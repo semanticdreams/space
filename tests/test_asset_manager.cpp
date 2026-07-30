@@ -222,6 +222,54 @@ bool test_missing_error_lists_requested_asset_and_searched_paths()
     return false;
 }
 
+bool test_absolute_path_is_rejected()
+{
+    fs::path root = make_temp_root("space_asset_abs_reject");
+    ScopedEnv env("SPACE_ASSETS_PATH", std::nullopt);
+    ScopedEnv xdg("XDG_DATA_HOME", std::nullopt);
+    fs::create_directories(root / "cwd");
+    ScopedCwd cwd(root / "cwd");
+    AssetManager::clearExecutablePathForTests();
+
+    // /etc/hostname should exist on Linux and must not be reachable
+    // via an absolute relativePath argument.
+    try {
+        (void)AssetManager::getAssetPath("/etc/hostname");
+        return check(false, "absolute path should throw");
+    } catch (const std::runtime_error& e) {
+        return check(std::string(e.what()).find("absolute") != std::string::npos,
+                     "absolute path error should mention 'absolute'");
+    }
+}
+
+bool test_parent_traversal_escaping_root_is_rejected()
+{
+    fs::path root = make_temp_root("space_asset_parent_reject");
+    ScopedEnv env("SPACE_ASSETS_PATH", (root / "env").string());
+    ScopedEnv xdg("XDG_DATA_HOME", std::nullopt);
+    fs::create_directories(root / "cwd");
+    ScopedCwd cwd(root / "cwd");
+    AssetManager::clearExecutablePathForTests();
+    AssetManager::setExecutablePath(root / "bin" / "space");
+
+    // Create a legitimate asset and an out-of-root file
+    touch(root / "env" / "probe.txt");
+
+    fs::path sensitiveFile = root / "sensitive.txt";
+    touch(sensitiveFile);
+
+    // Try to reach sensitiveFile via parent-traversing relative path.
+    // The env root is root/env; ../../sensitive.txt escapes that root.
+    try {
+        (void)AssetManager::getAssetPath("../../sensitive.txt");
+        return check(false, "parent traversal should throw");
+    } catch (const std::runtime_error& e) {
+        std::string message = e.what();
+        return check(message.find("outside root") != std::string::npos,
+                     "parent traversal error should mention 'outside root'");
+    }
+}
+
 } // namespace
 
 int main()
@@ -233,6 +281,8 @@ int main()
     ok = test_executable_relative_share_assets_work() && ok;
     ok = test_cwd_assets_fallback_remains() && ok;
     ok = test_missing_error_lists_requested_asset_and_searched_paths() && ok;
+    ok = test_absolute_path_is_rejected() && ok;
+    ok = test_parent_traversal_escaping_root_is_rejected() && ok;
     AssetManager::clearExecutablePathForTests();
     return ok ? 0 : 1;
 }

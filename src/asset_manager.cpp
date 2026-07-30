@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -35,6 +36,24 @@ std::string dedup_key(const fs::path& root)
     return norm.string();
 }
 
+bool is_contained_under(const fs::path& full, const fs::path& root)
+{
+    std::error_code ec;
+    fs::path canonFull = fs::weakly_canonical(fs::absolute(full, ec), ec);
+    if (ec) {
+        canonFull = fs::absolute(full).lexically_normal();
+    }
+    ec.clear();
+    fs::path canonRoot = fs::weakly_canonical(fs::absolute(root, ec), ec);
+    if (ec) {
+        canonRoot = fs::absolute(root).lexically_normal();
+    }
+    auto [m1, m2] = std::mismatch(
+        canonFull.begin(), canonFull.end(),
+        canonRoot.begin(), canonRoot.end());
+    return m2 == canonRoot.end();
+}
+
 } // namespace
 
 void AssetManager::setExecutablePath(const fs::path& path)
@@ -53,6 +72,13 @@ void AssetManager::clearExecutablePathForTests()
 
 std::string AssetManager::getAssetPath(const std::string& relativePath)
 {
+    // Reject absolute paths — asset discovery only works with relative paths
+    // that are resolved under configured asset roots.
+    if (fs::path(relativePath).is_absolute()) {
+        throw std::runtime_error("Asset not found: " + relativePath +
+                                 " (absolute paths are not supported)");
+    }
+
     struct Candidate {
         fs::path root;
         std::string label;
@@ -130,6 +156,10 @@ std::string AssetManager::getAssetPath(const std::string& relativePath)
         fs::path fullPath = (candidate.root / relativePath).lexically_normal();
         std::error_code ec;
         if (fs::exists(fullPath, ec)) {
+            if (!is_contained_under(fullPath, candidate.root)) {
+                searched.push_back(candidate.label + ": " + fullPath.string() + " (outside root)");
+                continue;
+            }
             return fs::absolute(fullPath).string();
         }
         searched.push_back(candidate.label + ": " + fullPath.string());
