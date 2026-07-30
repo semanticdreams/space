@@ -364,6 +364,7 @@
         {:cleanup cleanup :scene-result payload}
         (do
           (cleanup)
+          (set app.physics-containment-config original-containment-config)
           (error payload)))))
 
 (fn random-flat-heights [width depth]

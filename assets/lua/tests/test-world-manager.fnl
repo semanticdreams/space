@@ -511,15 +511,17 @@
       (set world.runtime {:physics-containment-config {:mode "manual-bounds"
                                                        :bounds {:min [-500 -1450 -500]
                                                                 :max [500 500 500]}}})
+      (local original-config app.physics-containment-config)
       (set app.physics-containment-config {:mode "manual-bounds"
-                                           :bounds {:min [-500 -777 -500]
-                                                    :max [500 500 500]}})
+                                            :bounds {:min [-500 -777 -500]
+                                                     :max [500 500 500]}})
       (world:activate {})
       ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
       ;; containment is supplied by Scene slot activation (sandbox activity).
       ;; The runtime config is not written back into sandbox session or app.
       (assert (= (. (. app.physics-containment-config.bounds.min) 2) -777)
               "World activation should not overwrite app containment from world state")
+      (set app.physics-containment-config original-config)
       true)))
 
 (fn home-world-captures-runtime-containment-on-drop []
