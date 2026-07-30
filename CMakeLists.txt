@@ -715,6 +715,7 @@ if(SPACE_ENABLE_CEF)
     add_executable(space_cef_helper
         apps/space/cef_subprocess_main.cpp
         src/cef_runtime.cpp
+        src/executable_path.cpp
     )
     target_include_directories(space_cef_helper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(space_cef_helper PUBLIC SPACE_ENABLE_CEF=1)
@@ -890,6 +891,14 @@ add_executable(test_asset_manager
 target_include_directories(test_asset_manager PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME test_asset_manager COMMAND test_asset_manager)
 set_tests_properties(test_asset_manager PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_runtime_asset_discovery_integration
+    tests/test_runtime_asset_discovery_integration.cpp
+)
+add_test(NAME test_runtime_asset_discovery_integration COMMAND test_runtime_asset_discovery_integration)
+set_tests_properties(test_runtime_asset_discovery_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 

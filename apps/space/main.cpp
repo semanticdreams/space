@@ -10,7 +10,9 @@
 
 #include <CLI/CLI.hpp>
 
+#include "asset_manager.h"
 #include "dotenv.h"
+#include "executable_path.h"
 #include "lua_callbacks.h"
 #include "lua_jobs.h"
 #include "lua_keyring.h"
@@ -95,60 +97,14 @@ std::string read_stdin()
     return input;
 }
 
-std::string sibling_path(const std::string& file_path, const std::string& sibling_name)
-{
-    std::filesystem::path executable_path;
-#if defined(__linux__)
-    std::error_code proc_error;
-    executable_path = std::filesystem::read_symlink("/proc/self/exe", proc_error);
-    if (proc_error) {
-        executable_path.clear();
-    }
-#endif
-
-    if (executable_path.empty() && !file_path.empty()) {
-        std::filesystem::path argv_path(file_path);
-        if (argv_path.is_absolute() || argv_path.has_parent_path()) {
-            executable_path = std::filesystem::absolute(argv_path);
-        } else if (const char* path_env = std::getenv("PATH")) {
-            std::string search_path(path_env);
-            size_t start = 0;
-            while (start <= search_path.size()) {
-                size_t end = search_path.find(':', start);
-                std::string dir = search_path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-                if (dir.empty()) {
-                    dir = ".";
-                }
-                std::filesystem::path candidate = std::filesystem::path(dir) / argv_path;
-                if (std::filesystem::exists(candidate)) {
-                    executable_path = std::filesystem::absolute(candidate);
-                    break;
-                }
-                if (end == std::string::npos) {
-                    break;
-                }
-                start = end + 1;
-            }
-        }
-    }
-
-    if (executable_path.empty()) {
-        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
-    }
-    std::error_code canonical_error;
-    executable_path = std::filesystem::weakly_canonical(executable_path, canonical_error);
-    std::filesystem::path parent = executable_path.parent_path();
-    if (parent.empty()) {
-        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
-    }
-    return std::filesystem::absolute(parent / sibling_name).string();
-}
-
 int main(int argc, char *argv[])
 {
     LOG_CONFIG.reporting_level = Debug;
     LOG_CONFIG.restart = true;
     log_init(LOG_CONFIG);
+
+    const std::filesystem::path executablePath = executable_path::resolve(argc > 0 ? argv[0] : nullptr);
+    AssetManager::setExecutablePath(executablePath);
 
 #if defined(SPACE_ENABLE_CEF)
     bool skip_cef = false;
@@ -306,7 +262,8 @@ int main(int argc, char *argv[])
         cef_runtime::Config cef_config;
         cef_config.argc = argc;
         cef_config.argv = argv;
-        cef_config.helper_executable_path = sibling_path(argv[0], "space_cef_helper");
+        cef_config.helper_executable_path =
+            executable_path::sibling(executablePath, "space_cef_helper").string();
         cef_runtime::configure_browser_process(cef_config);
     }
 #endif
