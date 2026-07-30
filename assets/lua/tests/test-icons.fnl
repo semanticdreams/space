@@ -7,14 +7,19 @@
                  :get-color (fn [] [1 1 1 1])})
 
 ;; Wrapper that snapshots/restores dotted global paths.
-;; Nil-safe: if any segment of the key path does not exist, the snapshot is nil.
+;; Keys not starting with 'package.' or 'app.' are prefixed with 'app.'.
+;; Nil-safe: if any segment of the path does not exist in _G, snapshot is nil
+;; and restore is a no-op.
 ;; Recognized by the test-isolation constraint rule as a safe mutation wrapper.
 (fn with-restored-app-fields [keys f]
   (local snapshot {})
   (each [_ key (ipairs keys)]
+    ;; Resolve dotted key path from global scope to snapshot
+    (local full-key (if (or (key:find "^package%.") (key:find "^app%."))
+                       key
+                       (.. "app." key)))
     (local parts [])
-    (each [seg (key:gmatch "[^%.]+")] (table.insert parts seg))
-    ;; Walk _G to the parent, stopping early if nil
+    (each [seg (full-key:gmatch "[^%.]+")] (table.insert parts seg))
     (var src _G)
     (var all-exist true)
     (for [i 1 (- (length parts) 1)]
@@ -22,15 +27,17 @@
       (when (= nil src)
         (set all-exist false)
         (lua :break)))
-    ;; Snapshot the leaf or nil if path didn't exist
     (set (. snapshot key) (if all-exist
                               (. src (. parts (length parts)))
                               nil)))
   (local (ok result) (pcall f))
   (each [_ key (ipairs keys)]
+    ;; Restore dotted key path from snapshot
+    (local full-key (if (or (key:find "^package%.") (key:find "^app%."))
+                       key
+                       (.. "app." key)))
     (local parts [])
-    (each [seg (key:gmatch "[^%.]+")] (table.insert parts seg))
-    ;; Walk _G to the parent for restore, stopping if nil
+    (each [seg (full-key:gmatch "[^%.]+")] (table.insert parts seg))
     (var dst _G)
     (var all-exist true)
     (for [i 1 (- (length parts) 1)]
@@ -38,7 +45,6 @@
       (when (= nil dst)
         (set all-exist false)
         (lua :break)))
-    ;; Restore leaf only if the parent chain still exists
     (when all-exist
       (tset dst (. parts (length parts)) (. snapshot key))))
   (if ok
@@ -46,14 +52,12 @@
       (error result)))
 
 (fn setup-icons []
-  ;; Wrap all module-loading mutations so they are restored immediately.
-  ;; package.loaded.textures is covered by the wrapper's key.
-  ;; app.engine.get-asset-path is snapshotted/restored manually inside.
-  (with-restored-app-fields [:package.loaded.textures]
+  ;; Wrapper snapshots/restores package.loaded.textures AND app.engine.
+  ;; :package.loaded.textures — restore leaf texture module value
+  ;; :engine — restore app.engine container (includes get-asset-path)
+  ;; If a require throws, the wrapper's pcall restores both keys immediately.
+  (with-restored-app-fields [:package.loaded.textures :engine]
     (fn []
-      ;; Snapshot prior engine state
-      (local prev-engine-get-asset-path
-             (and _G.app _G.app.engine _G.app.engine.get-asset-path))
       ;; Ensure app.engine exists before mocking get-asset-path
       (if (not _G.app.engine)
           (tset _G.app :engine {}))
@@ -67,9 +71,6 @@
       (local icons (require :icons))
       (local icon (require :icon-widget))
       (local button (require :button))
-
-      ;; Restore engine state immediately after module loading
-      (tset _G.app.engine :get-asset-path prev-engine-get-asset-path)
 
       ;; Return loaded modules as a sequential table
       [icons icon button])))
@@ -129,8 +130,9 @@
 (fn main []
   ;; Set up app.engine.get-asset-path mock for test execution
   ;; (Icons() calls parse-codepoints which reads the codepoints file).
-  ;; Wrapped in pcall so restore always runs, even on test failure.
-  (local prev-engine-get-asset-path (and _G.app _G.app.engine _G.app.engine.get-asset-path))
+  ;; Snapshot and restore app.engine container so cleanup is guaranteed
+  ;; even if tests fail.
+  (local prev-engine (and _G.app _G.app.engine))
   (if (not _G.app.engine)
       (tset _G.app :engine {}))
   (tset _G.app.engine :get-asset-path
@@ -141,8 +143,10 @@
     (test-icon-widget-render)
     (print "All icon tests passed."))))
 
-  ;; Always restore engine state, even if tests failed
-  (tset _G.app.engine :get-asset-path prev-engine-get-asset-path)
+  ;; Always restore engine state, even if tests failed.
+  ;; Restoring the container also restores the original get-asset-path.
+  (if _G.app
+      (tset _G.app :engine prev-engine))
 
   ;; Re-raise any test error after cleanup
   (if (not ok) (error err)))
