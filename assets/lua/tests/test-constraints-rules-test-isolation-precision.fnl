@@ -1154,10 +1154,24 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "T11-7: should flag multi-line pcall with invalid before/valid after")
   (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
+;; R1-1: pcall with non-fn callee — fn is not the direct pcall body, must still flag
+(fn mutation-restoration-flags-pcall-other-callee-fn-extra-arg []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl" :module "tests.test-bad"
+                              :definitions [{:kind :fn :name "test-other-callee" :top-level? true :line 5 :column 1 :length 280
+                                             :form "(fn test-other-callee []\n  (local orig (and app.engine app.engine.width))\n  (pcall some-runner\n      (fn []\n        (set app.engine.width 100)))\n  (set app.engine.width orig))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 8 :column 1 :length 50
+                                             :form "(fn []\n        (set app.engine.width 100))"}]
+                              :mutations [{:op :set :path ["app" "engine" "width"] :line 9 :column 1
+                                           :form "(set app.engine.width 100)" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1: must flag — fn is not direct pcall callee (some-runner is)")
+  (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
 
 (table.insert tests {:name "T11-5 flags nonliteral module var key" :fn mutation-restoration-flags-nonliteral-module-var-key})
 (table.insert tests {:name "T11-6 allows multi-line pcall parent restore" :fn mutation-restoration-allows-multiline-pcall-parent-restore})
 (table.insert tests {:name "T11-7 flags multi-line pcall invalid before valid after" :fn mutation-restoration-flags-multiline-pcall-invalid-before})
+(table.insert tests {:name "R1-1 flags pcall other callee fn extra arg" :fn mutation-restoration-flags-pcall-other-callee-fn-extra-arg})
 
 (local main
   (fn []

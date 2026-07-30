@@ -428,38 +428,56 @@
   snap-var)
 
 
+(fn only-whitespace-between? [form-text start-byte end-byte]
+  "Return true if every character between start-byte and end-byte (exclusive)
+   is whitespace (space, newline, or tab)."
+  (var pos start-byte)
+  (while (< pos end-byte)
+    (local ch (form-text:sub pos pos))
+    (when (not (string.find " \n\t" ch 1 true))
+      (lua "return false"))
+    (set pos (+ pos 1)))
+  true)
+
+(fn fn-body-end-byte [fn-form fn-start]
+  "Find the matching close paren for the fn form starting at fn-start.
+   Returns the byte position of the closing ')' or nil."
+  (var depth 1)
+  (var pos (+ fn-start 4))
+  (var end-pos nil)
+  (while (and (> depth 0) (<= pos (length fn-form)))
+    (local ch (fn-form:sub pos pos))
+    (if (= ch "(") (set depth (+ depth 1))
+        (= ch ")") (do (set depth (- depth 1))
+                       (when (= depth 0)
+                         (set end-pos pos)))
+        (= ch "\"") (do
+                      (local end-quote (fn-form:find "\"" (+ pos 1) true))
+                      (when end-quote (set pos end-quote))))
+    (set pos (+ pos 1)))
+  end-pos)
+
 (fn try-extract-pcall-range [fn-form pcall-start]
   "Try to find the fn body end for a pcall+fn form starting at pcall-start.
    Returns {:fn-start fn-start :fn-end end-pos :pcall-start pcall-start} or nil
-   if no inner fn found or pcall-start is a substring of a longer identifier."
+   if no inner fn found, pcall-start is a substring of a longer identifier,
+   or the fn is not the direct callee of pcall."
   ;; Reject pcall-start where 'pcall' is a substring of a longer identifier
   ;; (e.g., no-pcall-def).  Before a real (pcall ...) call, the byte is '('
   ;; or whitespace.  Default to '(' when pcall-start is at position 1.
   (var pre-byte "(")
   (when (> pcall-start 1)
     (set pre-byte (fn-form:sub (- pcall-start 1) (- pcall-start 1))))
-  ;; Accept '(' or whitespace before pcall via single-char match
-  ;; (avoids (or ...) pattern that triggers style-doctrine silent-fallback).
-  (if (string.find " \n\t(" pre-byte 1 true)
-      (do
-        (local fn-start (string.find fn-form "%(fn[%s%)]" pcall-start false))
-        (if (not fn-start) nil
-            (do
-              (var depth 1)
-              (var pos (+ fn-start 4))
-              (var end-pos nil)
-              (while (and (> depth 0) (<= pos (length fn-form)))
-                (local ch (fn-form:sub pos pos))
-                (if (= ch "(") (set depth (+ depth 1))
-                    (= ch ")") (do (set depth (- depth 1))
-                                   (when (= depth 0)
-                                     (set end-pos pos)))
-                    (= ch "\"") (do
-                                  (local end-quote (fn-form:find "\"" (+ pos 1) true))
-                                  (when end-quote (set pos end-quote))))
-                (set pos (+ pos 1)))
-              (if end-pos {:fn-start fn-start :fn-end end-pos :pcall-start pcall-start} nil))))
-      nil))
+  (when (string.find " \n\t(" pre-byte 1 true)
+    (local fn-start (string.find fn-form "%(fn[%s%)]" pcall-start false))
+    (when fn-start
+      ;; Verify fn is the direct callee: no non-whitespace between
+      ;; end of 'pcall' and fn-start.  Rejects (pcall runner (fn ...)).
+      (when (only-whitespace-between? fn-form (+ pcall-start 5) fn-start)
+        (local fn-end (fn-body-end-byte fn-form fn-start))
+        (when fn-end
+          {:fn-start fn-start :fn-end fn-end :pcall-start pcall-start})))))
+
 
 (fn find-all-pcall-fn-ranges [fn-form]
   "Find all (pcall (fn [...] ...)) forms and return their fn body byte ranges.
