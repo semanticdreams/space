@@ -1427,12 +1427,12 @@
     (error err)))
 
 (fn heightfield-paint-capture-stamps-live-scene-samples []
+  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
-  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
@@ -1527,12 +1527,12 @@
     (error err)))
 
 (fn heightfield-paint-capture-does-not-raycast-before-stroke []
+  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
-  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
@@ -1621,12 +1621,12 @@
 
 (fn terrain-rect-pick-state-routes-engine-events []
   (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
+  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
-  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
@@ -2203,10 +2203,10 @@
     (error err))))
 
 (fn scene-ball-context-menu-removes-ball []
+  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-menu-manager app.menu-manager)
 
   (let [(ok err)
@@ -2312,10 +2312,10 @@
       (error err))))
 
 (fn scene-light-ball-context-menu-removes-light-and-ball []
+  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-menu-manager app.menu-manager)
 
   (let [(ok err)
