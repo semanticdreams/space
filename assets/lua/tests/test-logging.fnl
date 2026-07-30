@@ -36,6 +36,16 @@
   (logging.set-level "space" original-space-level)
   (logging.set-level "mcp" original-mcp-level))
 
+(fn logging-get-level-reads-existing-named-logger-after-default-change []
+  (local logger (logging.get "untracked-test-logger"))
+  (local original-space-level (logging.get-level "space"))
+  (logger.set-level "warn")
+  (logging.set-level "space" "error")
+  (assert (= (logging.get-level "untracked-test-logger") "warn")
+          "get-level should report existing named logger threshold, not current default")
+  (logging.set-level "untracked-test-logger" "info")
+  (logging.set-level "space" original-space-level))
+
 (fn logging-get-named-logger []
   (local logger (logging.get "graph"))
   (assert logger "logging.get should return a logger table")
@@ -49,6 +59,8 @@
 (table.insert tests {:name "logging accepts varargs" :fn logging-accepts-varargs})
 (table.insert tests {:name "logging set-level validates strings" :fn logging-set-level})
 (table.insert tests {:name "logging get-level round-trips named levels" :fn logging-get-level-round-trips-named-levels})
+(table.insert tests {:name "logging get-level reads existing named logger after default change"
+                     :fn logging-get-level-reads-existing-named-logger-after-default-change})
 (table.insert tests {:name "logging get returns named logger" :fn logging-get-named-logger})
 
 (local main

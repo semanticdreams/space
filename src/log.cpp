@@ -39,6 +39,25 @@ spdlog::level::level_enum to_spd_level(LogLevel level)
     return spdlog::level::info;
 }
 
+LogLevel from_spd_level(spdlog::level::level_enum level)
+{
+    switch (level) {
+        case spdlog::level::trace:
+        case spdlog::level::debug:
+            return Debug;
+        case spdlog::level::info:
+            return Info;
+        case spdlog::level::warn:
+            return Warning;
+        case spdlog::level::err:
+        case spdlog::level::critical:
+        case spdlog::level::off:
+            return Error;
+        default:
+            return Info;
+    }
+}
+
 void ensure_logger()
 {
     if (!log_ready) {
@@ -321,10 +340,16 @@ void log_set_level_for(const std::string& name, LogLevel level)
 
 LogLevel log_get_level_for(const std::string& name)
 {
-    std::lock_guard<std::mutex> lock(log_levels_mutex);
-    auto found = configured_logger_levels.find(name);
-    if (found != configured_logger_levels.end()) {
-        return found->second;
+    ensure_logger();
+    if (auto logger = spdlog::get(name)) {
+        return from_spd_level(logger->level());
+    }
+    {
+        std::lock_guard<std::mutex> lock(log_levels_mutex);
+        auto found = configured_logger_levels.find(name);
+        if (found != configured_logger_levels.end()) {
+            return found->second;
+        }
     }
     return LOG_CONFIG.reporting_level;
 }
