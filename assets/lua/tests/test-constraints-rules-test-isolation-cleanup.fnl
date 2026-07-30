@@ -240,7 +240,35 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "C13: child mutation should pass when parent snapshots before child and restores after pcall"))
 
+(fn mutation-restoration-flags-child-mutation-with-unrelated-parent-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 360
+                                             :form "(fn setup-scene []\n  (local snap app.renderers)\n  (set AppBootstrap.init-renderers\n       (fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (local (ok result) (pcall (fn [] (unrelated-work))))\n  (set app.renderers snap)\n  (if ok result (error result)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 8 :length 90
+                                             :form "(fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers)"}]
+                              :mutations [{:op :set :path ["app" "renderers"] :line 14 :column 10
+                                           :form "(set app.renderers (make-renderer-stub))" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C14: unrelated parent pcall should not cover child mutation")
+  (assert (> (length result) 0) "C14: should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-child-mutation-called-before-parent-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 420
+                                             :form "(fn setup-scene []\n  (local snap app.renderers)\n  (set AppBootstrap.init-renderers\n       (fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (AppBootstrap.init-renderers {})\n  (local (ok result) (pcall (fn [] (Main.init))))\n  (set app.renderers snap)\n  (if ok result (error result)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 8 :length 90
+                                             :form "(fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers)"}]
+                              :mutations [{:op :set :path ["app" "renderers"] :line 14 :column 10
+                                           :form "(set app.renderers (make-renderer-stub))" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C15: child mutation invoked before parent pcall should flag")
+  (assert (> (length result) 0) "C15: should have at least one diagnostic"))
+
 (table.insert tests {:name "C13 allows parent pcall restoring child mutation" :fn mutation-restoration-allows-parent-pcall-restoring-child-mutation})
+(table.insert tests {:name "C14 flags unrelated parent pcall" :fn mutation-restoration-flags-child-mutation-with-unrelated-parent-pcall})
+(table.insert tests {:name "C15 flags child call before parent pcall" :fn mutation-restoration-flags-child-mutation-called-before-parent-pcall})
 
 (local main
   (fn []

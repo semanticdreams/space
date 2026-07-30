@@ -136,6 +136,7 @@
                   (local child-start (string.find parent.form child-fn-form 1 true))
                   (if (not child-start) false
                       (do
+                        (local child-end (+ child-start (length child-fn-form) -1))
                         (local before-child (parent.form:sub 1 (- child-start 1)))
                         (local snap-var (find-snapshot-var before-child path-segments))
                         (if (not snap-var) false
@@ -143,9 +144,16 @@
                               (var restored false)
                               (local pcall-ranges (find-all-pcall-fn-ranges parent.form))
                               (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
-                              (each [_ span (ipairs call-spans)]
+                              (each [i span (ipairs call-spans)]
                                 (when (and (not restored) (> span.call-start child-start))
-                                  (when (has-restore-after-byte-for-var? parent.form path-segments snap-var span.call-end)
+                                  (local between (parent.form:sub (+ child-end 1) (- span.call-start 1)))
+                                  (local range (. pcall-ranges i))
+                                  (local body (if range (parent.form:sub range.fn-start range.fn-end) ""))
+                                  (when (and (not (string.find between "init-renderers" 1 true))
+                                             (or (string.find body "Main.init" 1 true)
+                                                 (string.find body "Main :init" 1 true)
+                                                 (string.find body "Main:init" 1 true))
+                                             (has-restore-after-byte-for-var? parent.form path-segments snap-var span.call-end))
                                     (set restored true))))
                               restored)))))))))
 

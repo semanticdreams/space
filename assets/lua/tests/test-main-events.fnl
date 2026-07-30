@@ -1222,30 +1222,30 @@
   (local saved-resizables app.resizables)
   (local saved-system-cursors app.system-cursors)
   (local saved-states app.states)
-  (var last-state nil)
-  (local states-host
-    {:active-name (fn [_self] "normal")
-     :set-state (fn [_self name] (set last-state name))
-     :drop (fn [_self] nil)})
-  (StateSystemBindings.bind-states-host states-host)
-  (set app.states states-host)
-  (var disconnected? false)
-  (local input
-    {:on-state-connected (fn [_self _payload] true)
-     :on-state-disconnected (fn [_self _payload] (set disconnected? true))
-     :on-key-down (fn [_self _payload] false)})
-  (InputState.connect-input input)
-  (assert (= (InputState.active-input) input)
-          "Input should be active before drop")
-  (local unit (Units.Unit
-                {:id "test-drop-unit"
-                 :load (fn [_ctx] nil)
-                 :unload (fn [_ctx]
-                           (InputState.disconnect-input input))}))
-  (set app.unit-manager (or app.unit-manager (UnitManager)))
-  (app.unit-manager:register unit)
-  (unit:load {})
   (local (ok err) (pcall (fn []
+        (var last-state nil)
+        (local states-host
+          {:active-name (fn [_self] "normal")
+           :set-state (fn [_self name] (set last-state name))
+           :drop (fn [_self] nil)})
+        (StateSystemBindings.bind-states-host states-host)
+        (set app.states states-host)
+        (var disconnected? false)
+        (local input
+          {:on-state-connected (fn [_self _payload] true)
+           :on-state-disconnected (fn [_self _payload] (set disconnected? true))
+           :on-key-down (fn [_self _payload] false)})
+        (InputState.connect-input input)
+        (assert (= (InputState.active-input) input)
+                "Input should be active before drop")
+        (local unit (Units.Unit
+                      {:id "test-drop-unit"
+                       :load (fn [_ctx] nil)
+                       :unload (fn [_ctx]
+                                 (InputState.disconnect-input input))}))
+        (set app.unit-manager (or app.unit-manager (UnitManager)))
+        (app.unit-manager:register unit)
+        (unit:load {})
         (assert (= (InputState.active-input) input)
                 "Input must remain active after unit load")
         (Main.drop)
