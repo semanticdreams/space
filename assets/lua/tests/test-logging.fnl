@@ -37,14 +37,15 @@
   (logging.set-level "mcp" original-mcp-level))
 
 (fn logging-get-level-reads-existing-named-logger-after-default-change []
-  (local logger (logging.get "untracked-test-logger"))
-  (local original-space-level (logging.get-level "space"))
-  (logger.set-level "warn")
-  (logging.set-level "space" "error")
-  (assert (= (logging.get-level "untracked-test-logger") "warn")
+  (local name "untracked-existing-logger")
+  (local logger (logging.get name))
+  (logger.debug "create untracked existing logger")
+  (local original-default-level (logging.get-level "space"))
+  (local original-named-level (logging.get-level name))
+  (logging.set-level "error")
+  (assert (= (logging.get-level name) original-named-level)
           "get-level should report existing named logger threshold, not current default")
-  (logging.set-level "untracked-test-logger" "info")
-  (logging.set-level "space" original-space-level))
+  (logging.set-level original-default-level))
 
 (fn logging-get-named-logger []
   (local logger (logging.get "graph"))
