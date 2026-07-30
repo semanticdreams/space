@@ -902,6 +902,17 @@ set_tests_properties(test_runtime_asset_discovery_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_space_log_path
+    tests/test_space_log_path.cpp
+    src/space_log_path.cpp
+    src/appdirs.cpp
+)
+target_include_directories(test_space_log_path PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_space_log_path COMMAND test_space_log_path)
+set_tests_properties(test_space_log_path PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 

@@ -162,7 +162,7 @@ LogConfig parse_config(sol::object options)
     sol::table table = options.as<sol::table>();
     sol::object path_obj = table["path"];
     if (path_obj.is<std::string>()) {
-        log_set_output_path(path_obj.as<std::string>());
+        config.output_path = path_obj.as<std::string>();
     }
     sol::object restart_obj = table["restart"];
     if (restart_obj.is<bool>()) {
