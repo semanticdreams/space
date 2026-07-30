@@ -168,6 +168,12 @@ Asset roots are searched in this order:
 
 `SPACE_ASSETS_PATH` is an explicit override for custom asset roots and remains the highest-priority lookup location. It is not required for normal build, installed, or portable runtime layouts.
 
+### Runtime log location
+
+Native logging is configured during C++ startup before any entry mode runs. By default, logs are written to `get_user_log_dir("space") / "space.log"`; on Linux this is `${XDG_CACHE_HOME:-~/.cache}/space/log/space.log`.
+
+Set `SPACE_LOG_DIR` to a non-empty directory to override the log directory. The runtime writes `space.log` inside that directory. `LOGS_DIR` is not used by Space. Direct CLI modes such as `space --no-dotenv -c ...` do not write `gl.log` into the current working directory as part of normal startup.
+
 Optional packaging dependencies (only needed for `make pack`):
 
 Ubuntu/Pop!_OS:

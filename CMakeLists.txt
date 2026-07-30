@@ -913,6 +913,15 @@ set_tests_properties(test_space_log_path PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_native_logging_integration
+    tests/test_native_logging_integration.cpp
+)
+target_include_directories(test_native_logging_integration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_native_logging_integration COMMAND test_native_logging_integration)
+set_tests_properties(test_native_logging_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 

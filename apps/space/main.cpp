@@ -21,6 +21,7 @@
 #include "lua_engine.h"
 #include "log.h"
 #include "resource_manager.h"
+#include "space_log_path.h"
 #include "cef_runtime.h"
 
 LogConfig LOG_CONFIG = {};
@@ -101,7 +102,16 @@ int main(int argc, char *argv[])
 {
     LOG_CONFIG.reporting_level = Debug;
     LOG_CONFIG.restart = true;
-    log_init(LOG_CONFIG);
+    try {
+        std::filesystem::path logPath = space_log::resolve_log_path();
+        space_log::ensure_log_directory(logPath);
+        LOG_CONFIG.output_path = logPath.string();
+        log_init(LOG_CONFIG);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "error: failed to initialize logging: " << e.what() << "\n";
+        return 1;
+    }
 
     const std::filesystem::path executablePath = executable_path::resolve(argc > 0 ? argv[0] : nullptr);
     AssetManager::setExecutablePath(executablePath);
