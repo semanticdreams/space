@@ -529,63 +529,79 @@
       (set enclosing-end range.fn-end)))
   enclosing-end)
 
+(fn scan-restore-for-path-var [fn-form path-segments path-text snap-var min-byte]
+  "Scan fn-form for (set path_text var) or (tset ... var) after min-byte. Returns true if found."
+  (local escaped-path (escape-pattern path-text))
+  (local escaped-var (escape-pattern snap-var))
+  (var found false)
+  ;; Scan (set path_text snap-var) positions
+  (local set-pat (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
+  (var search-start 1)
+  (while (and (not found) search-start)
+    (local s-e (find-substring fn-form set-pat search-start))
+    (if s-e
+        (do
+          (if (>= s-e.start min-byte)
+              (set found true)
+              (set search-start (+ s-e.end 1))))
+        (set search-start nil)))
+  ;; Scan tset positions
+  (when (and (not found) (>= (length path-segments) 2))
+    (local alen (length path-segments))
+    (local table-parts [])
+    (for [i 1 (- alen 1)]
+      (table.insert table-parts (. path-segments i)))
+    (local tset-table (table.concat table-parts "."))
+    (local key (. path-segments alen))
+    (local escaped-tset (escape-pattern tset-table))
+    (local escaped-key (escape-pattern key))
+    (local pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
+    (local pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var))
+    (set search-start 1)
+    (var done false)
+    (while (and (not found) (not done) search-start)
+      (local s-e1 (find-substring fn-form pat1 search-start))
+      (if s-e1
+          (do
+            (if (>= s-e1.start min-byte)
+                (set found true)
+                (set search-start (+ s-e1.end 1))))
+          (do
+            (local s-e2 (find-substring fn-form pat2 search-start))
+            (if s-e2
+                (do
+                  (if (>= s-e2.start min-byte)
+                      (set found true)
+                      (set search-start (+ s-e2.end 1))))
+                (set done true))))))
+  found)
+(fn try-ancestor-concrete-restore [fn-form path min-byte]
+  "Try shorter ancestor paths (≥2 segments) for concrete snapshot+restore. Returns true if found."
+  (local plen (length path))
+  (when (< plen 3)
+    (lua "return false"))
+  (var ancestor [])
+  (for [i 1 (- plen 1)]
+    (table.insert ancestor (. path i)))
+  (var found false)
+  (while (and (not found) (>= (length ancestor) 2))
+    (local ancestor-snap-var (find-snapshot-var fn-form ancestor))
+    (when ancestor-snap-var
+      (local ancestor-path-text (table.concat ancestor "."))
+      (when (scan-restore-for-path-var fn-form ancestor ancestor-path-text ancestor-snap-var min-byte)
+        (set found true)))
+    (when (not found)
+      (table.remove ancestor)))
+  found)
 (fn has-concrete-restore-after-byte? [fn-form fn-def-line path min-byte]
   "Check for concrete restore evidence at a byte position >= min-byte.
-   Compares start byte positions instead of line numbers, supporting
-   same-line restore-before-mutation detection (R2-3)."
+   Falls back to ancestor path snapshots when exact-path snapshot not found."
   (local snap-var (find-snapshot-var fn-form path))
-  (if (not snap-var) false
+  (if (not snap-var)
+      (try-ancestor-concrete-restore fn-form path min-byte)
       (do
         (local path-text (table.concat path "."))
-        (local escaped-path (escape-pattern path-text))
-        (local escaped-var (escape-pattern snap-var))
-        (var found false)
-         ;; Scan (set path_text snap-var) positions
-         (local set-pat (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
-         (var search-start 1)
-         (while (and (not found) search-start)
-           (local s-e (find-substring fn-form set-pat search-start))
-           (if s-e
-               (do
-                 (local start s-e.start)
-                 (local end s-e.end)
-                 (if (>= start min-byte)
-                     (set found true)
-                     (set search-start (+ end 1))))
-               (set search-start nil)))
-         ;; Scan tset positions  
-         (when (and (not found) (>= (length path) 2))
-           (local plen (length path))
-           (local table-parts [])
-           (for [i 1 (- plen 1)]
-             (table.insert table-parts (. path i)))
-           (local tset-table (table.concat table-parts "."))
-           (local key (. path plen))
-            (local escaped-tset (escape-pattern tset-table))
-           (local escaped-key (escape-pattern key))
-           (local pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
-           (local pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var))
-           (set search-start 1)
-           (while (and (not found) search-start)
-             (local s-e1 (find-substring fn-form pat1 search-start))
-             (if s-e1
-                 (do
-                   (local start1 s-e1.start)
-                   (local end1 s-e1.end)
-                   (if (>= start1 min-byte)
-                       (set found true)
-                       (set search-start (+ end1 1))))
-                 (do
-                   (local s-e2 (find-substring fn-form pat2 search-start))
-                   (if s-e2
-                       (do
-                         (local start2 s-e2.start)
-                         (local end2 s-e2.end)
-                         (if (>= start2 min-byte)
-                             (set found true)
-                             (set search-start (+ end2 1))))
-                       (set search-start nil))))))
-        found)))
+        (scan-restore-for-path-var fn-form path path-text snap-var min-byte))))
 (fn find-pcall-call-start [form-text pcall-byte]
   "Given the byte position of 'p' in 'pcall', find the opening '(' of the pcall call.
    Returns the byte position of '(' or nil."

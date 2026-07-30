@@ -1186,14 +1186,14 @@
   (assert (and result (> (length result) 0)) "Mutation inside inline fn without restore should flag"))
 (table.insert tests {:name "T11-8 allows same-line inline fn excluded by column" :fn mutation-restoration-allows-same-line-inline-fn-excluded-by-column})
 (table.insert tests {:name "T11-9 flags mutation inside inline fn no restore" :fn mutation-restoration-flags-mutation-inside-inline-fn-no-restore})
-;; Import cleanup-closure restore precision tests
+(local ancestor-tests (require :tests.test-constraints-rules-test-isolation-ancestor))
+(each [_ t (ipairs ancestor-tests.tests)]
+  (table.insert tests t))
 (local cleanup-tests (require :tests.test-constraints-rules-test-isolation-cleanup))
 (each [_ t (ipairs cleanup-tests.tests)]
   (table.insert tests t))
-
 (local main
   (fn []
     (local runner (require :tests/runner))
     (runner.run-tests {:name "constraints-rules-test-isolation-precision" :tests tests})))
-
 {:name "constraints-rules-test-isolation-precision" :tests tests :main main}
