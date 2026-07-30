@@ -13,6 +13,10 @@
   (fh:close)
   bytes)
 
+(fn cleanup [client]
+  (when client
+    (client:close)))
+
 (fn main []
   (local token-path (assert (os.getenv "SPACE_REALTIME_TOKEN_PATH") "SPACE_REALTIME_TOKEN_PATH required"))
   (local client-id-value (assert (os.getenv "SPACE_REALTIME_CLIENT_ID") "SPACE_REALTIME_CLIENT_ID required"))
@@ -82,7 +86,7 @@
                                     (when (<= settle-ticks 0)
                                       (set done true)))
                                   done)}))
-  (client:close)
+  (cleanup client)
   (assert ok "client timed out waiting for pong")
   (assert feature-deactivated "client feature-deactivated callback should fire")
   (assert (not error-message)

@@ -54,8 +54,12 @@
                              :server-scope "loopback"
                              :allowed-features [1]
                              :issued-at issued-at
-                             :expires-at (+ issued-at 60)
-                             :secret "loopback-secret"}))
+                              :expires-at (+ issued-at 60)
+                              :secret "loopback-secret"}))
+
+(fn cleanup [handle]
+  (when handle
+    (handle:close)))
 
 (fn same-process-loopback []
   (local registry (realtime.FeatureRegistry))
@@ -173,8 +177,8 @@
                           done)
                         5000
                         false))
-  (client:close)
-  (server:close)
+  (cleanup client)
+  (cleanup server)
   (assert ok "same-process realtime test timed out")
   (assert (= server-activated-count 1) "same-process realtime server activation should be idempotent")
   (assert (= client-activated-count 1) "same-process realtime client activation should be idempotent")
@@ -230,7 +234,7 @@
         (if (= (. payload "payload") "close-now")
             (do
               (set saw-close-now true)
-              (client:close))
+              (cleanup client))
             (when (= (. payload "payload") "after-close")
               (set saw-after-close true)
               (set failure "client processed queued message after closing inside callback")
@@ -245,7 +249,7 @@
                    :connect-token (server:create-connect-token {:signed-ticket (make-loopback-ticket 5252)
                                                                 :secret "loopback-secret"})})
   (local ok (wait-until (fn [] done) 5000 false))
-  (server:close)
+  (cleanup server)
   (assert ok "same-process reentrant close test timed out")
   (assert saw-close-now "client should receive the first queued message before closing")
   (assert (not saw-after-close) "client should not process queued callbacks after closing inside callback")

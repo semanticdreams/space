@@ -4,6 +4,10 @@
 (local realtime-test-features (require :realtime.test-features))
 (local tests [])
 
+(fn cleanup [handle]
+  (when handle
+    (handle:close)))
+
 (fn module-exports []
   (assert realtime.available "realtime module should be available")
   (assert (= (realtime.version) "1.2.5") "realtime version should match vendored yojimbo")
@@ -36,8 +40,8 @@
   (assert (= (type client.connect) :function) "client should expose connect")
   (assert (not (server:is-running)) "server should not be running before start")
   (assert (not (client:is-connected)) "client should not be connected before connect")
-  (server:close)
-  (client:close))
+  (cleanup server)
+  (cleanup client))
 
 (fn lifecycle-guards []
   (local service (realtime.Service))
@@ -143,7 +147,7 @@
                  (server:start))))
       (set restart-during-close-failed (not restart-ok))))
   (server:start)
-  (server:close)
+  (cleanup server)
   (assert stopped-callback-fired "server close should dispatch stopped callback before callback teardown")
   (assert stopped-saw-not-running "stopped callback should observe a non-running server")
   (assert restart-during-close-failed "server close should reject restart attempts during shutdown")
@@ -151,13 +155,13 @@
   (callbacks.dispatch)
   (assert unrelated-callback-fired "unrelated callbacks should remain queued after server close")
   (callbacks.unregister unrelated-callback-id)
-  (server:close)
+  (cleanup server)
   (local (server-after-close-ok _server-after-close-err)
     (pcall (fn []
              (server:start))))
   (assert (not server-after-close-ok) "server operations after close should fail loudly")
-  (client:close)
-  (client:close)
+  (cleanup client)
+  (cleanup client)
   (local (client-after-close-ok _client-after-close-err)
     (pcall (fn []
              (client:connect {:client-id 1
@@ -231,7 +235,7 @@
              (client:connect {:client-id 0
                               :connect-token connect-token}))))
   (assert (not zero-client-id-ok) "client connect should require non-zero client-id")
-  (client:close)
+  (cleanup client)
   (local unsigned-ticket {:ticket-id "ticket-2"
                           :subject-user-id "dev-user"
                           :client-id 4242
@@ -282,7 +286,7 @@
              (wildcard-server:create-connect-token {:signed-ticket signed
                                                     :secret "dev-secret"}))))
   (assert (not wildcard-token-ok) "wildcard bind without connect-addresses should fail loudly")
-  (wildcard-server:close)
+  (cleanup wildcard-server)
   (local advertised-server
     (service:create-server {:registry registry
                             :bind-address "0.0.0.0:0"
@@ -295,7 +299,7 @@
                                              :secret "dev-secret"}))
   (assert (> (# advertised-token) 0)
           "wildcard bind with connect-addresses should mint a connect token")
-  (advertised-server:close)
+  (cleanup advertised-server)
   (local (wildcard-advertised-ok _wildcard-advertised-err)
     (pcall (fn []
              (service:create-server {:registry registry
@@ -326,7 +330,7 @@
                                         :expires-at expires-at
                                         :secret "dev-secret"}))))
   (assert (not oversized-ticket-ok) "oversized auth ticket fields should fail during signing")
-  (server:close)
+  (cleanup server)
   (local verified
     (realtime.verify-dev-ticket {:payload-json (. signed "payload-json")
                                  :signature (. signed "signature")
