@@ -161,11 +161,8 @@
   (local objects (world:getCollisionObjectArray))
   (length objects))
 
-(fn activate-and-assert-containment [world expected-min-y]
-  (world:activate {})
-  (assert (= (. (. app.physics-containment-config.bounds.min) 2) expected-min-y)
-          "World activation should not overwrite app containment from world state"))
-
+(fn activate-and-assert-containment [w y] (w:activate {})
+  (assert (= (. (. app.physics-containment-config.bounds.min) 2) y) "World activation should not overwrite app containment from world state"))
 (fn manager-creates-and-activates-default-home []
   (with-temp-dir
     (fn [root]
@@ -520,14 +517,11 @@
       (set app.physics-containment-config {:mode "manual-bounds"
                                             :bounds {:min [-500 -777 -500]
                                                      :max [500 500 500]}})
-      ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
-      ;; containment is supplied by Scene slot activation (sandbox activity).
-      ;; The runtime config is not written back into sandbox session or app.
+      ;; After R1-3, world activation no longer calls set-runtime-containment-config!; containment is supplied by Scene slot activation (sandbox activity). Runtime config is not written back to sandbox session or app.
       (local (ok? err) (pcall activate-and-assert-containment world -777))
       (set app.physics-containment-config original-config)
       (if (not ok?) (error err))
       true)))
-
 (fn home-world-captures-runtime-containment-on-drop []
   (with-temp-dir
     (fn [root]

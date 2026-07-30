@@ -308,24 +308,6 @@
   (var owns-camera? false)
   (local icons (make-icons-stub))
 
-  (fn cleanup []
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when (and owns-camera? camera)
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.camera original-camera)
-    (set app.hud original-hud)
-    (set app.create-default-projection original-create-default-projection)
-    (PhysicsContainment.clear)
-    (set app.physics-containment-config original-containment-config)
-    (when (and app.lights app.lights.set-state original-light-state)
-      (app.lights:set-state original-light-state)))
-
   (let [(ok payload)
         (pcall (fn []
                  (when (and app.lights app.lights.clear)
@@ -360,11 +342,27 @@
                  (assert (= scene.active-activity-slot-id "sandbox")
                          "setup-scene must leave the sandbox slot active for content construction")
                  {:scene scene :movables movables :icons icons :hud hud}))]
+    (fn cleanup []
+      (when scene
+        (scene:drop)
+        (set scene nil))
+      (when (and owns-camera? camera)
+        (camera:drop)
+        (set camera nil))
+      (set app.scene original-scene)
+      (set app.layout-root original-layout-root)
+      (set app.movables original-movables)
+      (set app.camera original-camera)
+      (set app.hud original-hud)
+      (set app.create-default-projection original-create-default-projection)
+      (PhysicsContainment.clear)
+      (set app.physics-containment-config original-containment-config)
+      (when (and app.lights app.lights.set-state original-light-state)
+        (app.lights:set-state original-light-state)))
     (if ok
         {:cleanup cleanup :scene-result payload}
         (do
           (cleanup)
-          (set app.physics-containment-config original-containment-config)
           (error payload)))))
 
 (fn random-flat-heights [width depth]
