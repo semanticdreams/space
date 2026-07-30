@@ -43,8 +43,12 @@
    :prerender-sub-apps (fn [_self] true)
    :draw-target (fn [_self _target _opts] true)
    :update (fn [_self] true)
-   :on-viewport-changed (fn [_self _viewport] true)
-   :drop (fn [_self] true)})
+    :on-viewport-changed (fn [_self _viewport] true)
+    :drop (fn [_self] true)})
+
+(fn apply-renderer-viewport! [opts]
+  (when (and app.renderers opts.viewport)
+    (app.renderers:on-viewport-changed opts.viewport)))
 
 (fn with-temp-dir [f]
   (local handle (tempfile.TemporaryDirectory {:prefix "units-test-"}))
@@ -59,6 +63,31 @@
   (if body-ok
       (if cleanup-ok body-result (error cleanup-result))
       (error body-result)))
+
+(fn cleanup-app-hot-reload-controller-and-main! []
+  (when app.hot-reload-controller
+    (app.hot-reload-controller:drop)
+    (set app.hot-reload-controller nil))
+  (when (= (type (. (require :main) :drop)) :function)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-if-engine! []
+  (when (and (= (type (. (require :main) :drop)) :function) app.engine)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-loaded! []
+  (when (= (type (. (require :main) :drop)) :function)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-var-if-engine! [Main]
+  (when (and (= (type Main.drop) :function) app.engine)
+    (Main.drop)
+    (restore-test-runner-app-services!)))
+
+(fn cleanup-controller-and-main-if-engine! [controller]
+  (when controller
+    (controller:drop))
+  (cleanup-main-if-engine!))
 
 (fn count-searcher-occurrences [target]
   (var count 0)
@@ -87,8 +116,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (set app.hot-reload-controller nil)
       (set app.hot-reload-config {:enabled true
@@ -140,13 +168,7 @@
             (set app.hot-reload-controller nil)
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when app.hot-reload-controller
-              (app.hot-reload-controller:drop)
-              (set app.hot-reload-controller nil))
-            (when (= (type (. (require :main) :drop)) :function)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-app-hot-reload-controller-and-main!))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
@@ -164,8 +186,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (set app.hot-reload-config {:enabled true
                                   :watch-paths [(fs.join-path runtime.assets-path "lua")]
@@ -189,12 +210,7 @@
                     "Expected drop to clear app.hot-reload-callback-id")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when (and (= (type Main.drop) :function)
-                       app.engine)
-              (Main.drop)
-              (restore-test-runner-app-services!)))))
+        (pcall cleanup-main-var-if-engine! Main))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
@@ -209,8 +225,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -235,10 +250,7 @@
                     "Expected app init to overwrite stale preset context")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when (= (type (. (require :main) :drop)) :function)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-main-loaded!))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -252,8 +264,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -302,14 +313,7 @@
                     "Expected HUD unit reload to preserve panel position state")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -324,8 +328,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -387,14 +390,7 @@
                     "Expected routed HUD reload to preserve panel count")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -408,8 +404,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -482,14 +477,7 @@
                     "Expected canvas unit reload to preserve panel restorer module")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -504,8 +492,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -575,14 +562,7 @@
                     "Expected routed canvas reload to preserve panel count")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -597,8 +577,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -643,14 +622,7 @@
                     "Expected workspace shell helper reload to replace app root ownership")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -665,8 +637,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -713,14 +684,7 @@
                     "Canvas unit reload should recreate graph view for shared triangle-line changes")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -735,8 +699,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -791,14 +754,7 @@
                     "Expected drawing activity unit reload to restore command hints hook")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -813,8 +769,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -865,14 +820,7 @@
                     "Expected graph activity unit reload to restore graph view")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -886,8 +834,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -907,14 +854,7 @@
                     "Graph activity restore-active-activity should keep graph view active")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -929,8 +869,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+          (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -980,14 +919,7 @@
                     "Expected board activity unit reload to restore board view")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
@@ -999,8 +931,7 @@
   (set AppBootstrap.init-renderers
        (fn [opts]
          (set app.renderers (make-renderer-stub))
-         (when (and app.renderers opts.viewport)
-           (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
          app.renderers))
   (local (ok result)
     (pcall
@@ -1025,11 +956,7 @@
                 "Expected drawing-only hooks to clear after unloading drawing activity")
         true)))
   (local (cleanup-ok cleanup-result)
-    (pcall
-      (fn []
-        (when (and (= (type (. (require :main) :drop)) :function)
-                   app.engine)
-          (drop-main-and-restore-test-fixture!)))))
+    (pcall cleanup-main-if-engine!))
   (set app.renderers original-renderers)
   (set AppBootstrap.init-renderers original-init-renderers)
   (finish-protected-result ok result cleanup-ok cleanup-result))
@@ -1044,8 +971,7 @@
       (set AppBootstrap.init-renderers
            (fn [opts]
              (set app.renderers (make-renderer-stub))
-             (when (and app.renderers opts.viewport)
-               (app.renderers:on-viewport-changed opts.viewport))
+              (apply-renderer-viewport! opts)
              app.renderers))
       (var controller nil)
       (local (ok result)
@@ -1089,14 +1015,7 @@
                     "Expected drawing activity actions file change to target drawing activity unit")
             true)))
       (local (cleanup-ok cleanup-result)
-        (pcall
-          (fn []
-            (when controller
-              (controller:drop)
-              (set controller nil))
-            (when (and (= (type (. (require :main) :drop)) :function)
-                       app.engine)
-              (drop-main-and-restore-test-fixture!)))))
+        (pcall cleanup-controller-and-main-if-engine! controller))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (finish-protected-result ok result cleanup-ok cleanup-result))))
