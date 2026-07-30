@@ -1,9 +1,6 @@
 ;; Test-Isolation constraint rules for experimental Fennel constraints.
-;; One rule: global-mutation-restoration
-
 (local Diagnostics (require :constraints.diagnostics))
 (local M {})
-
 (local sensitive ["app.renderers" "app.lights" "app.engine" "app.activity-registry" "app.physics-containment-config" "package.loaded"])
 
 ;; Strip double-quoted string literals from form text so that pattern
@@ -427,6 +424,10 @@
     (set snap-var (try-and-snapshot-var fn-form path-text)))
   snap-var)
 
+(local h (require :constraints.rules.test-isolation-cleanup))
+(local cleanup-helpers (h.make-helpers {:find-containing-fn-defs find-containing-fn-defs
+                                         :find-snapshot-var find-snapshot-var
+                                         :escape-pattern escape-pattern}))
 
 (fn only-whitespace-between? [form-text start-byte end-byte]
   "Return true if every character between start-byte and end-byte (exclusive)
@@ -1144,6 +1145,9 @@
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
     (when (check-parent-pcall-restoration ff fn-def-line anon-def-col path-text path-segments max-line)
       (set has-restoration true)))
+  ;; Parent-snapshot child-restore: nested fn restoring parent snapshot
+  (when (and (not has-restoration) fn-form fn-def-line (cleanup-helpers.check-parent-snapshot-child-restore ff fn-form fn-name fn-def-line path-text))
+    (set has-restoration true))
   has-restoration)
 
 (fn global-mutation-restoration-rule-run [ctx]

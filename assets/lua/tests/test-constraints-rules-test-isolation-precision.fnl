@@ -1173,6 +1173,11 @@
 (table.insert tests {:name "T11-7 flags multi-line pcall invalid before valid after" :fn mutation-restoration-flags-multiline-pcall-invalid-before})
 (table.insert tests {:name "R1-1 flags pcall other callee fn extra arg" :fn mutation-restoration-flags-pcall-other-callee-fn-extra-arg})
 
+;; Import cleanup-closure restore precision tests
+(local cleanup-tests (require :tests.test-constraints-rules-test-isolation-cleanup))
+(each [_ t (ipairs cleanup-tests.tests)]
+  (table.insert tests t))
+
 (local main
   (fn []
     (local runner (require :tests/runner))
