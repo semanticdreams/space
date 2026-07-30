@@ -3303,6 +3303,24 @@
           "Scene restore should add graph node cube using scene-owned graph-map")
   true)
 
+(fn restore-state-capturing-warnings [scene state]
+  (local logging (require :logging))
+  (local original-warn logging.warn)
+  (local warnings [])
+  (set logging.warn (fn [message] (table.insert warnings (tostring message))))
+  (local (ok err) (pcall scene.restore-state scene state))
+  (set logging.warn original-warn)
+  (when (not ok)
+    (error err))
+  warnings)
+
+(fn assert-warning-contains [warnings expected]
+  (var found false)
+  (each [_ message (ipairs warnings)]
+    (when (string.find message expected 1 true)
+      (set found true)))
+  (assert found (.. "expected captured warning containing: " expected)))
+
 (fn scene-restore-graph-node-cube-sanitizes-poisoned-position []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
@@ -3321,13 +3339,17 @@
   (local (ok err)
     (pcall
       (fn []
-        (scene:restore-state {:panels [{:kind "graph-node-cube"
-                                        :node-key "poisoned-node"
-                                        :label "poisoned restore target"
-                                        :size [4 4 4]
-                                        :position [1001000 0 0]
-                                        :rotation [1 0 0 0]}]
-                              :lights (LightSystemModule.default-state)}))))
+        (local warnings
+          (restore-state-capturing-warnings
+            scene
+            {:panels [{:kind "graph-node-cube"
+                       :node-key "poisoned-node"
+                       :label "poisoned restore target"
+                       :size [4 4 4]
+                       :position [950000 0 0]
+                       :rotation [1 0 0 0]}]
+             :lights (LightSystemModule.default-state)}))
+        (assert-warning-contains warnings "dropping invalid restored panel position"))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -3364,13 +3386,17 @@
   (local (ok err)
     (pcall
       (fn []
-        (scene:restore-state {:panels [{:kind "graph-node-cube"
-                                        :node-key "poisoned-size-node"
-                                        :label "poisoned size restore target"
-                                        :size [1001000 4 4]
-                                        :position [0 0 0]
-                                        :rotation [1 0 0 0]}]
-                              :lights (LightSystemModule.default-state)}))))
+        (local warnings
+          (restore-state-capturing-warnings
+            scene
+            {:panels [{:kind "graph-node-cube"
+                       :node-key "poisoned-size-node"
+                       :label "poisoned size restore target"
+                       :size [950000 4 4]
+                       :position [0 0 0]
+                       :rotation [1 0 0 0]}]
+             :lights (LightSystemModule.default-state)}))
+        (assert-warning-contains warnings "replacing invalid restored panel size"))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -3407,17 +3433,21 @@
   (local (ok err)
     (pcall
       (fn []
-        (scene:restore-state {:panels [{:kind "legacy-panel-without-restorer"
-                                        :position [1 2 3]
-                                        :rotation [1 0 0 0]
-                                        :size [4 4 4]}
-                                       {:kind "graph-node-cube"
-                                        :node-key "legacy-skip-node"
-                                        :label "legacy skip target"
-                                        :position [4 5 6]
-                                        :rotation [1 0 0 0]
-                                        :size [4 4 4]}]
-                              :lights (LightSystemModule.default-state)}))))
+        (local warnings
+          (restore-state-capturing-warnings
+            scene
+            {:panels [{:kind "legacy-panel-without-restorer"
+                       :position [1 2 3]
+                       :rotation [1 0 0 0]
+                       :size [4 4 4]}
+                      {:kind "graph-node-cube"
+                       :node-key "legacy-skip-node"
+                       :label "legacy skip target"
+                       :position [4 5 6]
+                       :rotation [1 0 0 0]
+                       :size [4 4 4]}]
+             :lights (LightSystemModule.default-state)}))
+        (assert-warning-contains warnings "skipping restored panel at index 1"))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (set app.graph-map original-graph-map)
@@ -3461,68 +3491,37 @@
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
-(table.insert tests {:name "Scene capture-state includes default terrain"
-                     :fn scene-capture-state-includes-default-terrain})
-(table.insert tests {:name "Scene recover terrain-bound panel uses lowest overlapping terrain"
-                     :fn scene-recover-terrain-bound-panel-uses-lowest-overlapping-terrain})
-(table.insert tests {:name "Scene recover terrain-bound object moves to nearest terrain"
-                     :fn scene-recover-terrain-bound-object-moves-to-nearest-terrain})
-(table.insert tests {:name "Scene recover ignores unbound scene object"
-                     :fn scene-recover-ignores-unbound-scene-object})
-(table.insert tests {:name "Scene recover terrain-bound physics cuboid repositions body"
-                     :fn scene-recover-terrain-bound-physics-cuboid-repositions-body})
-(table.insert tests {:name "Scene recover nearest terrain respects scene root transform"
-                     :fn scene-recover-nearest-terrain-respects-scene-root-transform})
-(table.insert tests {:name "Scene build-default preserves explicit empty terrains"
-                     :fn scene-build-default-preserves-explicit-empty-terrains})
-(table.insert tests {:name "Scene screen-pos terrain domain hit respects scene root transform"
-                     :fn scene-screen-pos-terrain-domain-hit-respects-scene-root-transform})
-(table.insert tests {:name "Scene screen-pos terrain hit resolves default heightfield"
-                     :fn scene-screen-pos-terrain-hit-resolves-default-heightfield})
-(table.insert tests {:name "Scene screen-pos terrain hit respects scene root transform"
-                     :fn scene-screen-pos-terrain-hit-respects-scene-root-transform})
-(table.insert tests {:name "Scene screen-rect terrain target builds sample set"
-                     :fn scene-screen-rect-terrain-target-builds-sample-set})
-(table.insert tests {:name "Scene screen-rect terrain target respects scene root transform"
-                     :fn scene-screen-rect-terrain-target-respects-scene-root-transform})
-(table.insert tests {:name "Scene screen-pos terrain domain hit scales logical input to pixel viewport"
-                     :fn scene-screen-pos-terrain-domain-hit-scales-logical-input-to-pixel-viewport})
-(table.insert tests {:name "Heightfield target capture resolves live scene drag"
-                     :fn heightfield-target-capture-resolves-live-scene-drag})
-(table.insert tests {:name "Heightfield target capture escape cancels selection"
-                     :fn heightfield-target-capture-escape-cancels-selection})
-(table.insert tests {:name "Heightfield target capture requires both drag endpoints on terrain"
-                     :fn heightfield-target-capture-requires-both-drag-endpoints-on-terrain})
-(table.insert tests {:name "Heightfield target capture uses last drag position on release"
-                     :fn heightfield-target-capture-uses-last-drag-position-on-release})
-(table.insert tests {:name "Heightfield target capture clears selection when drag leaves terrain"
-                     :fn heightfield-target-capture-clears-selection-when-drag-leaves-terrain})
-(table.insert tests {:name "Heightfield target capture resolves live scene drag with default ray opts"
-                     :fn heightfield-target-capture-resolves-live-scene-drag-with-default-ray-opts})
-(table.insert tests {:name "Heightfield paint capture stamps live scene samples"
-                     :fn heightfield-paint-capture-stamps-live-scene-samples})
-(table.insert tests {:name "Heightfield paint capture does not raycast before stroke"
-                     :fn heightfield-paint-capture-does-not-raycast-before-stroke})
-(table.insert tests {:name "Terrain rect pick state routes engine events"
-                     :fn terrain-rect-pick-state-routes-engine-events})
-(table.insert tests {:name "Scene terrain selection persists across runtime replace"
-                     :fn scene-terrain-selection-persists-across-runtime-replace})
-(table.insert tests {:name "Demo entry capture-state persists entry metadata"
-                     :fn demo-entry-capture-state-persists-entry-persistence})
-(table.insert tests {:name "Scene capture-state requires panel persistence"
-                     :fn scene-capture-state-requires-panel-persistence})
-(table.insert tests {:name "Scene capture-state requires restore strategy"
-                     :fn scene-capture-state-requires-restore-strategy})
-(table.insert tests {:name "Scene capture-state requires light state provider"
-                     :fn scene-capture-state-requires-light-state-provider})
-(table.insert tests {:name "Scene set-light-state updates app lights"
-                     :fn scene-set-light-state-updates-app-lights})
-(table.insert tests {:name "Scene set-light-state updates non-ambient lights"
-                     :fn scene-set-light-state-updates-non-ambient-lights})
-(table.insert tests {:name "Scene set-light-state requires complete light state"
-                     :fn scene-set-light-state-requires-complete-light-state})
-(table.insert tests {:name "LightSystem clear restores canonical default state"
-                     :fn light-system-clear-restores-canonical-default-state})
+(table.insert tests {:name "Scene capture-state includes default terrain" :fn scene-capture-state-includes-default-terrain})
+(table.insert tests {:name "Scene recover terrain-bound panel uses lowest overlapping terrain" :fn scene-recover-terrain-bound-panel-uses-lowest-overlapping-terrain})
+(table.insert tests {:name "Scene recover terrain-bound object moves to nearest terrain" :fn scene-recover-terrain-bound-object-moves-to-nearest-terrain})
+(table.insert tests {:name "Scene recover ignores unbound scene object" :fn scene-recover-ignores-unbound-scene-object})
+(table.insert tests {:name "Scene recover terrain-bound physics cuboid repositions body" :fn scene-recover-terrain-bound-physics-cuboid-repositions-body})
+(table.insert tests {:name "Scene recover nearest terrain respects scene root transform" :fn scene-recover-nearest-terrain-respects-scene-root-transform})
+(table.insert tests {:name "Scene build-default preserves explicit empty terrains" :fn scene-build-default-preserves-explicit-empty-terrains})
+(table.insert tests {:name "Scene screen-pos terrain domain hit respects scene root transform" :fn scene-screen-pos-terrain-domain-hit-respects-scene-root-transform})
+(table.insert tests {:name "Scene screen-pos terrain hit resolves default heightfield" :fn scene-screen-pos-terrain-hit-resolves-default-heightfield})
+(table.insert tests {:name "Scene screen-pos terrain hit respects scene root transform" :fn scene-screen-pos-terrain-hit-respects-scene-root-transform})
+(table.insert tests {:name "Scene screen-rect terrain target builds sample set" :fn scene-screen-rect-terrain-target-builds-sample-set})
+(table.insert tests {:name "Scene screen-rect terrain target respects scene root transform" :fn scene-screen-rect-terrain-target-respects-scene-root-transform})
+(table.insert tests {:name "Scene screen-pos terrain domain hit scales logical input to pixel viewport" :fn scene-screen-pos-terrain-domain-hit-scales-logical-input-to-pixel-viewport})
+(table.insert tests {:name "Heightfield target capture resolves live scene drag" :fn heightfield-target-capture-resolves-live-scene-drag})
+(table.insert tests {:name "Heightfield target capture escape cancels selection" :fn heightfield-target-capture-escape-cancels-selection})
+(table.insert tests {:name "Heightfield target capture requires both drag endpoints on terrain" :fn heightfield-target-capture-requires-both-drag-endpoints-on-terrain})
+(table.insert tests {:name "Heightfield target capture uses last drag position on release" :fn heightfield-target-capture-uses-last-drag-position-on-release})
+(table.insert tests {:name "Heightfield target capture clears selection when drag leaves terrain" :fn heightfield-target-capture-clears-selection-when-drag-leaves-terrain})
+(table.insert tests {:name "Heightfield target capture resolves live scene drag with default ray opts" :fn heightfield-target-capture-resolves-live-scene-drag-with-default-ray-opts})
+(table.insert tests {:name "Heightfield paint capture stamps live scene samples" :fn heightfield-paint-capture-stamps-live-scene-samples})
+(table.insert tests {:name "Heightfield paint capture does not raycast before stroke" :fn heightfield-paint-capture-does-not-raycast-before-stroke})
+(table.insert tests {:name "Terrain rect pick state routes engine events" :fn terrain-rect-pick-state-routes-engine-events})
+(table.insert tests {:name "Scene terrain selection persists across runtime replace" :fn scene-terrain-selection-persists-across-runtime-replace})
+(table.insert tests {:name "Demo entry capture-state persists entry metadata" :fn demo-entry-capture-state-persists-entry-persistence})
+(table.insert tests {:name "Scene capture-state requires panel persistence" :fn scene-capture-state-requires-panel-persistence})
+(table.insert tests {:name "Scene capture-state requires restore strategy" :fn scene-capture-state-requires-restore-strategy})
+(table.insert tests {:name "Scene capture-state requires light state provider" :fn scene-capture-state-requires-light-state-provider})
+(table.insert tests {:name "Scene set-light-state updates app lights" :fn scene-set-light-state-updates-app-lights})
+(table.insert tests {:name "Scene set-light-state updates non-ambient lights" :fn scene-set-light-state-updates-non-ambient-lights})
+(table.insert tests {:name "Scene set-light-state requires complete light state" :fn scene-set-light-state-requires-complete-light-state})
+(table.insert tests {:name "LightSystem clear restores canonical default state" :fn light-system-clear-restores-canonical-default-state})
 (table.insert tests {:name "Scene capture-state preserves updated ambient light"
                      :fn scene-capture-state-preserves-updated-ambient-light})
 (table.insert tests {:name "Scene capture-state preserves updated non-ambient lights"
