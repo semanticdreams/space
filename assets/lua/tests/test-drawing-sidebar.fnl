@@ -94,12 +94,14 @@
   stub)
 
 (fn make-ctx []
+  (local clickables (assert app.clickables "test requires app.clickables"))
+  (local hoverables (assert app.hoverables "test requires app.hoverables"))
   (BuildContext {:theme (and app.themes app.themes.get-active-theme (app.themes.get-active-theme))
-                 :clickables app.clickables
-                 :hoverables app.hoverables
-                 :system-cursors app.system-cursors
-                 :icons (make-icons-stub)
-                 :states app.states}))
+                  :clickables clickables
+                  :hoverables hoverables
+                  :system-cursors app.system-cursors
+                  :icons (make-icons-stub)
+                  :states app.states}))
 
 (fn codepoints->text [codepoints]
   (local parts [])
@@ -108,8 +110,10 @@
   (table.concat parts))
 
 (fn clickable-labels []
+  (local clickables (assert app.clickables "test requires app.clickables"))
+  (local left-click-objects (assert clickables.left-click-objects "test requires app.clickables.left-click-objects"))
   (local labels [])
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs left-click-objects)]
     (when (and obj obj.text obj.text.get-codepoints)
       (local text (codepoints->text (obj.text:get-codepoints)))
       (when (> (# text) 0)
@@ -131,8 +135,10 @@
        (= (or (. a 4) a.w 0) (or (. b 4) b.w 0))))
 
 (fn find-clickable-button [target]
+  (local clickables (assert app.clickables "test requires app.clickables"))
+  (local left-click-objects (assert clickables.left-click-objects "test requires app.clickables.left-click-objects"))
   (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs left-click-objects)]
     (when (and (not resolved)
                obj
                obj.text
@@ -143,8 +149,10 @@
   resolved)
 
 (fn find-clickable-button-by-icon [target]
+  (local clickables (assert app.clickables "test requires app.clickables"))
+  (local left-click-objects (assert clickables.left-click-objects "test requires app.clickables.left-click-objects"))
   (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs left-click-objects)]
     (when (and (not resolved)
                obj
                (= obj.icon target))
@@ -152,8 +160,10 @@
   resolved)
 
 (fn find-text-input []
+  (local clickables (assert app.clickables "test requires app.clickables"))
+  (local left-click-objects (assert clickables.left-click-objects "test requires app.clickables.left-click-objects"))
   (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs left-click-objects)]
     (when (and (not resolved)
                obj
                obj.get-text
@@ -162,8 +172,10 @@
   resolved)
 
 (fn with-sidebar-env [body]
-  (local previous {:clickables app.clickables
-                   :hoverables app.hoverables
+  (local saved-clickables (assert app.clickables "test requires app.clickables"))
+  (local saved-hoverables (assert app.hoverables "test requires app.hoverables"))
+  (local previous {:clickables saved-clickables
+                   :hoverables saved-hoverables
                    :canvas app.canvas
                    :canvas-visible? app.canvas-visible?
                    :preferred-interaction-surface app.preferred-interaction-surface
