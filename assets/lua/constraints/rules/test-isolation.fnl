@@ -422,9 +422,7 @@
   snap-var)
 
 (local h (require :constraints.rules.test-isolation-cleanup))
-(local cleanup-helpers (h.make-helpers {:find-containing-fn-defs find-containing-fn-defs
-                                         :find-snapshot-var find-snapshot-var
-                                         :escape-pattern escape-pattern}))
+(var cleanup-helpers nil)
 (fn only-whitespace-between? [form-text start-byte end-byte]
   "Return true if every character between start-byte and end-byte (exclusive)
    is whitespace (space, newline, or tab)."
@@ -784,12 +782,6 @@
   found)
 
 (fn snapshot-before-pcall-and-restore-after? [parent-form path-segments path-text enclosing-span]
-  "Check if the parent has a valid snapshot binding BEFORE the pcall call start
-   and that exact snapshot variable is concretely restored AFTER the pcall call end.
-   Searches only the text before the pcall for snapshot bindings. Uses the pre-pcall
-   snap-var directly for the restore check — does NOT re-derive from the full form.
-   Helper snapshots (snapshot-app-fields/restore-app-fields!) are conservatively
-   unsupported in parent-pcall path."
   (local before-text (parent-form:sub 1 (- enclosing-span.call-start 1)))
   (local snap-var (find-snapshot-var before-text path-segments))
   (if (not snap-var) false
@@ -813,6 +805,12 @@
                           (local enclosing-span (find-enclosing-call-span call-spans parent.form parent.line max-line))
                           (if (not enclosing-span) false
                               (snapshot-before-pcall-and-restore-after? parent.form path-segments path-text enclosing-span)))))))))))
+
+(set cleanup-helpers
+     (h.make-helpers {:find-containing-fn-defs find-containing-fn-defs :find-snapshot-var find-snapshot-var
+                      :escape-pattern escape-pattern :find-all-pcall-fn-ranges find-all-pcall-fn-ranges
+                      :find-all-pcall-call-spans find-all-pcall-call-spans
+                      :has-restore-after-byte-for-var? has-restore-after-byte-for-var?}))
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
 (fn build-mutation-group-key [mutation ff]
@@ -1140,11 +1138,11 @@
   (when (and (not has-restoration) enclosing-pcall-end)
     (when (has-helper-restore-after-byte? fn-form path-text enclosing-pcall-end)
       (set has-restoration true)))
-  ;; Parent-scope pcall restoration: when the anonymous fn form lacks
-  ;; snapshot/restore (because they're in the parent), check the parent
-  ;; function's form for snapshot before pcall + restore after pcall.
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
     (when (check-parent-pcall-restoration ff fn-def-line anon-def-col path-text path-segments max-line)
+      (set has-restoration true)))
+  (when (and (not has-restoration) (= fn-name "<anonymous>"))
+    (when (cleanup-helpers.check-parent-child-mutation-pcall-restoration ff fn-form fn-def-line anon-def-col path-segments)
       (set has-restoration true)))
   ;; Parent-snapshot child-restore: nested fn restoring parent snapshot
   (when (and (not has-restoration) fn-form fn-def-line (cleanup-helpers.check-parent-snapshot-child-restore ff fn-form fn-name fn-def-line path-text))

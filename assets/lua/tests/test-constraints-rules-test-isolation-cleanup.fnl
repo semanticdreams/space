@@ -228,6 +228,20 @@
 (table.insert tests {:name "C11 flags tset mismatched var" :fn mutation-restoration-flags-tset-mismatched-var})
 (table.insert tests {:name "C12 flags sibling lambda snapshot" :fn mutation-restoration-flags-sibling-lambda-snapshot})
 
+(fn mutation-restoration-allows-parent-pcall-restoring-child-mutation []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 360
+                                             :form "(fn setup-scene []\n  (local snap app.renderers)\n  (set AppBootstrap.init-renderers\n       (fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (local (ok result) (pcall (fn [] (Main.init))))\n  (set app.renderers snap)\n  (if ok result (error result)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 8 :length 90
+                                             :form "(fn [opts]\n         (set app.renderers (make-renderer-stub))\n         app.renderers)"}]
+                              :mutations [{:op :set :path ["app" "renderers"] :line 14 :column 10
+                                           :form "(set app.renderers (make-renderer-stub))" :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "C13: child mutation should pass when parent snapshots before child and restores after pcall"))
+
+(table.insert tests {:name "C13 allows parent pcall restoring child mutation" :fn mutation-restoration-allows-parent-pcall-restoring-child-mutation})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

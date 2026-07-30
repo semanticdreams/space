@@ -81,7 +81,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -157,7 +157,7 @@
       (local original-config app.hot-reload-config)
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -201,7 +201,7 @@
       (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -243,7 +243,7 @@
       (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -314,7 +314,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -397,7 +397,7 @@
       (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -492,7 +492,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -584,7 +584,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -651,7 +651,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -720,7 +720,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -797,7 +797,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -869,7 +869,7 @@
       (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -911,7 +911,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))
@@ -980,7 +980,7 @@
   (local original-renderers app.renderers)
   (set AppBootstrap.init-renderers
        (fn [opts]
-         (rawset app :renderers (make-renderer-stub))
+         (set app.renderers (make-renderer-stub))
          (when (and app.renderers opts.viewport)
            (app.renderers:on-viewport-changed opts.viewport))
          app.renderers))
@@ -1024,7 +1024,7 @@
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
            (fn [opts]
-             (rawset app :renderers (make-renderer-stub))
+             (set app.renderers (make-renderer-stub))
              (when (and app.renderers opts.viewport)
                (app.renderers:on-viewport-changed opts.viewport))
              app.renderers))

@@ -9,6 +9,9 @@
     (local find-containing-fn-defs deps.find-containing-fn-defs)
     (local find-snapshot-var deps.find-snapshot-var)
     (local escape-pattern deps.escape-pattern)
+    (local find-all-pcall-fn-ranges deps.find-all-pcall-fn-ranges)
+    (local find-all-pcall-call-spans deps.find-all-pcall-call-spans)
+    (local has-restore-after-byte-for-var? deps.has-restore-after-byte-for-var?)
 
     (fn find-matching-close [text open-pos]
       "Find matching close paren for an opener at open-pos. Returns byte or nil."
@@ -120,6 +123,33 @@
                 (set all-restore false))))))
       all-restore)
 
-    {:check-parent-snapshot-child-restore check-parent-snapshot-child-restore}))
+    (fn check-parent-child-mutation-pcall-restoration [ff child-fn-form child-fn-line anon-def-col path-segments]
+      "Check a child callback that mutates a sensitive app field while the parent
+       test function snapshots the field before defining the callback, runs the
+       body under pcall, then restores the same snapshot after the pcall."
+      (local containing (find-containing-fn-defs ff.definitions child-fn-line anon-def-col))
+      (if (<= (length containing) 1) false
+          (do
+            (local parent (. containing 2))
+            (if (not (and parent.form parent.line child-fn-form)) false
+                (do
+                  (local child-start (string.find parent.form child-fn-form 1 true))
+                  (if (not child-start) false
+                      (do
+                        (local before-child (parent.form:sub 1 (- child-start 1)))
+                        (local snap-var (find-snapshot-var before-child path-segments))
+                        (if (not snap-var) false
+                            (do
+                              (var restored false)
+                              (local pcall-ranges (find-all-pcall-fn-ranges parent.form))
+                              (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
+                              (each [_ span (ipairs call-spans)]
+                                (when (and (not restored) (> span.call-start child-start))
+                                  (when (has-restore-after-byte-for-var? parent.form path-segments snap-var span.call-end)
+                                    (set restored true))))
+                              restored)))))))))
+
+    {:check-parent-snapshot-child-restore check-parent-snapshot-child-restore
+     :check-parent-child-mutation-pcall-restoration check-parent-child-mutation-pcall-restoration}))
 
 M
