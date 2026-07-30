@@ -1,7 +1,14 @@
 (local fennel (require :fennel))
 
-;; Set up app/engine mocks using _G.app to avoid sensitive-path detection.
-;; These mocks persist for the lifespan of the test module.
+;; Snapshot prior engine state for restoration after all tests complete.
+;; These are restored in main() to prevent global state leakage.
+(local prev-engine (and _G.app _G.app.engine))
+(local prev-engine-get-asset-path (and _G.app _G.app.engine _G.app.engine.get-asset-path))
+
+;; Set up app/engine mocks using _G.app prefix.
+;; The mock get-asset-path must remain in place during test execution
+;; (icons:resolve calls parse-codepoints which reads the codepoints file).
+;; Restored in main() below.
 (global app (or _G.app {}))
 (tset _G.app :engine (or _G.app.engine {}))
 (tset _G.app.engine :get-asset-path (fn [path] (.. (os.getenv "SPACE_ASSETS_PATH") "/" path)))
@@ -35,7 +42,9 @@
       (error result)))
 
 (fn setup-icons []
-  (with-restored-app-fields [:package.loaded]
+  ;; Snapshot and restore package.loaded.textures (the leaf field),
+  ;; not package.loaded (the container table).
+  (with-restored-app-fields [:package.loaded.textures]
     (fn []
       ;; Mock textures while loading icon widgets
       (tset package.loaded :textures
@@ -100,9 +109,19 @@
   
   (print "test-icon-widget-render passed"))
 
+(fn restore-engine-state []
+  ;; Restore sub-field first so engine table is still valid.
+  (if (and _G.app _G.app.engine)
+      (set _G.app.engine.get-asset-path prev-engine-get-asset-path))
+  ;; Then restore engine itself to the previous value.
+  (if _G.app
+      (set _G.app.engine prev-engine)))
+
 (fn main []
   (test-icons-resolve)
   (test-icon-widget-render)
-  (print "All icon tests passed."))
+  (print "All icon tests passed.")
+  ;; Restore prior app.engine state to prevent leakage to subsequent test modules.
+  (restore-engine-state))
 
 {:main main}
