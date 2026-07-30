@@ -49,10 +49,7 @@
   (assert rule "rule lifecycle.global-mutation-restoration should be in rules list")
   rule)
 
-;; ======================================================================
 ;; lifecycle.global-mutation-restoration (test-isolation)
-;; ======================================================================
-
 ;; --- Precision: wrapper anonymous fn restoration (with-restored-app-fields) ---
 
 (fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields []
@@ -343,10 +340,7 @@
   (assert result "should flag mutation when restore happens before it")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
 ;; R1-3: parent wrapper must contain the mutation, not just same parent
-;; ======================================================================
-
 (fn mutation-restoration-flags-sibling-anon-not-inside-wrapper []
   "R1-3: Parent function with with-restored-app-fields around one callback,
    but a separate sibling anonymous fn mutates without being wrapped.
@@ -440,10 +434,7 @@
   (assert result "should produce diagnostics for the first leaking anon on same line")
   (assert (> (length result) 0) "should have at least one diagnostic for the same-line leak"))
 
-;; ======================================================================
 ;; R1-2 round2: snapshot helper must cover the mutated path
-;; ======================================================================
-
 (fn mutation-restoration-flags-snapshot-with-unrelated-keys []
   "R1-2 round2: snapshot-app-fields covers only :renderers, but mutation
    is on app.activity-registry. Rule should still flag the mutation."
@@ -491,10 +482,7 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "snapshot covering app.engine with app.engine mutation should pass"))
 
-;; ======================================================================
 ;; R1-3 round2: identical anonymous form text, different positions
-;; ======================================================================
-
 (fn mutation-restoration-flags-identical-anon-form-not-inside-wrapper []
   "R1-3 round2: Two anonymous fns with identical form text.
    One is wrapped by with-restored-app-fields, the other is a sibling.
@@ -541,10 +529,7 @@
   (assert (> (length engine-diags) 0)
           "unwrapped identical-form sibling should be flagged"))
 
-;; ======================================================================
 ;; V1-1: variable-key with-restored-app-fields
-;; ======================================================================
-
 (fn mutation-restoration-allows-variable-key-wraf-wrapper []
   "V1-1: with-restored-app-fields with variable key list (not literal vector),
    where the variable is bound to a literal vector in the same form.
@@ -584,10 +569,7 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "variable-key with-restored-app-fields wrapper should be recognized"))
 
-;; ======================================================================
 ;; V2-1: same-line anonymous, column-aware definition matching
-;; ======================================================================
-
 (fn mutation-restoration-flags-same-line-leak-when-first-restores []
   "V2-1: Two same-line anonymous fns. First restores app.engine,
    second leaks app.engine. Column-aware grouping must not collapse them."
@@ -632,10 +614,7 @@
   (assert result "should produce diagnostics for leaking anon when first restores")
   (assert (> (length result) 0) "should have at least one diagnostic for the same-line leak"))
 
-;; ======================================================================
 ;; V2-2: parent wrapper column-adjusted byte position
-;; ======================================================================
-
 (fn mutation-restoration-flags-same-line-sibling-outside-wrapper []
   "V2-2: Parent wraps one anon, sibling anon on same line outside wrapper.
    Column-adjusted byte position must correctly place sibling outside."
@@ -680,10 +659,7 @@
   (assert (> (length engine-diags) 0)
           "unwrapped same-line sibling should be flagged"))
 
-;; ======================================================================
 ;; V2-3: snapshot subpath coverage and variable key resolution
-;; ======================================================================
-
 (fn mutation-restoration-allows-snapshot-covering-subpath []
   "V2-3: snapshot [:engine] should cover app.engine.audio (subpath coverage)."
   (local rule (get-test-isolation-rule))
@@ -731,10 +707,7 @@
   (assert result "should flag engine mutation when variable keys only cover activity-registry")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
 ;; V3-1: two snapshots / non-restored covering snapshot
-;; ======================================================================
-
 (fn mutation-restoration-flags-two-snapshots-non-restored-covering []
   "V3-1: Two snapshots: s1 covers [:renderers], s2 covers [:engine].
    Mutate app.engine, then restore s1 (which does NOT cover engine).
@@ -761,10 +734,7 @@
    (assert result "should flag engine mutation when only non-covering snapshot is restored")
    (assert (> (length result) 0) "should have at least one diagnostic for non-restored covering snapshot"))
 
-;; ======================================================================
 ;; V4-1: any covering snapshot restore accepted
-;; ======================================================================
-
 (fn mutation-restoration-allows-later-covering-snapshot-restore []
   "V4-1: Two snapshots both covering app.engine (s1 and s2).
    Only the later one (s2) is restored after mutation.
@@ -790,10 +760,7 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "V4-1: restore of any covering snapshot after mutation should pass"))
 
-;; ======================================================================
 ;; R2-1: mixed literal+variable-key snapshot coverage
-;; ======================================================================
-
 (fn mutation-restoration-allows-mixed-literal-variable-key-snapshot-restore []
   "R2-1: Two snapshots: s1 literal [:engine], s2 via variable keys [:engine].
    Mutate app.engine, restore only s2. Should pass because s2 covers engine
@@ -820,10 +787,7 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "R2-1: restore of variable-key snapshot covering engine should pass when literal also exists"))
 
-;; ======================================================================
 ;; V-R2-2: outside-before-wrapper same-path mutation
-;; ======================================================================
-
 (fn mutation-restoration-flags-outside-before-wrapper-same-path []
   "V-R2-2: Named function with an outside-wrapper mutation of app.engine
    that precedes a later same-path mutation inside a with-restored-app-fields
@@ -855,10 +819,7 @@
   (assert result "V-R2-2: outside-before-wrap mutation should be diagnosed")
   (assert (> (length result) 0) "should have at least one diagnostic for outside-before-wrap leak"))
 
-;; ======================================================================
 ;; R2-2: named-function with-restored-app-fields containment
-;; ======================================================================
-
 (fn mutation-restoration-flags-named-mutation-outside-wrapper []
   "R2-2: Named function with with-restored-app-fields wrapper, but mutation
    is textually outside the wrapper body. Should be diagnosed.
@@ -889,10 +850,7 @@
   (assert result "R2-2: mutation outside wraf body should be diagnosed")
   (assert (> (length result) 0) "should have at least one diagnostic for outside-wrapper mutation"))
 
-;; ======================================================================
 ;; R2-3: same-line restore-before-mutation byte-aware ordering
-;; ======================================================================
-
 (fn mutation-restoration-flags-same-line-helper-restore-before-mutation []
   "R2-3: Helper restore before same-line mutation should be flagged.
    Byte-based comparison must detect restore is textually before the mutation."
@@ -939,10 +897,7 @@
   (assert result "R2-3: direct restore before same-line mutation should be flagged")
   (assert (> (length result) 0) "should have at least one diagnostic for same-line direct leak"))
 
-;; ======================================================================
 ;; T11-1: same-line nested callback inside restored wrapper passes
-;; ======================================================================
-
 (fn mutation-restoration-allows-sameline-nested-callback-in-wrapper []
   "T11-1: Same-line nested anonymous fn inside a with-restored-app-fields
    wrapper body must not be flagged. Models the real test-scene-activity-slots.fnl
@@ -981,10 +936,7 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "T11-1: same-line nested callback inside restored wrapper should pass"))
 
-;; ======================================================================
 ;; T11-2: wrapper missing the mutated key still flags
-;; ======================================================================
-
 (fn mutation-restoration-flags-wrapper-missing-key []
   "T11-2: with-restored-app-fields wrapping [:renderers] but mutation is on
    app.engine. The wrapper key argument must include the mutated path.
@@ -1018,10 +970,7 @@
   (assert result "T11-2: wrapper missing key should flag")
   (assert (> (length result) 0) "T11-2: should have at least one diagnostic"))
 
-;; ======================================================================
 ;; T11-3: real-file regression — test-scene-activity-slots.fnl
-;; ======================================================================
-
 (fn mutation-restoration-real-file-regression-activity-slots []
   "T11-3: Real-file regression using Source.discover + Facts.extract.
    The production file test-scene-activity-slots.fnl should produce zero
@@ -1048,10 +997,7 @@
                 (.. "T11-3: expected 0 activity-slots diagnostics, got " scene-count)))
       (assert true "T11-3: pass - no diagnostics returned")))
 
-;; ======================================================================
 ;; T11-4: variable-key wrapper missing the mutated field still flags
-;; ======================================================================
-
 (fn mutation-restoration-flags-variable-key-missing-field []
   "T11-4: Variable key list resolved to [:renderers] but mutation is on
    app.engine. The resolved key must include the mutated path."
@@ -1084,10 +1030,7 @@
   (assert result "T11-4: resolved variable key missing field should flag")
   (assert (> (length result) 0) "T11-4: should have at least one diagnostic"))
 
-;; ======================================================================
 ;; T11-5: non-literal module-level variable key still flags
-;; ======================================================================
-
 (fn mutation-restoration-flags-nonliteral-module-var-key []
   "T11-5: Module-level local with computed expression containing a vector
    must NOT be resolved. (local keys (compute-keys [:engine])) should be
@@ -1188,7 +1131,33 @@
 (table.insert tests {:name "T11-2 flags wrapper missing key" :fn mutation-restoration-flags-wrapper-missing-key})
 (table.insert tests {:name "T11-3 real-file regression activity-slots" :fn mutation-restoration-real-file-regression-activity-slots})
 (table.insert tests {:name "T11-4 flags variable-key missing field" :fn mutation-restoration-flags-variable-key-missing-field})
+;; T11-6 + T11-7: multi-line pcall parent-scope snapshot/restore
+(fn mutation-restoration-allows-multiline-pcall-parent-restore []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "test-parent-restore" :top-level? true :line 5 :column 1 :length 250
+                                             :form "(fn test-parent-restore []\n  (local orig (and app.engine app.engine.width))\n  (pcall\n      (fn []\n        (set app.engine.width 100)))\n  (set app.engine.width orig))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 8 :column 1 :length 50
+                                             :form "(fn []\n        (set app.engine.width 100))"}]
+                              :mutations [{:op :set :path ["app" "engine" "width"] :line 9 :column 1
+                                           :form "(set app.engine.width 100)" :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil) "T11-6: multi-line pcall parent restore should pass"))
+(fn mutation-restoration-flags-multiline-pcall-invalid-before []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl" :module "tests.test-bad"
+                              :definitions [{:kind :fn :name "test-invalid-before" :top-level? true :line 5 :column 1 :length 300
+                                             :form "(fn test-invalid-before []\n  (local orig (and some-flag app.engine.width))\n  (pcall\n      (fn []\n        (set app.engine.width 100)))\n  (local orig-b (and app.engine app.engine.width))\n  (set app.engine.width orig-b))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 8 :column 1 :length 50
+                                             :form "(fn []\n        (set app.engine.width 100))"}]
+                              :mutations [{:op :set :path ["app" "engine" "width"] :line 9 :column 1
+                                           :form "(set app.engine.width 100)" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "T11-7: should flag multi-line pcall with invalid before/valid after")
+  (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
+
 (table.insert tests {:name "T11-5 flags nonliteral module var key" :fn mutation-restoration-flags-nonliteral-module-var-key})
+(table.insert tests {:name "T11-6 allows multi-line pcall parent restore" :fn mutation-restoration-allows-multiline-pcall-parent-restore})
+(table.insert tests {:name "T11-7 flags multi-line pcall invalid before valid after" :fn mutation-restoration-flags-multiline-pcall-invalid-before})
 
 (local main
   (fn []

@@ -430,24 +430,36 @@
 
 (fn try-extract-pcall-range [fn-form pcall-start]
   "Try to find the fn body end for a pcall+fn form starting at pcall-start.
-   Returns {:fn-start fn-start :fn-end end-pos} or nil if no inner fn found."
-  (local fn-start (string.find fn-form "%(fn[%s%)]" pcall-start false))
-  (if (not fn-start) nil
+   Returns {:fn-start fn-start :fn-end end-pos :pcall-start pcall-start} or nil
+   if no inner fn found or pcall-start is a substring of a longer identifier."
+  ;; Reject pcall-start where 'pcall' is a substring of a longer identifier
+  ;; (e.g., no-pcall-def).  Before a real (pcall ...) call, the byte is '('
+  ;; or whitespace.  Default to '(' when pcall-start is at position 1.
+  (var pre-byte "(")
+  (when (> pcall-start 1)
+    (set pre-byte (fn-form:sub (- pcall-start 1) (- pcall-start 1))))
+  ;; Accept '(' or whitespace before pcall via single-char match
+  ;; (avoids (or ...) pattern that triggers style-doctrine silent-fallback).
+  (if (string.find " \n\t(" pre-byte 1 true)
       (do
-        (var depth 1)
-        (var pos (+ fn-start 4))
-        (var end-pos nil)
-        (while (and (> depth 0) (<= pos (length fn-form)))
-          (local ch (fn-form:sub pos pos))
-          (if (= ch "(") (set depth (+ depth 1))
-              (= ch ")") (do (set depth (- depth 1))
-                             (when (= depth 0)
-                               (set end-pos pos)))
-              (= ch "\"") (do
-                            (local end-quote (fn-form:find "\"" (+ pos 1) true))
-                            (when end-quote (set pos end-quote))))
-          (set pos (+ pos 1)))
-        (if end-pos {:fn-start fn-start :fn-end end-pos} nil))))
+        (local fn-start (string.find fn-form "%(fn[%s%)]" pcall-start false))
+        (if (not fn-start) nil
+            (do
+              (var depth 1)
+              (var pos (+ fn-start 4))
+              (var end-pos nil)
+              (while (and (> depth 0) (<= pos (length fn-form)))
+                (local ch (fn-form:sub pos pos))
+                (if (= ch "(") (set depth (+ depth 1))
+                    (= ch ")") (do (set depth (- depth 1))
+                                   (when (= depth 0)
+                                     (set end-pos pos)))
+                    (= ch "\"") (do
+                                  (local end-quote (fn-form:find "\"" (+ pos 1) true))
+                                  (when end-quote (set pos end-quote))))
+                (set pos (+ pos 1)))
+              (if end-pos {:fn-start fn-start :fn-end end-pos :pcall-start pcall-start} nil))))
+      nil))
 
 (fn find-all-pcall-fn-ranges [fn-form]
   "Find all (pcall (fn [...] ...)) forms and return their fn body byte ranges.
@@ -571,7 +583,7 @@
         (= ch " ") (set pos (- pos 1))
         (= ch "\n") (set pos (- pos 1))
         (= ch "\t") (set pos (- pos 1))
-        #(set pos nil)))
+        (do (set pos nil))))
   (if (and pos (>= pos 1) (= (form-text:sub pos pos) "(")) pos nil))
 
 (fn find-all-pcall-call-spans [form-text pcall-ranges]
@@ -580,12 +592,7 @@
    call-start is the '(' before 'pcall', call-end is the matching ')' via paren-matching."
   (var spans [])
   (each [_ range (ipairs pcall-ranges)]
-    (var pcall-byte nil)
-    ;; Find the 'pcall' text near this fn-start by searching backwards
-    (for [search (- range.fn-start 2) (- range.fn-start 10) -1]
-      (when (and (not pcall-byte) (>= search 1))
-        (when (= (form-text:sub search (+ search 4)) "pcall")
-          (set pcall-byte search))))
+    (local pcall-byte range.pcall-start)
     (when pcall-byte
       (local call-start (find-pcall-call-start form-text pcall-byte))
       (when call-start
