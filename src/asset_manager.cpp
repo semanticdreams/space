@@ -1,44 +1,175 @@
+#include <algorithm>
+#include <cstdlib>
 #include <filesystem>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <system_error>
+#include <vector>
 
 #include "appdirs.h"
 #include "asset_manager.h"
 
 namespace fs = std::filesystem;
 
-// Initialize static variable
+// Initialize static variables
 std::string AssetManager::systemAssetsRoot = "/usr/share/space/assets";
+std::optional<fs::path> AssetManager::executablePath;
 
-std::string AssetManager::getAssetPath(const std::string& relativePath) {
-    // Look for asset in env var
-    if (const char* envAssetsPath = std::getenv("SPACE_ASSETS_PATH")) {
-        fs::path envPath = fs::path(envAssetsPath) / relativePath;
-        fs::path absEnvPath = fs::absolute(envPath);
-        if (fs::exists(absEnvPath)) {
-            return absEnvPath.string();
+namespace {
+
+fs::path normalized(const fs::path& path)
+{
+    std::error_code ec;
+    fs::path result = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    return ec ? fs::absolute(path).lexically_normal() : result;
+}
+
+std::string dedup_key(const fs::path& root)
+{
+    std::error_code ec;
+    fs::path norm = fs::weakly_canonical(fs::absolute(root, ec), ec);
+    if (ec) {
+        norm = fs::absolute(root).lexically_normal();
+    }
+    return norm.string();
+}
+
+bool is_contained_under(const fs::path& full, const fs::path& root)
+{
+    std::error_code ec;
+    fs::path canonFull = fs::weakly_canonical(fs::absolute(full, ec), ec);
+    if (ec) {
+        canonFull = fs::absolute(full).lexically_normal();
+    }
+    ec.clear();
+    fs::path canonRoot = fs::weakly_canonical(fs::absolute(root, ec), ec);
+    if (ec) {
+        canonRoot = fs::absolute(root).lexically_normal();
+    }
+    auto [m1, m2] = std::mismatch(
+        canonFull.begin(), canonFull.end(),
+        canonRoot.begin(), canonRoot.end());
+    return m2 == canonRoot.end();
+}
+
+} // namespace
+
+void AssetManager::setExecutablePath(const fs::path& path)
+{
+    if (path.empty()) {
+        executablePath = std::nullopt;
+    } else {
+        executablePath = normalized(path);
+    }
+}
+
+void AssetManager::clearExecutablePathForTests()
+{
+    executablePath = std::nullopt;
+}
+
+std::string AssetManager::getAssetPath(const std::string& relativePath)
+{
+    // Reject absolute paths — asset discovery only works with relative paths
+    // that are resolved under configured asset roots.
+    if (fs::path(relativePath).is_absolute()) {
+        throw std::runtime_error("Asset not found: " + relativePath +
+                                 " (absolute paths are not supported)");
+    }
+
+    struct Candidate {
+        fs::path root;
+        std::string label;
+    };
+
+    std::vector<Candidate> candidates;
+    std::vector<std::string> dedupKeys;
+    std::vector<std::string> searched;
+
+    auto addCandidate = [&](const fs::path& root, const std::string& label) {
+        std::string key = dedup_key(root);
+        for (const std::string& existing : dedupKeys) {
+            if (existing == key) {
+                searched.push_back(label + ": " + (root / relativePath).string() + " (deduplicated)");
+                return;
+            }
+        }
+        dedupKeys.push_back(key);
+        candidates.push_back({root, label});
+    };
+
+    // 1. SPACE_ASSETS_PATH (highest priority override)
+    const char* envAssetsPath = std::getenv("SPACE_ASSETS_PATH");
+    if (envAssetsPath && envAssetsPath[0] != '\0') {
+        fs::path envRoot(envAssetsPath);
+        addCandidate(envRoot, "SPACE_ASSETS_PATH");
+    }
+
+    // 2. User data assets
+    {
+        fs::path userDataRoot = fs::path(get_user_data_dir("space")) / "assets";
+        addCandidate(userDataRoot, "user-data");
+    }
+
+    // 3. Executable sibling assets
+    // 4. Executable-relative ../share/space/assets
+    // 5. Executable-relative ../Resources/assets
+    if (executablePath.has_value()) {
+        fs::path exeDir = executablePath->parent_path();
+
+        // 3. <executable-dir>/assets
+        {
+            fs::path siblingRoot = exeDir / "assets";
+            if (!siblingRoot.empty()) {
+                addCandidate(siblingRoot, "executable-sibling");
+            }
+        }
+
+        // 4. <executable-dir>/../share/space/assets
+        {
+            fs::path shareRoot = exeDir / ".." / "share" / "space" / "assets";
+            addCandidate(shareRoot, "executable-share");
+        }
+
+        // 5. <executable-dir>/../Resources/assets
+        {
+            fs::path resRoot = exeDir / ".." / "Resources" / "assets";
+            addCandidate(resRoot, "executable-resources");
         }
     }
 
-    // Look for asset in user data assets folder
-    fs::path userDataPath = fs::path(get_user_data_dir("space")) / "assets" / relativePath;
-    fs::path absUserDataPath = fs::absolute(userDataPath);
-    if (fs::exists(absUserDataPath)) {
-        return absUserDataPath.string();
+    // 6. CWD/assets fallback
+    {
+        fs::path cwdRoot = fs::current_path() / "assets";
+        addCandidate(cwdRoot, "cwd");
     }
 
-    // Look for asset in local assets folder
-    fs::path devPath = fs::current_path() / "assets" / relativePath;
-    fs::path absDevPath = fs::absolute(devPath);
-    if (fs::exists(absDevPath)) {
-        return absDevPath.string();
+    // 7. System assets root
+    {
+        addCandidate(fs::path(systemAssetsRoot), "system");
     }
 
-    // Look for asset in system assets folder
-    fs::path sysPath = fs::path(systemAssetsRoot) / relativePath;
-    if (fs::exists(sysPath)) {
-        return sysPath.string();
+    // Probe candidates in order
+    for (const auto& candidate : candidates) {
+        fs::path fullPath = (candidate.root / relativePath).lexically_normal();
+        std::error_code ec;
+        if (fs::exists(fullPath, ec)) {
+            if (!is_contained_under(fullPath, candidate.root)) {
+                searched.push_back(candidate.label + ": " + fullPath.string() + " (outside root)");
+                continue;
+            }
+            return fs::absolute(fullPath).string();
+        }
+        searched.push_back(candidate.label + ": " + fullPath.string());
     }
 
-    // If not found, throw an error
-    throw std::runtime_error("Asset not found: " + relativePath);
+    // Not found — build diagnostic error
+    std::ostringstream oss;
+    oss << "Asset not found: " << relativePath << "\nSearched paths:\n";
+    for (const std::string& s : searched) {
+        oss << "  " << s << "\n";
+    }
+    throw std::runtime_error(oss.str());
 }

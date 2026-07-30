@@ -69,12 +69,7 @@
 (local fs (require :fs))
 (local json (require :json))
 (local appdirs (require :appdirs))
-(local log-dir
-  (or (os.getenv "SPACE_LOG_DIR")
-      (appdirs.user-log-dir "space")))
-(when (and log-dir fs fs.create-dirs)
-  (fs.create-dirs log-dir))
-(local log-path (fs.join-path log-dir "space.log"))
+(local log-path (logging.get-output-path))
 (logging.init {:path log-path})
 (logging.set-level "shader" "warn")
 (logging.set-level "window" "warn")

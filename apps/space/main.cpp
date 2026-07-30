@@ -10,7 +10,9 @@
 
 #include <CLI/CLI.hpp>
 
+#include "asset_manager.h"
 #include "dotenv.h"
+#include "executable_path.h"
 #include "lua_callbacks.h"
 #include "lua_jobs.h"
 #include "lua_keyring.h"
@@ -19,6 +21,7 @@
 #include "lua_engine.h"
 #include "log.h"
 #include "resource_manager.h"
+#include "space_log_path.h"
 #include "cef_runtime.h"
 
 LogConfig LOG_CONFIG = {};
@@ -95,60 +98,62 @@ std::string read_stdin()
     return input;
 }
 
-std::string sibling_path(const std::string& file_path, const std::string& sibling_name)
+int main(int argc, char *argv[])
 {
-    std::filesystem::path executable_path;
-#if defined(__linux__)
-    std::error_code proc_error;
-    executable_path = std::filesystem::read_symlink("/proc/self/exe", proc_error);
-    if (proc_error) {
-        executable_path.clear();
-    }
-#endif
+    // Pre-scan CLI for dotenv flags so SPACE_LOG_DIR from dotenv files
+    // is available to the native log path resolver at startup.
+    bool no_dotenv = false;
+    bool dotenv_override = false;
+    std::string dotenv_path = ".env";
 
-    if (executable_path.empty() && !file_path.empty()) {
-        std::filesystem::path argv_path(file_path);
-        if (argv_path.is_absolute() || argv_path.has_parent_path()) {
-            executable_path = std::filesystem::absolute(argv_path);
-        } else if (const char* path_env = std::getenv("PATH")) {
-            std::string search_path(path_env);
-            size_t start = 0;
-            while (start <= search_path.size()) {
-                size_t end = search_path.find(':', start);
-                std::string dir = search_path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-                if (dir.empty()) {
-                    dir = ".";
-                }
-                std::filesystem::path candidate = std::filesystem::path(dir) / argv_path;
-                if (std::filesystem::exists(candidate)) {
-                    executable_path = std::filesystem::absolute(candidate);
-                    break;
-                }
-                if (end == std::string::npos) {
-                    break;
-                }
-                start = end + 1;
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        // Stop at entry boundaries (matching the real CLI parser) so that
+        // dotenv flags after -c / -m / -- / file entries are not consumed
+        // as global options.
+        if (arg == "--" || arg == "-c" || arg == "-m") {
+            break;
+        }
+        if (arg == "--no-dotenv") {
+            no_dotenv = true;
+        } else if (arg == "--dotenv-override") {
+            dotenv_override = true;
+        } else if (arg == "--dotenv") {
+            if (i + 1 < argc) {
+                dotenv_path = argv[i + 1];
+                i++;
             }
+        } else if (arg.rfind("--dotenv=", 0) == 0) {
+            dotenv_path = arg.substr(9);
+        } else if (!arg.empty() && arg[0] == '-' && arg != "-") {
+            // Other flags — skip (processed by the real parser)
+            continue;
+        } else {
+            // Non-option argument reached (file or "-" for stdin) — stop
+            break;
         }
     }
 
-    if (executable_path.empty()) {
-        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
+    bool dotenv_already_loaded = false;
+    if (!no_dotenv) {
+        dotenv_already_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
     }
-    std::error_code canonical_error;
-    executable_path = std::filesystem::weakly_canonical(executable_path, canonical_error);
-    std::filesystem::path parent = executable_path.parent_path();
-    if (parent.empty()) {
-        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
-    }
-    return std::filesystem::absolute(parent / sibling_name).string();
-}
 
-int main(int argc, char *argv[])
-{
     LOG_CONFIG.reporting_level = Debug;
     LOG_CONFIG.restart = true;
-    log_init(LOG_CONFIG);
+    try {
+        std::filesystem::path logPath = space_log::resolve_log_path();
+        space_log::ensure_log_directory(logPath);
+        LOG_CONFIG.output_path = logPath.string();
+        log_init(LOG_CONFIG);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "error: failed to initialize logging: " << e.what() << "\n";
+        return 1;
+    }
+
+    const std::filesystem::path executablePath = executable_path::resolve(argc > 0 ? argv[0] : nullptr);
+    AssetManager::setExecutablePath(executablePath);
 
 #if defined(SPACE_ENABLE_CEF)
     bool skip_cef = false;
@@ -162,9 +167,6 @@ int main(int argc, char *argv[])
 #endif
 
     bool run_repl = false;
-    bool no_dotenv = false;
-    bool dotenv_override = false;
-    std::string dotenv_path = ".env";
     std::string command_source;
     std::string module_name;
 
@@ -271,11 +273,13 @@ int main(int argc, char *argv[])
         return app.exit(e);
     }
 
-    bool load_dotenv = !no_dotenv;
-    if (load_dotenv) {
-        bool dotenv_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
-        if (!dotenv_loaded && dotenv_path != ".env") {
-            std::cerr << "warning: failed to load dotenv file: " << dotenv_path << "\n";
+    if (!dotenv_already_loaded) {
+        bool load_dotenv = !no_dotenv;
+        if (load_dotenv) {
+            bool dotenv_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
+            if (!dotenv_loaded && dotenv_path != ".env") {
+                std::cerr << "warning: failed to load dotenv file: " << dotenv_path << "\n";
+            }
         }
     }
 
@@ -306,7 +310,8 @@ int main(int argc, char *argv[])
         cef_runtime::Config cef_config;
         cef_config.argc = argc;
         cef_config.argv = argv;
-        cef_config.helper_executable_path = sibling_path(argv[0], "space_cef_helper");
+        cef_config.helper_executable_path =
+            executable_path::sibling(executablePath, "space_cef_helper").string();
         cef_runtime::configure_browser_process(cef_config);
     }
 #endif

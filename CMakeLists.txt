@@ -715,6 +715,7 @@ if(SPACE_ENABLE_CEF)
     add_executable(space_cef_helper
         apps/space/cef_subprocess_main.cpp
         src/cef_runtime.cpp
+        src/executable_path.cpp
     )
     target_include_directories(space_cef_helper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(space_cef_helper PUBLIC SPACE_ENABLE_CEF=1)
@@ -869,6 +870,55 @@ if(WIN32)
 endif()
 add_test(NAME test_realtime_core COMMAND test_realtime_core)
 set_tests_properties(test_realtime_core PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_executable_path
+    tests/test_executable_path.cpp
+    src/executable_path.cpp
+)
+target_include_directories(test_executable_path PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_executable_path COMMAND test_executable_path)
+set_tests_properties(test_executable_path PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_asset_manager
+    tests/test_asset_manager.cpp
+    src/asset_manager.cpp
+    src/appdirs.cpp
+)
+target_include_directories(test_asset_manager PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_asset_manager COMMAND test_asset_manager)
+set_tests_properties(test_asset_manager PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_runtime_asset_discovery_integration
+    tests/test_runtime_asset_discovery_integration.cpp
+)
+add_test(NAME test_runtime_asset_discovery_integration COMMAND test_runtime_asset_discovery_integration)
+set_tests_properties(test_runtime_asset_discovery_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_space_log_path
+    tests/test_space_log_path.cpp
+    src/space_log_path.cpp
+    src/appdirs.cpp
+)
+target_include_directories(test_space_log_path PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_space_log_path COMMAND test_space_log_path)
+set_tests_properties(test_space_log_path PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_native_logging_integration
+    tests/test_native_logging_integration.cpp
+)
+target_include_directories(test_native_logging_integration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_native_logging_integration COMMAND test_native_logging_integration)
+set_tests_properties(test_native_logging_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 

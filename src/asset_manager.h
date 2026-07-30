@@ -1,12 +1,16 @@
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
 
 class AssetManager {
 public:
-    // Find the full path to an asset
     static std::string getAssetPath(const std::string& relativePath);
+    static void setExecutablePath(const std::filesystem::path& executablePath);
+    static void clearExecutablePathForTests();
 
 private:
     static std::string systemAssetsRoot;
+    static std::optional<std::filesystem::path> executablePath;
 };
