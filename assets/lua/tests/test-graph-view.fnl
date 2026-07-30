@@ -4214,7 +4214,7 @@
 
 (local main
   (fn []
-    (local runner (require :tests/runner))
+    (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))})
     (runner.run-tests {:name "graph-view"
                        :tests tests})))
 
