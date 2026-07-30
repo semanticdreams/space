@@ -290,14 +290,16 @@
                                         :bind-address "127.0.0.1:0"
                                         :server-scope "loopback"
                                         :max-clients 1}))
-  (server:start)
-  (local connect-token (server:create-connect-token {:signed-ticket signed
-                                                     :secret "dev-secret"}))
-  (assert (> (# connect-token) 0) "dev ticket output should be accepted by create-connect-token")
-  (local client (service:create-client {:registry registry
-                                        :bind-address "127.0.0.1:0"}))
-  (with-cleanup [client server]
+  (local handles [server])
+  (with-cleanup handles
     (fn []
+      (server:start)
+      (local connect-token (server:create-connect-token {:signed-ticket signed
+                                                         :secret "dev-secret"}))
+      (assert (> (# connect-token) 0) "dev ticket output should be accepted by create-connect-token")
+      (local client (service:create-client {:registry registry
+                                            :bind-address "127.0.0.1:0"}))
+      (table.insert handles client)
       (expect-running-server-guards server client connect-token signed issued-at expires-at)))
   (local wildcard-server
     (service:create-server {:registry registry
