@@ -1,5 +1,10 @@
 (local fennel (require :fennel))
 
+;; Snapshot _G.app existence before the global form creates/uses it.
+;; If _G.app was nil, restore it to nil after setup so the module
+;; does not permanently create a global that didn't exist before.
+(local app-existed-before (not (= nil _G.app)))
+
 ;; Module-level: only safe globals that don't need restore.
 (global app (or _G.app {}))
 (set app.themes {:get-active-theme (fn [] {:font "default-font"
@@ -58,11 +63,12 @@
   ;; If a require throws, the wrapper's pcall restores both keys immediately.
   (with-restored-app-fields [:package.loaded.textures :engine]
     (fn []
-      ;; Ensure app.engine exists before mocking get-asset-path
-      (if (not _G.app.engine)
-          (tset _G.app :engine {}))
-      (tset _G.app.engine :get-asset-path
-            (fn [path] (.. (os.getenv "SPACE_ASSETS_PATH") "/" path)))
+      ;; Create a FRESH engine table — never mutate a pre-existing one.
+      ;; The wrapper replaces the engine container entirely, so the old
+      ;; engine reference (or nil) is saved and properly restored on exit.
+      (tset _G.app :engine
+            {:get-asset-path
+             (fn [path] (.. (os.getenv "SPACE_ASSETS_PATH") "/" path))})
 
       ;; Mock textures while loading icon widgets
       (tset package.loaded :textures
@@ -77,6 +83,12 @@
 
 ;; Destructure the returned module table
 (local modules (setup-icons))
+
+;; If _G.app did not exist before module loading, restore it to nil.
+;; The local `app` variable still holds the table reference for themes.
+(when (not app-existed-before)
+  (tset _G :app nil))
+
 (local Icons (. modules 1))
 (local Icon (. modules 2))
 (local Button (. modules 3))
@@ -128,25 +140,33 @@
   (print "test-icon-widget-render passed"))
 
 (fn main []
-  ;; Set up app.engine.get-asset-path mock for test execution
-  ;; (Icons() calls parse-codepoints which reads the codepoints file).
-  ;; Snapshot and restore app.engine container so cleanup is guaranteed
-  ;; even if tests fail.
+  ;; Snapshot _G.app existence and engine state before mocking.
+  (local app-existed-main (not (= nil _G.app)))
   (local prev-engine (and _G.app _G.app.engine))
-  (if (not _G.app.engine)
-      (tset _G.app :engine {}))
-  (tset _G.app.engine :get-asset-path
-        (fn [path] (.. (os.getenv "SPACE_ASSETS_PATH") "/" path)))
+
+  ;; Ensure _G.app exists for test execution.
+  (when (not app-existed-main)
+    (tset _G :app {}))
+
+  ;; Create a FRESH engine table — never mutate a pre-existing one.
+  ;; The restore below replaces the entire container, so the old
+  ;; engine (or nil) is preserved without leaking mock mutations.
+  (tset _G.app :engine
+        {:get-asset-path
+         (fn [path] (.. (os.getenv "SPACE_ASSETS_PATH") "/" path))})
 
   (local (ok err) (pcall (fn []
     (test-icons-resolve)
     (test-icon-widget-render)
     (print "All icon tests passed."))))
 
-  ;; Always restore engine state, even if tests failed.
-  ;; Restoring the container also restores the original get-asset-path.
+  ;; Always restore state, even if tests failed.
+  ;; Restore engine to its pre-main value (nil or original table ref).
   (if _G.app
       (tset _G.app :engine prev-engine))
+  ;; If _G.app was created solely for this test run, remove it.
+  (when (not app-existed-main)
+    (tset _G :app nil))
 
   ;; Re-raise any test error after cleanup
   (if (not ok) (error err)))
