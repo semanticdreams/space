@@ -37,15 +37,24 @@
   (logging.set-level "mcp" original-mcp-level))
 
 (fn logging-get-level-reads-existing-named-logger-after-default-change []
-  (local name "untracked-existing-logger")
-  (local logger (logging.get name))
-  (logger.debug "create untracked existing logger")
   (local original-default-level (logging.get-level "space"))
-  (local original-named-level (logging.get-level name))
-  (logging.set-level "error")
-  (assert (= (logging.get-level name) original-named-level)
-          "get-level should report existing named logger threshold, not current default")
-  (logging.set-level original-default-level))
+  (local name "untracked-existing-logger")
+  (local (ok err)
+         (pcall
+           (fn []
+             (assert (logging.set-level "info") "test precondition should set default level to info")
+             (local logger (logging.get name))
+             (logger.debug "create untracked existing logger")
+             (assert (= (logging.get-level name) "info")
+                     "test precondition should create the named logger at the info threshold")
+             (assert (logging.set-level "error") "test should change default level to error")
+             (assert (= (logging.get-level "space") "error")
+                     "test precondition should change the top-level logger level")
+             (assert (= (logging.get-level name) "info")
+                     "get-level should report existing named logger threshold, not current default"))))
+  (logging.set-level original-default-level)
+  (when (not ok)
+    (error err)))
 
 (fn logging-get-named-logger []
   (local logger (logging.get "graph"))
