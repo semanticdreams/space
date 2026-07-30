@@ -7,6 +7,7 @@
   (io.flush))
 
 (fn run-headless-callback-dispatch-test []
+  (local prev-app app)
   (global app {})
   (set app.testing true)
   (local prev-engine app.engine)
@@ -60,9 +61,11 @@
     (callbacks.unregister callback-id))
   (app.engine:shutdown)
   (set app.engine prev-engine)
+  (global app prev-app)
   (assert ok err))
 
 (fn run-headless-zero-fps-idle-test []
+  (local prev-app app)
   (global app {})
   (set app.testing true)
   (local prev-engine app.engine)
@@ -108,9 +111,11 @@
     (callbacks.unregister callback-id))
   (app.engine:shutdown)
   (set app.engine prev-engine)
+  (global app prev-app)
   (assert ok err))
 
 (fn run-headless-zero-fps-request-frame-test []
+  (local prev-app app)
   (global app {})
   (set app.testing true)
   (local prev-engine app.engine)
@@ -156,6 +161,7 @@
     (callbacks.unregister callback-id))
   (app.engine:shutdown)
   (set app.engine prev-engine)
+  (global app prev-app)
   (assert ok err))
 
 (local main
