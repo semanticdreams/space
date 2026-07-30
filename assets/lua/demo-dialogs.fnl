@@ -80,7 +80,7 @@
 (fn new-object-browser-dialog [opts]
   (local options (or opts {}))
   (local browser
-    (ObjectBrowser {:target (or app.engine {})
+    (ObjectBrowser {:target (assert app.engine "DemoDialogs.new-object-browser-dialog requires app.engine")
                     :name "space-browser"
                     :items-per-page 8
                     :item-padding [0.5 0.45]
@@ -198,7 +198,7 @@
     :builder (dialog-padding (new-fs-dialog))}
    {:key :object-browser
     :label "Object Browser"
-    :builder (dialog-padding (new-object-browser-dialog))}
+    :builder (fn [ctx runtime-opts] ((dialog-padding (new-object-browser-dialog)) ctx runtime-opts))}
    {:key :mission-log
     :label "Mission Log Inputs"
     :builder (dialog-padding (new-input-dialog))}])
