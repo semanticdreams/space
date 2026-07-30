@@ -240,33 +240,59 @@
            (when cube-c.drop (cube-c:drop))
            (when cube-d.drop (cube-d:drop)))})
 
-(fn render-light-setup [ctx name lights opts]
-  (local options (or opts {}))
-  (set app.lights lights)
-  (local camera (Camera {:position (glm.vec3 0 14 34)}))
-  (local base-center (glm.vec3 0 -6 -26))
-  (local center (+ base-center (or options.scene-offset (glm.vec3 0 0 0))))
-  (camera:look-at center)
+(fn cleanup-light-resources [resources]
+  (when resources.target
+    (Harness.cleanup-target resources.target))
+  (when resources.camera
+    (resources.camera:drop)))
+
+(fn normalize-first-directional-light [lights]
   (local dir-lights (lights:get-directional))
   (when (> (length dir-lights) 0)
     (local dir (glm.normalize (. (. dir-lights 1) :direction)))
-    (tset (. dir-lights 1) :direction dir))
-  (local target
-    (Harness.make-scene-target {:builder (fn [child-ctx]
-                                           (build-scene-element
-                                             child-ctx
-                                             {:texture options.texture
-                                              :rotation options.rotation
-                                              :scene-offset options.scene-offset}))
-                                :lighting-view-state (LightingViewState.perspective camera.position)
-                                :view-matrix (camera:get-view-matrix)}))
-  (Harness.draw-targets ctx.width ctx.height [{:target target}])
+    (tset (. dir-lights 1) :direction dir)))
+
+(fn make-lighting-target [camera options]
+  (local scene-offset options.scene-offset)
+  (Harness.make-scene-target {:builder (fn [child-ctx]
+                                          (build-scene-element
+                                            child-ctx
+                                            {:texture options.texture
+                                             :rotation options.rotation
+                                             :scene-offset scene-offset}))
+                               :lighting-view-state (LightingViewState.perspective camera.position)
+                               :view-matrix (camera:get-view-matrix)}))
+
+(fn render-light-setup-body [ctx name lights options resources]
+  (set resources.camera (Camera {:position (glm.vec3 0 14 34)}))
+  (local base-center (glm.vec3 0 -6 -26))
+  (local center (+ base-center options.scene-offset))
+  (resources.camera:look-at center)
+  (normalize-first-directional-light lights)
+  (set resources.target (make-lighting-target resources.camera options))
+  (Harness.draw-targets ctx.width ctx.height [{:target resources.target}])
   (Harness.capture-snapshot {:name name
                              :width ctx.width
                              :height ctx.height
-                             :tolerance 2})
-  (Harness.cleanup-target target)
-  (camera:drop))
+                             :tolerance 2}))
+
+(fn render-light-setup [ctx name lights opts]
+  (local options
+    (if opts
+        {:texture opts.texture
+         :rotation opts.rotation
+         :scene-offset (if opts.scene-offset opts.scene-offset (glm.vec3 0 0 0))}
+        {:scene-offset (glm.vec3 0 0 0)}))
+  (local original-lights app.lights)
+  (set app.lights lights)
+  (local resources {})
+  (local (ok result) (pcall render-light-setup-body ctx name lights options resources))
+  (local (cleanup-ok cleanup-err) (pcall cleanup-light-resources resources))
+  (set app.lights original-lights)
+  (when (not ok)
+    (error result))
+  (when (not cleanup-ok)
+    (error cleanup-err)))
 
 (fn run [ctx]
   (local ambient-only
