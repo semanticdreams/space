@@ -882,6 +882,17 @@ set_tests_properties(test_executable_path PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_asset_manager
+    tests/test_asset_manager.cpp
+    src/asset_manager.cpp
+    src/appdirs.cpp
+)
+target_include_directories(test_asset_manager PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_asset_manager COMMAND test_asset_manager)
+set_tests_properties(test_asset_manager PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 
