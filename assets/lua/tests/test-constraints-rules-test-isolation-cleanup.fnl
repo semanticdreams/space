@@ -279,10 +279,28 @@
   (assert result "C16: unrelated child mutation should not be covered by Main.init pcall")
   (assert (> (length result) 0) "C16: should have at least one diagnostic"))
 
+(fn mutation-restoration-flags-duplicate-unrelated-child-mutation []
+  (local rule (get-test-isolation-rule))
+  (local child-form "(fn []\n         (set app.renderers (make-renderer-stub))\n         app.renderers)")
+  (local parent-form "(fn setup-scene []\n  (local snap app.renderers)\n  (set AppBootstrap.init-renderers\n       (fn []\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (set unrelated-callback\n       (fn []\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (local (ok result) (pcall (fn [] (Main.init))))\n  (set app.renderers snap)\n  (if ok result (error result)))")
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 620
+                                             :form parent-form}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 8 :length 90
+                                             :form child-form}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 17 :column 8 :length 90
+                                             :form child-form}]
+                              :mutations [{:op :set :path ["app" "renderers"] :line 18 :column 10
+                                           :form "(set app.renderers (make-renderer-stub))" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C17: duplicate unrelated child mutation should not borrow first AppBootstrap assignment")
+  (assert (> (length result) 0) "C17: should have at least one diagnostic"))
+
 (table.insert tests {:name "C13 allows parent pcall restoring child mutation" :fn mutation-restoration-allows-parent-pcall-restoring-child-mutation})
 (table.insert tests {:name "C14 flags unrelated parent pcall" :fn mutation-restoration-flags-child-mutation-with-unrelated-parent-pcall})
 (table.insert tests {:name "C15 flags child call before parent pcall" :fn mutation-restoration-flags-child-mutation-called-before-parent-pcall})
 (table.insert tests {:name "C16 flags unrelated child with Main.init pcall" :fn mutation-restoration-flags-unrelated-child-mutation-with-main-init-pcall})
+(table.insert tests {:name "C17 flags duplicate unrelated child with earlier AppBootstrap callback" :fn mutation-restoration-flags-duplicate-unrelated-child-mutation})
 
 (local main
   (fn []

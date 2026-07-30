@@ -808,9 +808,10 @@
 
 (set cleanup-helpers
      (h.make-helpers {:find-containing-fn-defs find-containing-fn-defs :find-snapshot-var find-snapshot-var
-                      :escape-pattern escape-pattern :find-all-pcall-fn-ranges find-all-pcall-fn-ranges
-                      :find-all-pcall-call-spans find-all-pcall-call-spans
-                      :has-restore-after-byte-for-var? has-restore-after-byte-for-var?}))
+                       :escape-pattern escape-pattern :find-all-pcall-fn-ranges find-all-pcall-fn-ranges
+                       :find-all-pcall-call-spans find-all-pcall-call-spans
+                       :has-restore-after-byte-for-var? has-restore-after-byte-for-var?
+                       :find-mutation-approx-byte find-mutation-approx-byte}))
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
 (fn build-mutation-group-key [mutation ff]
@@ -1142,7 +1143,7 @@
     (when (check-parent-pcall-restoration ff fn-def-line anon-def-col path-text path-segments max-line)
       (set has-restoration true)))
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
-    (when (cleanup-helpers.check-parent-child-mutation-pcall-restoration ff fn-form fn-def-line anon-def-col path-segments)
+    (when (cleanup-helpers.check-parent-child-mutation-pcall-restoration ff fn-form fn-def-line anon-def-col path-segments max-line max-col)
       (set has-restoration true)))
   ;; Parent-snapshot child-restore: nested fn restoring parent snapshot
   (when (and (not has-restoration) fn-form fn-def-line (cleanup-helpers.check-parent-snapshot-child-restore ff fn-form fn-name fn-def-line path-text))

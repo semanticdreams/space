@@ -3,6 +3,56 @@
 
 (local M {})
 
+(fn find-actual-child-occurrence [find-line-byte parent-form parent-line child-fn-form child-fn-line child-fn-col mutation-line mutation-col]
+  (local child-byte (+ (find-line-byte parent-form parent-line child-fn-line)
+                       (math.max 0 (- (if child-fn-col child-fn-col 1) 1))))
+  (local mutation-byte (+ (find-line-byte parent-form parent-line mutation-line)
+                          (math.max 0 (- (if mutation-col mutation-col 1) 1))))
+  (var containing nil)
+  (var search-start 1)
+  (while search-start
+    (local start-byte (string.find parent-form child-fn-form search-start true))
+    (if (not start-byte)
+        (set search-start nil)
+        (do
+          (local end-byte (+ start-byte (length child-fn-form) -1))
+          (when (= start-byte child-byte) (lua "return start_byte"))
+          (when (and (not containing) (<= start-byte mutation-byte) (<= mutation-byte end-byte))
+            (set containing start-byte))
+          (set search-start (+ start-byte 1)))))
+  containing)
+
+(fn check-parent-child-mutation-pcall-restoration* [deps ff child-fn-form child-fn-line anon-def-col path-segments mutation-line mutation-col]
+  (local containing (deps.find-containing-fn-defs ff.definitions child-fn-line anon-def-col))
+  (when (<= (length containing) 1) (lua "return false"))
+  (local parent (. containing 2))
+  (when (not (and parent.form parent.line child-fn-form)) (lua "return false"))
+  (local child-start (find-actual-child-occurrence deps.find-mutation-approx-byte parent.form parent.line child-fn-form child-fn-line anon-def-col mutation-line mutation-col))
+  (when (not child-start) (lua "return false"))
+  (local child-end (+ child-start (length child-fn-form) -1))
+  (local before-child (parent.form:sub 1 (- child-start 1)))
+  (local snap-var (deps.find-snapshot-var before-child path-segments))
+  (when (not snap-var) (lua "return false"))
+  (local assigned-init-renderers? (string.find before-child "%(set%s+AppBootstrap%.init%-renderers%s*$" 1 false))
+  (when (not assigned-init-renderers?) (lua "return false"))
+  (var restored false)
+  (local pcall-ranges (deps.find-all-pcall-fn-ranges parent.form))
+  (local call-spans (deps.find-all-pcall-call-spans parent.form pcall-ranges))
+  (each [i span (ipairs call-spans)]
+    (when (and (not restored) (> span.call-start child-start))
+      (local between (parent.form:sub (+ child-end 1) (- span.call-start 1)))
+      (local range (. pcall-ranges i))
+      (local body (if range (parent.form:sub range.fn-start range.fn-end) ""))
+      (local main-init? (if (string.find body "Main.init" 1 true) true
+                            (string.find body "Main :init" 1 true) true
+                            (string.find body "Main:init" 1 true) true
+                            false))
+      (when (and (not (string.find between "init-renderers" 1 true))
+                 main-init?
+                 (deps.has-restore-after-byte-for-var? parent.form path-segments snap-var span.call-end))
+        (set restored true))))
+  restored)
+
 (tset M :make-helpers
   (fn [deps]
     "Create cleanup helpers with injected dependencies from parent module."
@@ -14,7 +64,6 @@
     (local has-restore-after-byte-for-var? deps.has-restore-after-byte-for-var?)
 
     (fn find-matching-close [text open-pos]
-      "Find matching close paren for an opener at open-pos. Returns byte or nil."
       (local open-ch (text:sub open-pos open-pos))
       (local close-ch (if (= open-ch "(") ")" (= open-ch "[") "]" (= open-ch "{") "}"))
       (if (not close-ch) nil
@@ -33,10 +82,6 @@
             result)))
 
     (fn blank-nested-scope-forms [text]
-      "Replace nested (fn ...), (lambda ...), and (λ ...) form bodies
-       with whitespace so sibling-scope locals are not misread as
-       parent-scope snapshots. The first scope form at position 1
-       is the parent header — skip it."
       (var result text)
       (var search-pos 1)
       ;; Patterns to match, with their byte-length skip values.
@@ -123,41 +168,8 @@
                 (set all-restore false))))))
       all-restore)
 
-    (fn check-parent-child-mutation-pcall-restoration [ff child-fn-form child-fn-line anon-def-col path-segments]
-      "Check a child callback that mutates a sensitive app field while the parent
-       test function snapshots the field before defining the callback, runs the
-       body under pcall, then restores the same snapshot after the pcall."
-      (local containing (find-containing-fn-defs ff.definitions child-fn-line anon-def-col))
-      (if (<= (length containing) 1) false
-          (do
-            (local parent (. containing 2))
-            (if (not (and parent.form parent.line child-fn-form)) false
-                (do
-                  (local child-start (string.find parent.form child-fn-form 1 true))
-                  (if (not child-start) false
-                      (do
-                        (local child-end (+ child-start (length child-fn-form) -1))
-                        (local before-child (parent.form:sub 1 (- child-start 1)))
-                        (local snap-var (find-snapshot-var before-child path-segments))
-                        (if (not snap-var) false
-                            (do
-                              (var restored false)
-                              (local assigned-init-renderers?
-                                (string.find before-child "%(set%s+AppBootstrap%.init%-renderers%s*$" 1 false))
-                              (local pcall-ranges (find-all-pcall-fn-ranges parent.form))
-                              (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
-                              (each [i span (ipairs call-spans)]
-                                (when (and (not restored) assigned-init-renderers? (> span.call-start child-start))
-                                  (local between (parent.form:sub (+ child-end 1) (- span.call-start 1)))
-                                  (local range (. pcall-ranges i))
-                                  (local body (if range (parent.form:sub range.fn-start range.fn-end) ""))
-                                  (when (and (not (string.find between "init-renderers" 1 true))
-                                             (or (string.find body "Main.init" 1 true)
-                                                 (string.find body "Main :init" 1 true)
-                                                 (string.find body "Main:init" 1 true))
-                                             (has-restore-after-byte-for-var? parent.form path-segments snap-var span.call-end))
-                                    (set restored true))))
-                              restored)))))))))
+    (fn check-parent-child-mutation-pcall-restoration [ff child-fn-form child-fn-line anon-def-col path-segments mutation-line mutation-col]
+      (check-parent-child-mutation-pcall-restoration* deps ff child-fn-form child-fn-line anon-def-col path-segments mutation-line mutation-col))
 
     {:check-parent-snapshot-child-restore check-parent-snapshot-child-restore
      :check-parent-child-mutation-pcall-restoration check-parent-child-mutation-pcall-restoration}))
