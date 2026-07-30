@@ -81,13 +81,16 @@
       ;; Return loaded modules as a sequential table
       [icons icon button])))
 
-;; Destructure the returned module table
-(local modules (setup-icons))
-
-;; If _G.app did not exist before module loading, restore it to nil.
-;; The local `app` variable still holds the table reference for themes.
+(local (ok modules) (pcall setup-icons))
+;; Wrap setup-icons in pcall so _G.app cleanup always runs,
+;; even when setup throws during module loading.
+;; The wrapper inside setup-icons already restores package.loaded.textures
+;; and app.engine on error; this outer pcall ensures _G.app itself is
+;; also cleaned up.
 (when (not app-existed-before)
   (tset _G :app nil))
+(if (not ok)
+    (error modules))
 
 (local Icons (. modules 1))
 (local Icon (. modules 2))
