@@ -368,7 +368,7 @@
     (when (and (not found) (callee-is-drop-method? call.callee))
       (set found true)))
   (each [_ call (ipairs (or ff.calls []))]
-    (when (and (not found) (or (. child-cleanup-calrees call.callee) (. child-cleanup-calrees call.method)))
+    (when (and (not found) (or (. child-cleanup-calrees call.callee) (and call.callee (string.find call.callee ":" 1 true) (. child-cleanup-calrees call.method))))
       (set found true)))
   found)
 

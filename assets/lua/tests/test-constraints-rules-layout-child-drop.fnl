@@ -872,6 +872,40 @@
       (set found-missing-cleanup true)))
   (assert found-missing-cleanup "should still flag missing child drop evidence"))
 
+;; R1-1: dotted cleanup-like call is not colon method cleanup evidence
+(fn child-drop-flags-dotted-cleanup-like-call []
+  "A valid public drop path with only a dotted metrics.drop-children call
+  should still report missing child cleanup evidence."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "drop"
+                                             :top-level? true
+                                             :line 20 :column 1
+                                             :length 80
+                                             :form "(fn drop [self]
+  (metrics.drop-children))"}]
+                              :accesses [{:path ["self" "children"]
+                                          :text "self.children"
+                                          :line 10 :column 1
+                                          :form "self.children"}]
+                              :calls [{:callee "metrics.drop-children"
+                                       :receiver "metrics" :method "drop-children"
+                                       :line 21 :column 1
+                                       :form "(metrics.drop-children)"
+                                       :enclosing-fn "drop"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "dotted cleanup-like call should not satisfy child cleanup")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should flag missing cleanup for dotted cleanup-like call"))
+
 ;; R9-3: valid public drop path but missing cleanup evidence
 (fn child-drop-flags-missing-cleanup-with-returned-drop []
   "A file with valid returned :drop but no :drop/clear-children/drop-children
@@ -1033,6 +1067,8 @@
                      :fn child-drop-allows-method-drop-children-cleanup})
 (table.insert tests {:name "child-drop still flags public drop without cleanup"
                      :fn child-drop-still-flags-public-drop-without-cleanup})
+(table.insert tests {:name "child-drop flags dotted cleanup-like call"
+                     :fn child-drop-flags-dotted-cleanup-like-call})
 ;; R9-3: valid :drop but missing cleanup
 (table.insert tests {:name "child-drop flags missing cleanup with returned drop"
                      :fn child-drop-flags-missing-cleanup-with-returned-drop})
