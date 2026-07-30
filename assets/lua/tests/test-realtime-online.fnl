@@ -62,8 +62,13 @@
     (handle:close)))
 
 (fn cleanup-handles [handles]
+  (var first-error nil)
   (each [_ handle (ipairs handles)]
-    (cleanup handle)))
+    (local (ok result) (pcall cleanup handle))
+    (when (and (not ok) (not first-error))
+      (set first-error result)))
+  (when first-error
+    (error first-error)))
 
 (fn with-cleanup [handles body]
   (local (ok result) (pcall body))
