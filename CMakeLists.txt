@@ -872,6 +872,16 @@ set_tests_properties(test_realtime_core PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_executable_path
+    tests/test_executable_path.cpp
+    src/executable_path.cpp
+)
+target_include_directories(test_executable_path PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_executable_path COMMAND test_executable_path)
+set_tests_properties(test_executable_path PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 
