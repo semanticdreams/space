@@ -153,6 +153,26 @@ bool set_level_for_logger(const std::string& name, const std::string& level)
     return true;
 }
 
+std::string level_to_string(LogLevel level)
+{
+    switch (level) {
+        case Debug:
+            return "debug";
+        case Info:
+            return "info";
+        case Warning:
+            return "warn";
+        case Error:
+            return "error";
+    }
+    return "info";
+}
+
+std::string get_level_for_logger(const std::string& name)
+{
+    return level_to_string(log_get_level_for(name));
+}
+
 LogConfig parse_config(sol::object options)
 {
     LogConfig config;
@@ -198,6 +218,9 @@ sol::table create_logger_table(sol::this_state state, const std::string& name)
     table.set_function("set-level", [name](const std::string& level) {
         return set_level_for_logger(name, level);
     });
+    table.set_function("get-level", [name]() {
+        return get_level_for_logger(name);
+    });
     table.set_function("flush", []() {
         log_flush();
     });
@@ -231,6 +254,7 @@ void lua_bind_logging(sol::state& lua)
             &set_level_from_string,
             &set_level_for_logger
         ));
+        logging_table.set_function("get-level", &get_level_for_logger);
         logging_table.set_function("get", [](sol::this_state ts, const std::string& name) {
             return create_logger_table(ts, name);
         });

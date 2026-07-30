@@ -34,6 +34,7 @@ void log_init(const LogConfig& config);
 void log_shutdown();
 void log_set_level(LogLevel level);
 void log_set_level_for(const std::string& name, LogLevel level);
+LogLevel log_get_level_for(const std::string& name);
 bool log_should_log(const std::string& name, LogLevel level);
 void log_write(LogLevel level, const std::string& message);
 void log_write_named(const std::string& name, LogLevel level, const std::string& message);
