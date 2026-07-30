@@ -152,27 +152,27 @@
   stub)
 
 (fn with-pointer-stubs [body]
-  (local clickables (make-clickables-stub))
-  (local hoverables (make-hoverables-stub))
-  (local cursors (make-system-cursors-stub))
+  (local clickables (assert (make-clickables-stub) "external-editor pointer stubs require clickables"))
+  (local hoverables (assert (make-hoverables-stub) "external-editor pointer stubs require hoverables"))
+  (local cursors (assert (make-system-cursors-stub) "external-editor pointer stubs require system cursors"))
   (local (ok result) (pcall body {:clickables clickables
-                                  :hoverables hoverables
-                                  :cursors cursors}))
+                                   :hoverables hoverables
+                                   :cursors cursors}))
   (if ok
       result
       (error result)))
 
 (fn make-focus-build-ctx [opts]
-  (local options (or opts {}))
+  (local options (assert opts "external-editor focus build context requires pointer stubs"))
   (local manager (FocusManager {:root-name "external-editor-test"}))
   (local root (manager:get-root-scope))
   (local scope (manager:create-scope {:name "input-scope"}))
   (manager:attach scope root)
   {:ctx (BuildContext {:focus-manager manager
-                       :focus-scope scope
-                       :clickables options.clickables
-                       :hoverables options.hoverables
-                       :system-cursors options.cursors})
+                        :focus-scope scope
+                        :clickables (assert options.clickables "external-editor focus build context requires clickables")
+                        :hoverables (assert options.hoverables "external-editor focus build context requires hoverables")
+                        :system-cursors (assert options.cursors "external-editor focus build context requires system cursors")})
    :manager manager})
 
 (fn input-double-click-external-editor-strips-eof-newline []

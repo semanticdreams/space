@@ -100,8 +100,8 @@
   (set app.scene saved.scene)
   (set app.hud saved.hud)
   (set app.layout-root saved.layout-root)
-  (set app.clickables saved.clickables)
-  (set app.hoverables saved.hoverables)
+  (set app.clickables (assert saved.clickables "panel-transfer restore requires saved clickables"))
+  (set app.hoverables (assert saved.hoverables "panel-transfer restore requires saved hoverables"))
   (set app.movables saved.movables)
   (set app.resizables saved.resizables)
   (set app.intersectables saved.intersectables)
@@ -147,16 +147,16 @@
   stub)
 
 (fn setup-app-stubs []
-  (set app.clickables
+  (set app.clickables (assert
        {:register (fn [_self] nil)
         :unregister (fn [_self] nil)
         :register-right-click (fn [_self] nil)
         :unregister-right-click (fn [_self] nil)
         :register-double-click (fn [_self] nil)
-        :unregister-double-click (fn [_self] nil)})
-  (set app.hoverables
+        :unregister-double-click (fn [_self] nil)} "panel-transfer setup requires app.clickables"))
+  (set app.hoverables (assert
        {:register (fn [_self] nil)
-        :unregister (fn [_self] nil)})
+        :unregister (fn [_self] nil)} "panel-transfer setup requires app.hoverables"))
   (set app.movables (make-stub-movables))
   (set app.resizables (make-stub-resizables))
   (set app.intersectables (make-stub-intersectables))

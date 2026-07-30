@@ -39,7 +39,7 @@
 
 (fn find-clickable-by-label [label]
   (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs (assert (. (assert app.clickables "drawing workflow e2e requires app.clickables") :left-click-objects) "drawing workflow e2e requires left-click objects"))]
     (when (and (not resolved)
                (= (clickable-label obj) label))
       (set resolved obj)))
@@ -47,7 +47,7 @@
 
 (fn find-clickable-by-icon [icon]
   (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (each [_ obj (ipairs (assert (. (assert app.clickables "drawing workflow e2e requires app.clickables") :left-click-objects) "drawing workflow e2e requires left-click objects"))]
     (when (and (not resolved)
                obj
                (= obj.icon icon))

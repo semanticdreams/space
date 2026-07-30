@@ -92,27 +92,27 @@
   stub)
 
 (fn with-pointer-stubs [body]
-  (local clickables (make-clickables-stub))
-  (local hoverables (make-hoverables-stub))
-  (local cursors (make-system-cursors-stub))
-  (let [(ok result) (pcall body {:clickables clickables
-                                 :hoverables hoverables
-                                 :cursors cursors})]
-    (when (not ok)
-      (error result))
-    result))
+  (local clickables (assert (make-clickables-stub) "input pointer stubs require clickables"))
+  (local hoverables (assert (make-hoverables-stub) "input pointer stubs require hoverables"))
+  (local cursors (assert (make-system-cursors-stub) "input pointer stubs require system cursors"))
+  (local (ok result) (pcall body {:clickables clickables
+                                  :hoverables hoverables
+                                  :cursors cursors}))
+  (when (not ok)
+    (error result))
+  result)
 
 (fn make-focus-build-ctx [opts]
-  (local options (or opts {}))
+  (local options (assert opts "input focus build context requires pointer stubs"))
   (local manager (FocusManager {:root-name "input-test"}))
   (local root (manager:get-root-scope))
   (local scope (manager:create-scope {:name "input-scope"}))
   (manager:attach scope root)
   {:ctx (BuildContext {:focus-manager manager
-                           :focus-scope scope
-                           :clickables options.clickables
-                           :hoverables options.hoverables
-                           :system-cursors options.cursors})
+                            :focus-scope scope
+                            :clickables (assert options.clickables "input focus build context requires clickables")
+                            :hoverables (assert options.hoverables "input focus build context requires hoverables")
+                            :system-cursors (assert options.cursors "input focus build context requires system cursors")})
    :manager manager})
 
 (fn make-first-person-stub []
