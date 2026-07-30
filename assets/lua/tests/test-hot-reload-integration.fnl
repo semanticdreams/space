@@ -26,26 +26,25 @@
   (set (. package.loaded "main") nil)
   (require :main))
 
-(fn install-renderer-stub! []
-  (var skybox-state {})
-  (var background-state {})
-  (set app.renderers {:skybox {:set-state (fn [_self state]
-                                            (set skybox-state state)
-                                            true)
-                               :get-state (fn [_self]
-                                            skybox-state)}
-                      :set-background-state (fn [_self state]
-                                              (set background-state state)
-                                              true)
-                      :get-background-state (fn [_self]
-                                               background-state)
-                      :apply-theme (fn [_self _theme] true)
-                      :prerender-sub-apps (fn [_self] true)
-                      :draw-target (fn [_self _target _opts] true)
-                      :update (fn [_self] true)
-                      :on-viewport-changed (fn [_self _viewport] true)
-                      :drop (fn [_self] true)})
-  app.renderers)
+(fn make-renderer-stub []
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (var background-state {:enabled? false :color [0.5 0.5 0.5] :texture nil})
+  {:skybox {:set-state (fn [_self state]
+                          (set skybox-state state)
+                          true)
+            :get-state (fn [_self]
+                         skybox-state)}
+   :set-background-state (fn [_self state]
+                           (set background-state state)
+                           true)
+   :get-background-state (fn [_self]
+                            background-state)
+   :apply-theme (fn [_self _theme] true)
+   :prerender-sub-apps (fn [_self] true)
+   :draw-target (fn [_self _target _opts] true)
+   :update (fn [_self] true)
+   :on-viewport-changed (fn [_self _viewport] true)
+   :drop (fn [_self] true)})
 
 (fn with-temp-dir [f]
   (local handle (tempfile.TemporaryDirectory {:prefix "units-test-"}))
@@ -75,13 +74,17 @@
       (local Main (require-main!))
       (local DebugLog (require :debug-log))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local original-config app.hot-reload-config)
       (local original-controller app.hot-reload-controller)
       (local original-worlds-dir app.worlds-dir)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (set app.hot-reload-controller nil)
       (set app.hot-reload-config {:enabled true
                                   :watch-paths [watch-root]
@@ -136,6 +139,7 @@
         (set app.hot-reload-controller nil))
       (when (= (type (. (require :main) :drop)) :function)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (set app.hot-reload-controller original-controller)
@@ -149,10 +153,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local original-config app.hot-reload-config)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (set app.hot-reload-config {:enabled true
                                   :watch-paths [(fs.join-path runtime.assets-path "lua")]
                                   :preserve-modules ["app-bootstrap"
@@ -178,6 +186,7 @@
                  app.engine)
         (pcall (fn [] (Main.drop)))
         (restore-test-runner-app-services!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (if ok
@@ -189,9 +198,13 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -216,6 +229,7 @@
             true)))
       (when (= (type (. (require :main) :drop)) :function)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -226,9 +240,13 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -281,6 +299,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -291,10 +310,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -360,6 +383,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -370,9 +394,13 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -449,6 +477,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -459,10 +488,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -536,6 +569,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -546,10 +580,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -598,6 +636,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -608,10 +647,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -662,6 +705,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -672,10 +716,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -734,6 +782,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -744,10 +793,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -802,6 +855,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -812,9 +866,13 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -838,6 +896,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -848,10 +907,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -905,6 +968,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -913,9 +977,13 @@
 (fn unloading-active-drawing-activity-updates-shell-state []
   (local Main (require-main!))
   (local original-init-renderers AppBootstrap.init-renderers)
+  (local original-renderers app.renderers)
   (set AppBootstrap.init-renderers
-       (fn [_opts]
-         (install-renderer-stub!)))
+       (fn [opts]
+         (rawset app :renderers (make-renderer-stub))
+         (when (and app.renderers opts.viewport)
+           (app.renderers:on-viewport-changed opts.viewport))
+         app.renderers))
   (local (ok result)
     (pcall
       (fn []
@@ -941,6 +1009,7 @@
   (when (and (= (type (. (require :main) :drop)) :function)
              app.engine)
     (drop-main-and-restore-test-fixture!))
+  (set app.renderers original-renderers)
   (set AppBootstrap.init-renderers original-init-renderers)
   (if ok
       result
@@ -951,10 +1020,14 @@
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (rawset app :renderers (make-renderer-stub))
+             (when (and app.renderers opts.viewport)
+               (app.renderers:on-viewport-changed opts.viewport))
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -1002,6 +1075,7 @@
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
         (drop-main-and-restore-test-fixture!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result

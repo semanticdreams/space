@@ -17,12 +17,10 @@
 
 (local tests [])
 
-(local ensure-renderers
-  (fn []
-    (set app.renderers {:update (fn [_] nil)
-                          :on-viewport-changed (fn [_ _] nil)
-                          :drop (fn [_] nil)})
-    app.renderers))
+(local minimal-renderers
+  {:update (fn [_] nil)
+   :on-viewport-changed (fn [_ _] nil)
+   :drop (fn [_] nil)})
 
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
@@ -208,16 +206,23 @@
 
 (fn window-resize-updates-viewport-and-layout-root []
   (reset-state)
-  (ensure-renderers)
-  (set (. app.engine "pixel-width") 960)
-  (set (. app.engine "pixel-height") 540)
-  (app.engine.events.window-resized.emit {:width 640 :height 360})
-  (assert (= app.viewport.width 960))
-  (assert (= app.viewport.height 540)))
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
+  (local (ok err)
+    (pcall
+      (fn []
+        (set (. app.engine "pixel-width") 960)
+        (set (. app.engine "pixel-height") 540)
+        (app.engine.events.window-resized.emit {:width 640 :height 360})
+        (assert (= app.viewport.width 960))
+        (assert (= app.viewport.height 540)))))
+  (set app.renderers original-renderers)
+  (when (not ok) (error err)))
 
 (fn drop-keeps-engine-events-and-clears-layout-root []
   (reset-state)
-  (ensure-renderers)
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
   (local original-intersectables app.intersectables)
   (local original-clickables app.clickables)
   (local original-hoverables app.hoverables)
@@ -232,28 +237,45 @@
     (set app.clickables (or original-clickables (Clickables {:intersectables app.intersectables}))))
   (when (not app.hoverables)
     (set app.hoverables (or original-hoverables (Hoverables {:intersectables app.intersectables}))))
-  (assert (= app.layout-root nil))
-  (assert (= app.active-world-runtime nil)
-          "app.drop should clear stale active-world-runtime")
-  (app.engine.events.key-down.emit {:key 10})
-  (assert fired))
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert (= app.layout-root nil))
+        (assert (= app.active-world-runtime nil)
+                "app.drop should clear stale active-world-runtime")
+        (app.engine.events.key-down.emit {:key 10})
+        (assert fired))))
+  (set app.renderers original-renderers)
+  (when (not ok) (error err)))
 
 (fn other-events-leave-viewport-untouched []
   (reset-state)
-  (ensure-renderers)
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
   (app.set-viewport {:width 111 :height 222})
   (app.engine.events.key-down.emit {:key 97})
-  (assert (= app.viewport.width 111))
-  (assert (= app.viewport.height 222)))
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert (= app.viewport.width 111))
+        (assert (= app.viewport.height 222)))))
+  (set app.renderers original-renderers)
+  (when (not ok) (error err)))
 
 (fn window-pixel-size-change-updates-viewport []
   (reset-state)
-  (ensure-renderers)
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
   (set (. app.engine "pixel-width") 2560)
   (set (. app.engine "pixel-height") 1440)
   (app.engine.events.window-pixel-size-changed.emit {:width 2560 :height 1440})
-  (assert (= app.viewport.width 2560))
-  (assert (= app.viewport.height 1440)))
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert (= app.viewport.width 2560))
+        (assert (= app.viewport.height 1440)))))
+  (set app.renderers original-renderers)
+  (when (not ok) (error err)))
 
 (fn bind-active-world-runtime-restores-runtime-interaction-surface []
   (with-restored-app-fields bind-state-keys
@@ -1195,7 +1217,8 @@
   ;; states host.  Without this ordering, unit-manager:clear unloads units
   ;; whose drop/disconnect calls require the states host, which is already nil.
   (reset-state)
-  (ensure-renderers)
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
   ;; Save global app systems that Main.drop destroys, so subsequent test
   ;; modules are not affected by the teardown in this test.
   (local saved-intersectables app.intersectables)
@@ -1249,6 +1272,7 @@
   (when (not app.system-cursors)
     (set app.system-cursors saved-system-cursors))
   (set app.renderers saved-renderers)
+  (set app.renderers original-renderers)
   (set app.states saved-states)
   (InputState.reset)
   (StateSystemBindings.bind-states-host saved-states))
