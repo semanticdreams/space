@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Extract one task's full text from an implementation plan into a file the
+# implementer reads in one call, so the task text never has to be pasted
+# through the controller's context. The header (up to "## Global Constraints",
+# "---", or the first task heading) and the "## Global Constraints" section
+# are prepended automatically so every implementer sees plan-wide requirements.
+#
+# The output is built atomically: on success the brief is moved into place;
+# on failure the caller-supplied OUTFILE is never modified or removed.
+#
+# Usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]
+# Default OUTFILE: <repo-root>/.superpowers/sdd/<plan-workspace>/task-<N>-brief.md
+set -euo pipefail
+
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
+  exit 2
+fi
+
+plan=$1
+n=$2
+[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+
+if [ $# -eq 3 ]; then
+  dest=$3
+else
+  dir=$("$(cd "$(dirname "$0")" && pwd)/sdd-workspace" "$plan")
+  dest="$dir/task-${n}-brief.md"
+fi
+
+# Build the entire brief in a temporary file in the destination directory
+# so the final mv is a true atomic rename (same filesystem).
+dest_dir=$(dirname "$dest")
+mkdir -p "$dest_dir"
+tmp=$(mktemp -p "$dest_dir")
+
+# Extract header: everything from start of file up to the first of
+# "## Global Constraints", "---", or a task heading.
+awk '
+  /^```/ { infence = !infence }
+  !infence && /^## Global Constraints/ { exit }
+  !infence && /^---$/ { exit }
+  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ { exit }
+  !infence { print }
+' "$plan" > "$tmp"
+
+# Extract "## Global Constraints" section if present (up to the next "---").
+awk '
+  BEGIN { in_section = 0 }
+  /^```/ { infence = !infence }
+  !infence && /^## Global Constraints/ { in_section = 1; print; next }
+  !infence && in_section {
+    if (/^---$/) exit
+    print
+  }
+' "$plan" >> "$tmp"
+
+echo "" >> "$tmp"
+
+# Extract the requested task section into a separate temp file to check
+# whether the heading was actually found.
+task_tmp=$(mktemp)
+awk -v n="$n" '
+  /^```/ { infence = !infence }
+  !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
+    intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
+  }
+  intask { print }
+' "$plan" > "$task_tmp"
+
+if [ ! -s "$task_tmp" ]; then
+  rm -f "$tmp" "$task_tmp"
+  echo "task ${n} not found in ${plan} (no heading matching 'Task ${n}')" >&2
+  exit 3
+fi
+
+cat "$task_tmp" >> "$tmp"
+rm -f "$task_tmp"
+
+# Atomically move the brief into place.
+mv "$tmp" "$dest"
+
+echo "wrote ${dest}: $(wc -l < "$dest" | tr -d ' ') lines"

@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Generate a review package: commit list, stat summary, file manifest,
+# and the net diff with extended context, written to a file the reviewer
+# reads in one call. Using the recorded per-task BASE (not HEAD~1) keeps
+# multi-commit tasks intact.
+#
+# If the diff exceeds 500KB the monolithic diff is omitted from the main
+# package and replaced with a manifest linking to per-file chunk diffs.
+# Reviewers read the manifest FIRST and MUST confirm they inspected every
+# file listed. Chunk filenames are collision-proof: each file path is
+# SHA-prefixed so distinct paths that map to the same suffix after `/` → `_`
+# replacement never overwrite each other.
+#
+# Usage: review-package PLAN_FILE BASE HEAD [OUTFILE]
+# Default OUTFILE: <repo-root>/.superpowers/sdd/<plan-workspace>/review-<base7>..<head7>.diff
+# (named per range, so a re-review after fixes gets a distinct fresh file).
+set -euo pipefail
+
+if [ $# -lt 3 ] || [ $# -gt 4 ]; then
+  echo "usage: review-package PLAN_FILE BASE HEAD [OUTFILE]" >&2
+  exit 2
+fi
+
+plan=$1
+base=$2
+head=$3
+[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+
+git rev-parse --verify --quiet "$base" >/dev/null || { echo "bad BASE: $base" >&2; exit 2; }
+git rev-parse --verify --quiet "$head" >/dev/null || { echo "bad HEAD: $head" >&2; exit 2; }
+
+if [ $# -eq 4 ]; then
+  out=$4
+else
+  dir=$("$(cd "$(dirname "$0")" && pwd)/sdd-workspace" "$plan")
+  out="$dir/review-$(git rev-parse --short "$base")..$(git rev-parse --short "$head").diff"
+fi
+
+mkdir -p "$(dirname "$out")"
+
+# Determine size and whether to split.
+tmp=$(mktemp)
+git diff -U10 "${base}..${head}" > "$tmp"
+diffsiz=$(wc -c < "$tmp")
+split=0
+if [ "$diffsiz" -gt 512000 ]; then
+  split=1
+fi
+
+{
+  echo "# Review package: ${base}..${head}"
+  echo
+  echo "## Commits"
+  git log --oneline "${base}..${head}"
+  echo
+  echo "## Files changed"
+  git diff --stat "${base}..${head}"
+} > "$out"
+
+if [ "$split" -eq 1 ]; then
+  chunk_dir="${out%.diff}-chunks"
+  mkdir -p "$chunk_dir"
+
+  {
+    echo
+    echo "## Manifest (review coverage checklist)"
+    echo
+    echo "The diff exceeds 500KB. The full unified diff is omitted — review per-file chunks instead."
+    echo
+    echo "Chunks dir: ${chunk_dir}/"
+    echo
+    echo "Reviewers MUST inspect every file below and confirm coverage:"
+    git diff --name-only "${base}..${head}" | while IFS= read -r f; do
+      hash=$(echo "$f" | sha256sum | cut -c1-6)
+      safe=$(echo "$f" | tr '/' '_')
+      chunk_name="${safe}.${hash}.diff"
+      git diff -U10 "${base}..${head}" -- "$f" > "$chunk_dir/${chunk_name}"
+      lines=$(wc -l < "$chunk_dir/${chunk_name}")
+      echo "- [ ] \`$f\` → ${chunk_dir}/${chunk_name} (${lines} lines)"
+    done
+  } >> "$out"
+else
+  {
+    echo
+    echo "## Diff"
+    cat "$tmp"
+  } >> "$out"
+fi
+
+rm -f "$tmp"
+commits=$(git rev-list --count "${base}..${head}")
+tot=$(wc -c < "$out")
+echo "wrote ${out}: ${commits} commit(s), ${tot} bytes"
