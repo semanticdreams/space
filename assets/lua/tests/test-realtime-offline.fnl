@@ -8,6 +8,21 @@
   (when handle
     (handle:close)))
 
+(fn with-cleanup [handle body]
+  (local (ok result) (pcall body))
+  (local (cleanup-ok cleanup-result) (pcall cleanup handle))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn expect-zero-client-id-connect-fails [client connect-token]
+  (local (zero-client-id-ok _zero-client-id-err)
+    (pcall (fn []
+             (client:connect {:client-id 0
+                              :connect-token connect-token}))))
+  (assert (not zero-client-id-ok) "client connect should require non-zero client-id"))
+
 (fn module-exports []
   (assert realtime.available "realtime module should be available")
   (assert (= (realtime.version) "1.2.5") "realtime version should match vendored yojimbo")
@@ -230,12 +245,9 @@
           "running server should reject unknown feature payload sends")
   (local client (service:create-client {:registry registry
                                         :bind-address "127.0.0.1:0"}))
-  (local (zero-client-id-ok _zero-client-id-err)
-    (pcall (fn []
-             (client:connect {:client-id 0
-                              :connect-token connect-token}))))
-  (assert (not zero-client-id-ok) "client connect should require non-zero client-id")
-  (cleanup client)
+  (with-cleanup client
+    (fn []
+      (expect-zero-client-id-connect-fails client connect-token)))
   (local unsigned-ticket {:ticket-id "ticket-2"
                           :subject-user-id "dev-user"
                           :client-id 4242

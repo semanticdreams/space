@@ -61,6 +61,22 @@
   (when handle
     (handle:close)))
 
+(fn cleanup-handles [handles]
+  (each [_ handle (ipairs handles)]
+    (cleanup handle)))
+
+(fn with-cleanup [handles body]
+  (local (ok result) (pcall body))
+  (local (cleanup-ok cleanup-result) (pcall cleanup-handles handles))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn assert-no-realtime-error [failure prefix]
+  (when failure
+    (error (.. prefix failure))))
+
 (fn same-process-loopback []
   (local registry (realtime.FeatureRegistry))
   (registry:register-feature {:id 1 :name "ping" :version 1})
@@ -168,27 +184,24 @@
   (server:start)
   (client:connect {:client-id 4242
                    :connect-token (server:create-connect-token {:signed-ticket (make-loopback-ticket 4242)
-                                                                :secret "loopback-secret"})})
-  (local ok (wait-until (fn []
-                          (when settle-ticks
-                            (set settle-ticks (- settle-ticks 1))
-                            (when (<= settle-ticks 0)
-                              (set done true)))
-                          done)
-                        5000
-                        false))
-  (cleanup client)
-  (cleanup server)
-  (assert ok "same-process realtime test timed out")
-  (assert (= server-activated-count 1) "same-process realtime server activation should be idempotent")
-  (assert (= client-activated-count 1) "same-process realtime client activation should be idempotent")
-  (assert server-deactivated "same-process realtime server deactivation callback should fire")
-  (assert client-deactivated "same-process realtime client deactivation callback should fire")
-  (assert (= server-deactivated-count 1) "same-process realtime server deactivation should be idempotent")
-  (assert (= client-deactivated-count 1) "same-process realtime client deactivation should be idempotent")
-  (assert (not failure)
-          (or (and failure (.. "same-process realtime error: " failure))
-              "same-process realtime error")))
+                                                                 :secret "loopback-secret"})})
+  (fn done-after-settle? []
+    (when settle-ticks
+      (set settle-ticks (- settle-ticks 1))
+      (when (<= settle-ticks 0)
+        (set done true)))
+    done)
+  (with-cleanup [client server]
+    (fn []
+      (local loop-ok (wait-until done-after-settle? 5000 false))
+      (assert loop-ok "same-process realtime test timed out")
+      (assert (= server-activated-count 1) "same-process realtime server activation should be idempotent")
+      (assert (= client-activated-count 1) "same-process realtime client activation should be idempotent")
+      (assert server-deactivated "same-process realtime server deactivation callback should fire")
+      (assert client-deactivated "same-process realtime client deactivation callback should fire")
+      (assert (= server-deactivated-count 1) "same-process realtime server deactivation should be idempotent")
+      (assert (= client-deactivated-count 1) "same-process realtime client deactivation should be idempotent")
+      (assert-no-realtime-error failure "same-process realtime error: "))))
 
 (fn same-process-close-inside-callback []
   (local registry (realtime.FeatureRegistry))
@@ -247,16 +260,16 @@
   (server:start)
   (client:connect {:client-id 5252
                    :connect-token (server:create-connect-token {:signed-ticket (make-loopback-ticket 5252)
-                                                                :secret "loopback-secret"})})
-  (local ok (wait-until (fn [] done) 5000 false))
-  (cleanup server)
-  (assert ok "same-process reentrant close test timed out")
-  (assert saw-close-now "client should receive the first queued message before closing")
-  (assert (not saw-after-close) "client should not process queued callbacks after closing inside callback")
-  (assert server-saw-disconnect "server should observe disconnect after client closes inside callback")
-  (assert (not failure)
-          (or (and failure (.. "same-process reentrant close error: " failure))
-              "same-process reentrant close error")))
+                                                                 :secret "loopback-secret"})})
+  (fn done? [] done)
+  (with-cleanup [client server]
+    (fn []
+      (local loop-ok (wait-until done? 5000 false))
+      (assert loop-ok "same-process reentrant close test timed out")
+      (assert saw-close-now "client should receive the first queued message before closing")
+      (assert (not saw-after-close) "client should not process queued callbacks after closing inside callback")
+      (assert server-saw-disconnect "server should observe disconnect after client closes inside callback")
+      (assert-no-realtime-error failure "same-process reentrant close error: "))))
 
 (fn separate-process-loopback []
   (local dir (make-temp-dir))
