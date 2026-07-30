@@ -165,6 +165,54 @@
 (table.insert tests {:name "C7 flags cleanup assigns other var" :fn mutation-restoration-flags-cleanup-assigns-other-var})
 (table.insert tests {:name "C8 allows child tset restoring parent snapshot" :fn mutation-restoration-allows-child-tset-restoring-parent-snapshot})
 
+;; R1-1 (C9): snapshot inside earlier sibling nested fn must not count
+(fn mutation-restoration-flags-sibling-scope-snapshot []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 250
+                                             :form "(fn setup-scene []\n  (fn other []\n    (local snap app.engine))\n  (fn cleanup []\n    (set app.engine snap)))"}
+                                            {:kind :fn :name "other" :top-level? false :line 11 :column 3 :length 60
+                                             :form "(fn other []\n    (local snap app.engine))"}
+                                            {:kind :fn :name "cleanup" :top-level? false :line 13 :column 3 :length 60
+                                             :form "(fn cleanup []\n    (set app.engine snap))"}]
+                              :mutations [{:op :set :path ["app" "engine"] :line 14 :column 5
+                                           :form "(set app.engine snap)" :enclosing-fn "cleanup"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C9: sibling-scope snapshot should not suppress cleanup diagnostic")
+  (assert (> (length result) 0) "C9: should have at least one diagnostic"))
+
+;; R1-2 (C10): tset with wrong path — parent snapshots app.engine, child tsets app.renderers
+(fn mutation-restoration-flags-tset-wrong-path []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 200
+                                             :form "(fn setup-scene []\n  (local snap app.engine)\n  (fn cleanup []\n    (tset app :renderers snap)))"}
+                                            {:kind :fn :name "cleanup" :top-level? false :line 12 :column 3 :length 60
+                                             :form "(fn cleanup []\n    (tset app :renderers snap))"}]
+                              :mutations [{:op :tset :path ["app" "renderers"] :line 13 :column 5
+                                           :form "(tset app :renderers snap)" :enclosing-fn "cleanup"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C10: tset with wrong path should flag")
+  (assert (> (length result) 0) "C10: should have at least one diagnostic"))
+
+;; R1-2 (C11): tset with mismatched variable — parent snapshots app.engine, child tsets different var
+(fn mutation-restoration-flags-tset-mismatched-var []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 200
+                                             :form "(fn setup-scene []\n  (local snap app.engine)\n  (fn cleanup []\n    (tset app :engine other-var)))"}
+                                            {:kind :fn :name "cleanup" :top-level? false :line 12 :column 3 :length 60
+                                             :form "(fn cleanup []\n    (tset app :engine other-var))"}]
+                              :mutations [{:op :tset :path ["app" "engine"] :line 13 :column 5
+                                           :form "(tset app :engine other-var)" :enclosing-fn "cleanup"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C11: tset with mismatched var should flag")
+  (assert (> (length result) 0) "C11: should have at least one diagnostic"))
+
+(table.insert tests {:name "C9 flags sibling-scope snapshot" :fn mutation-restoration-flags-sibling-scope-snapshot})
+(table.insert tests {:name "C10 flags tset wrong path" :fn mutation-restoration-flags-tset-wrong-path})
+(table.insert tests {:name "C11 flags tset mismatched var" :fn mutation-restoration-flags-tset-mismatched-var})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
