@@ -834,6 +834,12 @@
          (tset bare-covered kw true))))
    bare-covered)
 
+(fn saved-app-state-restore? [def form kw]
+  "Return true for exact app interaction-service restoration from a saved state table."
+  (and def.name
+       (string.find def.name "restore" 1 true)
+       (string.find form (.. "(set app." kw " saved." kw ")") 1 true)))
+
 (fn interactive-context-assertion-rule-run [ctx]
   "Rule: flag interactive widgets using clickables or hoverables without
   an actual assert call in the same enclosing function."
@@ -932,7 +938,7 @@
                                  (has-bare-keyword? cleaned kw)
                                  (not (. bare-covered kw)))
                         (set uncovered-kw kw)))))
-              (when uncovered-kw
+              (when (and uncovered-kw (not (saved-app-state-restore? def cleaned uncovered-kw)))
                 ;; Determine the best diagnostic text for this uncovered keyword.
                 (var access-used nil)
                 (each [_ text (ipairs interactive-access-texts)]

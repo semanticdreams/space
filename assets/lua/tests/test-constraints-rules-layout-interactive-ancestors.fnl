@@ -267,6 +267,39 @@
   (assert flagged
     "duplicate-name sibling should not cross-contaminate; anonymous drop should still be flagged"))
 
+(fn interactive-assertion-allows-saved-app-state-restore []
+  "Cleanup restore functions may assign saved nil interaction services back
+  to app state; they are restoration, not required context use."
+  (local Layout (require :constraints.rules.layout))
+  (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion"))
+  (assert rule)
+  (local restore-form "(fn restore-app-state [saved]
+  (set app.clickables saved.clickables)
+  (set app.hoverables saved.hoverables)
+  (set app.scene saved.scene))")
+  (local setup-form "(fn setup-app-stubs []
+  (local clickables {})
+  (assert clickables.register \"missing\")
+  (set app.clickables clickables))")
+  (local ff (make-file-fact
+    {:path "/src/tests/test-panel-transfer.fnl" :module "tests.test-panel-transfer"
+     :definitions [{:kind :fn :name "restore-app-state" :top-level? true
+                    :line 10 :column 1 :length (length restore-form) :form restore-form}
+                   {:kind :fn :name "setup-app-stubs" :top-level? true
+                    :line 20 :column 1 :length (length setup-form) :form setup-form}]
+     :calls [{:callee "assert" :receiver nil :method nil
+              :line 22 :column 3 :form "(assert clickables.register \"missing\")"
+              :enclosing-fn "setup-app-stubs"}]
+     :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 11 :column 8 :form "app.clickables"}
+                {:text "saved.clickables" :path ["saved" "clickables"] :line 11 :column 23 :form "saved.clickables"}
+                {:text "app.hoverables" :path ["app" "hoverables"] :line 12 :column 8 :form "app.hoverables"}
+                {:text "saved.hoverables" :path ["saved" "hoverables"] :line 12 :column 23 :form "saved.hoverables"}
+                {:text "app.clickables" :path ["app" "clickables"] :line 23 :column 8 :form "app.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (each [_ d (ipairs (or result []))]
+    (assert (not (= d.evidence.function-name "restore-app-state"))
+            "restore-app-state exact saved-field restore should not be flagged")))
+
 (table.insert tests {:name "interactive-assertion allows grandparent asserted clickables make-row pattern"
                      :fn interactive-assertion-allows-grandparent-asserted-clickables-make-row})
 (table.insert tests {:name "interactive-assertion allows grandparent separate local assert graph view pattern"
@@ -276,6 +309,8 @@
 (table.insert tests {:name "interactive-assertion-flags-grandparent-assert-with-intervening-param"
                      :fn interactive-assertion-flags-grandparent-assert-with-intervening-param})
 (table.insert tests {:name "interactive-assertion-flags-duplicate-name-ancestor-mismatch"
-                     :fn interactive-assertion-flags-duplicate-name-ancestor-mismatch})
+                      :fn interactive-assertion-flags-duplicate-name-ancestor-mismatch})
+(table.insert tests {:name "interactive-assertion allows saved app state restore"
+                     :fn interactive-assertion-allows-saved-app-state-restore})
 
 {:tests tests}
