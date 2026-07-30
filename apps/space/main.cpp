@@ -100,6 +100,33 @@ std::string read_stdin()
 
 int main(int argc, char *argv[])
 {
+    // Pre-scan CLI for dotenv flags so SPACE_LOG_DIR from dotenv files
+    // is available to the native log path resolver at startup.
+    bool no_dotenv = false;
+    bool dotenv_override = false;
+    std::string dotenv_path = ".env";
+
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--no-dotenv") {
+            no_dotenv = true;
+        } else if (arg == "--dotenv-override") {
+            dotenv_override = true;
+        } else if (arg == "--dotenv") {
+            if (i + 1 < argc) {
+                dotenv_path = argv[i + 1];
+                i++;
+            }
+        } else if (arg.rfind("--dotenv=", 0) == 0) {
+            dotenv_path = arg.substr(9);
+        }
+    }
+
+    bool dotenv_already_loaded = false;
+    if (!no_dotenv) {
+        dotenv_already_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
+    }
+
     LOG_CONFIG.reporting_level = Debug;
     LOG_CONFIG.restart = true;
     try {
@@ -128,9 +155,6 @@ int main(int argc, char *argv[])
 #endif
 
     bool run_repl = false;
-    bool no_dotenv = false;
-    bool dotenv_override = false;
-    std::string dotenv_path = ".env";
     std::string command_source;
     std::string module_name;
 
@@ -237,11 +261,13 @@ int main(int argc, char *argv[])
         return app.exit(e);
     }
 
-    bool load_dotenv = !no_dotenv;
-    if (load_dotenv) {
-        bool dotenv_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
-        if (!dotenv_loaded && dotenv_path != ".env") {
-            std::cerr << "warning: failed to load dotenv file: " << dotenv_path << "\n";
+    if (!dotenv_already_loaded) {
+        bool load_dotenv = !no_dotenv;
+        if (load_dotenv) {
+            bool dotenv_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
+            if (!dotenv_loaded && dotenv_path != ".env") {
+                std::cerr << "warning: failed to load dotenv file: " << dotenv_path << "\n";
+            }
         }
     }
 

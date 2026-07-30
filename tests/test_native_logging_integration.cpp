@@ -123,6 +123,14 @@ std::string logging_command(const fs::path& cwd, const fs::path& executable)
         shell_quote("(do (local logging (require :logging)) (logging.info \"native logging integration\") (logging.flush))");
 }
 
+std::string logging_command_dotenv(const fs::path& cwd, const fs::path& executable,
+                                   const std::string& dotenv_opts)
+{
+    return "cd " + shell_quote(cwd.string()) + " && " +
+        shell_quote(executable.string()) + " " + dotenv_opts + " -c " +
+        shell_quote("(do (local logging (require :logging)) (logging.info \"native logging integration\") (logging.flush))");
+}
+
 bool run_space_with_env(const fs::path& cwd, const fs::path& executable, std::string& output, int& exitCode)
 {
     return run_command_capture(logging_command(cwd, executable), output, exitCode);
@@ -199,6 +207,105 @@ bool test_invalid_log_directory_fails_loudly()
         check(!fs::exists(cwd / "gl.log"), "invalid run should not create cwd gl.log");
 }
 
+bool test_dotenv_spacelogdir()
+{
+    fs::path root = make_temp_root("space_native_dotenv_default");
+    fs::path cwd = root / "cwd";
+    fs::path logs = root / "dotenv-logs";
+    fs::create_directories(cwd);
+    fs::create_directories(logs);
+
+    // Write a .env file supplying SPACE_LOG_DIR
+    std::ofstream env_file(cwd / ".env");
+    env_file << "SPACE_LOG_DIR=" << logs.string() << "\n";
+    env_file.close();
+
+    // No process-level SPACE_LOG_DIR — let .env provide it
+    unset_env_var("SPACE_LOG_DIR");
+    set_env_var("XDG_CACHE_HOME", (root / "xdg-cache").string());
+    set_env_var("SPACE_DISABLE_AUDIO", "1");
+
+    std::string output;
+    int exitCode = 1;
+    std::string cmd = logging_command_dotenv(cwd, space_executable(), "");
+    if (!check(run_command_capture(cmd, output, exitCode), "run dotenv default logging command")) {
+        return false;
+    }
+    if (!check(exitCode == 0, "dotenv default logging command should exit 0")) {
+        std::cerr << output << "\n";
+        return false;
+    }
+    return check(fs::exists(logs / "space.log"), ".env SPACE_LOG_DIR log file should exist") &&
+        check(!fs::exists(cwd / "gl.log"), "dotenv run should not create cwd gl.log");
+}
+
+bool test_no_dotenv_skip()
+{
+    fs::path root = make_temp_root("space_native_no_dotenv");
+    fs::path cwd = root / "cwd";
+    fs::path logs = root / "dotenv-logs";
+    fs::path xdg = root / "xdg-cache";
+    fs::create_directories(cwd);
+    fs::create_directories(logs);
+
+    std::ofstream env_file(cwd / ".env");
+    env_file << "SPACE_LOG_DIR=" << logs.string() << "\n";
+    env_file.close();
+
+    unset_env_var("SPACE_LOG_DIR");
+    set_env_var("XDG_CACHE_HOME", xdg.string());
+    set_env_var("SPACE_DISABLE_AUDIO", "1");
+
+    std::string output;
+    int exitCode = 1;
+    std::string cmd = logging_command_dotenv(cwd, space_executable(), "--no-dotenv");
+    if (!check(run_command_capture(cmd, output, exitCode), "run no-dotenv logging command")) {
+        return false;
+    }
+    if (!check(exitCode == 0, "no-dotenv logging command should exit 0")) {
+        std::cerr << output << "\n";
+        return false;
+    }
+    // With --no-dotenv, .env is ignored — log goes to default XDG location
+    return check(fs::exists(xdg / "space" / "log" / "space.log"),
+                 "no-dotenv log file should exist in default XDG location") &&
+        check(!fs::exists(logs / "space.log"),
+              "no-dotenv run should NOT use .env SPACE_LOG_DIR") &&
+        check(!fs::exists(cwd / "gl.log"), "no-dotenv run should not create cwd gl.log");
+}
+
+bool test_dotenv_custom_path()
+{
+    fs::path root = make_temp_root("space_native_dotenv_custom");
+    fs::path cwd = root / "cwd";
+    fs::path logs = root / "custom-dotenv-logs";
+    fs::path dotenv_file = root / "custom.env";
+    fs::create_directories(cwd);
+    fs::create_directories(logs);
+
+    std::ofstream env_file(dotenv_file);
+    env_file << "SPACE_LOG_DIR=" << logs.string() << "\n";
+    env_file.close();
+
+    unset_env_var("SPACE_LOG_DIR");
+    set_env_var("XDG_CACHE_HOME", (root / "xdg-cache").string());
+    set_env_var("SPACE_DISABLE_AUDIO", "1");
+
+    std::string output;
+    int exitCode = 1;
+    std::string cmd = logging_command_dotenv(cwd, space_executable(),
+                                             "--dotenv " + shell_quote(dotenv_file.string()));
+    if (!check(run_command_capture(cmd, output, exitCode), "run custom dotenv logging command")) {
+        return false;
+    }
+    if (!check(exitCode == 0, "custom dotenv logging command should exit 0")) {
+        std::cerr << output << "\n";
+        return false;
+    }
+    return check(fs::exists(logs / "space.log"), "--dotenv <file> SPACE_LOG_DIR log file should exist") &&
+        check(!fs::exists(cwd / "gl.log"), "custom dotenv run should not create cwd gl.log");
+}
+
 } // namespace
 
 int main()
@@ -210,5 +317,8 @@ int main()
     ok = test_default_log_path() && ok;
     ok = test_space_log_dir_override() && ok;
     ok = test_invalid_log_directory_fails_loudly() && ok;
+    ok = test_dotenv_spacelogdir() && ok;
+    ok = test_no_dotenv_skip() && ok;
+    ok = test_dotenv_custom_path() && ok;
     return ok ? 0 : 1;
 }
