@@ -504,7 +504,7 @@
 
   (local scene-on-added
     (fn [_self scene element]
-      (when (and app.clickables element.intersect)
+      (when element.intersect (local clickables (assert app.clickables "ball scene context requires app.clickables"))
         (local right-click-target
           {:pointer-target app.scene
            :intersect (fn [_target ray]
@@ -520,13 +520,13 @@
                               :position (resolve-menu-position event)
                               :open-button (and event event.button)}))
              true)})
-        (app.clickables:register-right-click right-click-target)
+        (clickables:register-right-click right-click-target)
         (set element.__context-menu-target right-click-target)
         (set element.unregister-context-menu-target
-             (fn [self]
-               (when self.__context-menu-target
-                 (app.clickables:unregister-right-click self.__context-menu-target)
-                 (set self.__context-menu-target nil)))))
+             (fn [self] (local clickables (assert clickables "ball scene context requires clickables"))
+                (when self.__context-menu-target
+                  (clickables:unregister-right-click self.__context-menu-target)
+                  (set self.__context-menu-target nil)))))
       (scene:register-scene-object
        {:owner element
         :element element

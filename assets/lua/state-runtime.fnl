@@ -64,9 +64,9 @@
                (local drag? (and controls controls.drag-active?))
                (not (and drag? (drag? controls))))))))
 
-(fn handle-hover [payload]
+(fn handle-hover [payload] (local hoverables (assert app.hoverables "state runtime requires app.hoverables"))
   (when (hover-eligible?)
-    (app.hoverables:on-mouse-motion payload)))
+    (hoverables:on-mouse-motion payload)))
 
 (fn hovered-object []
   (assert app.hoverables "state runtime requires app.hoverables")

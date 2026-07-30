@@ -96,8 +96,10 @@
       (set app.pointer-input-override nil)))
 
   (fn clear-hover! []
-    (when (and clear-hover-on-proximity-out? app.hoverables app.hoverables.clear-active)
-      (app.hoverables:clear-active)))
+    (when clear-hover-on-proximity-out?
+      (local hoverables (assert app.hoverables "pen pointer requires app.hoverables to clear hover"))
+      (when hoverables.clear-active
+        (hoverables:clear-active))))
 
   (local PenProximityIn
     {:pen-proximity-in
