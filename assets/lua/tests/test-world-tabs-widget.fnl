@@ -32,8 +32,8 @@
   (local AppBootstrap (require :app-bootstrap))
   (AppBootstrap.init-themes)
   (local options (or opts {}))
-  (BuildContext {:clickables options.clickables
-                 :hoverables options.hoverables
+  (BuildContext {:clickables (assert options.clickables "world tabs widget test context requires clickables")
+                 :hoverables (assert options.hoverables "world tabs widget test context requires hoverables")
                  :theme (and app app.themes (app.themes.get-active-theme))}))
 
 (fn world-tabs-right-click-opens-delete-menu []

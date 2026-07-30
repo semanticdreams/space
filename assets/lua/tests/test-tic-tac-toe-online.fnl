@@ -176,8 +176,8 @@
         (BuildContext {:layout-root layout-root
                        :pointer-target scene
                        :panel-target scene
-                       :clickables mock-app.clickables
-                       :hoverables mock-app.hoverables
+                        :clickables (assert mock-app.clickables "tic tac toe online test requires app.clickables")
+                        :hoverables (assert mock-app.hoverables "tic tac toe online test requires app.hoverables")
                        :movables mock-app.movables
                        :resizables mock-app.resizables
                        :intersectables mock-app.intersectables

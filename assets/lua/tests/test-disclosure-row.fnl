@@ -27,8 +27,8 @@
 (fn make-test-ctx []
   (AppBootstrap.init-themes)
   (local intersector (Intersectables))
-  (local clickables (Clickables {:intersectables intersector}))
-  (local hoverables (Hoverables {:intersectables intersector}))
+  (local clickables (assert (Clickables {:intersectables intersector}) "disclosure row test context requires clickables"))
+  (local hoverables (assert (Hoverables {:intersectables intersector}) "disclosure row test context requires hoverables"))
   (BuildContext {:clickables clickables
                  :hoverables hoverables
                  :icons (make-icons-stub)}))

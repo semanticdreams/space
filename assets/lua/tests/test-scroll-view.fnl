@@ -237,7 +237,7 @@
   (view:drop))
 
 (fn scroll-view-mouse-wheel-scrolls-when-hovered []
-  (local original-hoverables app.hoverables)
+  (local original-hoverables (assert app.hoverables "scroll view test requires app.hoverables"))
   (local original-first-person app.first-person-controls)
   (var hoverables nil)
   (var view nil)
@@ -259,7 +259,7 @@
         (view.layout:layouter)
         (view:set-scroll-offset 0)
         (view.layout:layouter)
-        (set app.hoverables.active-entry {:object view})
+        (set hoverables.active-entry {:object view})
         (Runtime.dispatch-mouse-wheel {:x 0 :y 1})
         (view.layout:layouter)
         (assert (approx view.state.scroll-offset 1.0))

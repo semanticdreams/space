@@ -68,8 +68,8 @@
            (Rectangle {:color (glm.vec4 0.1 0.8 0.3 1)}))})
 
 (fn count-clickables-for-target [target]
-  (var count 0)
-  (each [_ object (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+  (local clickables (assert app.clickables "graph activity slot test requires app.clickables")) (var count 0)
+  (each [_ object (ipairs (or clickables.left-click-objects []))]
     (when (= object.pointer-target target)
       (set count (+ count 1))))
   count)
