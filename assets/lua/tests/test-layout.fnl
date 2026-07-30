@@ -210,6 +210,7 @@
   (local child (Layout {:name "stats-child"}))
   (child:set-root root)
   (child:mark-measure-dirty)
+  (local prev-frame-id app.engine.frame-id)
   (set app.engine.frame-id 42)
   (root:update)
   (local records root.stats.records)
@@ -227,7 +228,8 @@
     (root:update))
   (assert (= (length root.stats.records) 3))
   (local oldest (. root.stats.records 1))
-  (assert (= oldest.frame-id 45)))
+  (assert (= oldest.frame-id 45))
+  (set app.engine.frame-id prev-frame-id))
 
 (fn layout-root-buckets-measure-dirt-by-depth []
   (local root (LayoutRoot))
