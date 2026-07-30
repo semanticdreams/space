@@ -306,6 +306,47 @@ bool test_dotenv_custom_path()
         check(!fs::exists(cwd / "gl.log"), "custom dotenv run should not create cwd gl.log");
 }
 
+// --no-dotenv placed AFTER -c should be treated as a Fennel/script argument,
+// not a global flag. The dotenv pre-scan must stop at -c boundaries.
+bool test_no_dotenv_after_c_is_fennel_arg()
+{
+    fs::path root = make_temp_root("space_native_no_dotenv_after_c");
+    fs::path cwd = root / "cwd";
+    fs::path logs = root / "dotenv-logs";
+    fs::path xdg = root / "xdg-cache";
+    fs::create_directories(cwd);
+    fs::create_directories(logs);
+
+    std::ofstream env_file(cwd / ".env");
+    env_file << "SPACE_LOG_DIR=" << logs.string() << "\n";
+    env_file.close();
+
+    unset_env_var("SPACE_LOG_DIR");
+    set_env_var("XDG_CACHE_HOME", xdg.string());
+    set_env_var("SPACE_DISABLE_AUDIO", "1");
+
+    std::string output;
+    int exitCode = 1;
+    // --no-dotenv appears AFTER -c — it must be a Fennel arg, not a global flag
+    std::string cmd = "cd " + shell_quote(cwd.string()) + " && " +
+        shell_quote(space_executable().string()) + " -c " +
+        shell_quote("(do (local logging (require :logging)) (logging.info \"native logging integration\") (logging.flush))") +
+        " --no-dotenv";
+    if (!check(run_command_capture(cmd, output, exitCode), "run dotenv with --no-dotenv after -c")) {
+        return false;
+    }
+    if (!check(exitCode == 0, "dotenv with --no-dotenv after -c should exit 0")) {
+        std::cerr << output << "\n";
+        return false;
+    }
+    // .env should still be loaded — --no-dotenv is a Fennel arg, not a global flag
+    return check(fs::exists(logs / "space.log"),
+                 "log should use .env SPACE_LOG_DIR when --no-dotenv is after -c") &&
+        check(!fs::exists(xdg / "space" / "log" / "space.log"),
+              "log should NOT go to default XDG dir when --no-dotenv is after -c") &&
+        check(!fs::exists(cwd / "gl.log"), "should not create cwd gl.log");
+}
+
 } // namespace
 
 int main()
@@ -320,5 +361,6 @@ int main()
     ok = test_dotenv_spacelogdir() && ok;
     ok = test_no_dotenv_skip() && ok;
     ok = test_dotenv_custom_path() && ok;
+    ok = test_no_dotenv_after_c_is_fennel_arg() && ok;
     return ok ? 0 : 1;
 }

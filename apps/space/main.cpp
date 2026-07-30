@@ -108,6 +108,12 @@ int main(int argc, char *argv[])
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
+        // Stop at entry boundaries (matching the real CLI parser) so that
+        // dotenv flags after -c / -m / -- / file entries are not consumed
+        // as global options.
+        if (arg == "--" || arg == "-c" || arg == "-m") {
+            break;
+        }
         if (arg == "--no-dotenv") {
             no_dotenv = true;
         } else if (arg == "--dotenv-override") {
@@ -119,6 +125,12 @@ int main(int argc, char *argv[])
             }
         } else if (arg.rfind("--dotenv=", 0) == 0) {
             dotenv_path = arg.substr(9);
+        } else if (!arg.empty() && arg[0] == '-' && arg != "-") {
+            // Other flags — skip (processed by the real parser)
+            continue;
+        } else {
+            // Non-option argument reached (file or "-" for stdin) — stop
+            break;
         }
     }
 
