@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local callbacks (require :callbacks))
 (local ExternalEditor (require :external-editor))
+(local process (require :process))
 (local tempfile (require :tempfile))
 (local Input (require :input))
 (local BuildContext (require :build-context))
@@ -23,8 +24,25 @@
                 (if (= key "external-editor.program")
                     program
                     (= key "external-editor.args")
-                    args
-                    fallback))})
+                     args
+                     fallback))})
+
+(fn with-synchronous-process-spawn [body]
+  (local original-spawn process.spawn)
+  (local state {:callback-errors []})
+  (set process.spawn
+       (fn [opts callback]
+         (local result (process.run opts))
+         (when callback
+           (local (ok err) (pcall callback result))
+           (when (not ok)
+             (table.insert state.callback-errors err)))
+         0))
+  (local (ok result) (pcall body state))
+  (set process.spawn original-spawn)
+  (if ok
+      result
+      (error result)))
 
 (local wait-until
   (fn [pred]
@@ -87,22 +105,27 @@
   (assert (not (fs.exists path)) "edit-string should delete temp file by default"))
 
 (fn external-editor-edit-string-raise-on-changed-errors []
-  (local settings
-    (make-settings "sh"
-                   ["-c" "printf 'changed' > \"{path}\""]))
-  (var received nil)
-  (var received-err nil)
-  (with-settings settings
-    (fn []
-      (ExternalEditor.edit-string "original"
-                                  (fn [value err]
-                                    (set received value)
-                                    (set received-err err))
-                                  {:raise-on-changed true})))
-  (local ok (wait-until (fn [] received-err)))
-  (assert ok "edit-string callback should be invoked with error when raise-on-changed trips")
-  (assert (= received nil) "edit-string should not provide content when raise-on-changed trips")
-  (assert (string.find (tostring received-err) "raise-on-changed" 1 true)))
+  (with-synchronous-process-spawn
+    (fn [spawn-state]
+      (local settings
+        (make-settings "sh"
+                       ["-c" "printf 'changed' > \"{path}\""]))
+      (var received nil)
+      (var received-err nil)
+      (with-settings settings
+        (fn []
+          (ExternalEditor.edit-string "original"
+                                      (fn [value err]
+                                        (set received value)
+                                        (set received-err err))
+                                      {:raise-on-changed true})))
+      (local ok (wait-until (fn [] received-err)))
+      (assert ok "edit-string callback should be invoked with error when raise-on-changed trips")
+      (assert (= received nil) "edit-string should not provide content when raise-on-changed trips")
+      (assert (string.find (tostring received-err) "raise-on-changed" 1 true))
+      (assert (= (length spawn-state.callback-errors) 1)
+              "raise-on-changed should still throw inside the completion callback")
+      (assert (string.find (tostring (. spawn-state.callback-errors 1)) "raise-on-changed" 1 true)))))
 
 (fn external-editor-unknown-placeholder-errors []
   (local path (tempfile.mkstemp {:prefix "external-editor-missing-" :suffix ".txt"}))
