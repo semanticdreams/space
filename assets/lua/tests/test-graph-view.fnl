@@ -2137,7 +2137,7 @@
             (graph:drop)
             (selector:drop))))
 
-(fn graph-view-node-views-hosts-heightfield-perlin-tool-dialog []
+(fn graph-view-node-views-hosts-heightfield-perlin-tool-dialog [] (assert app.clickables "heightfield dialog test requires app.clickables") (assert app.hoverables "heightfield dialog test requires app.hoverables")
     (with-temp-data-dir
         (fn [_root]
             (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
@@ -2148,8 +2148,8 @@
             (local Hoverables (require :hoverables))
             (local original-hud app.hud)
             (local original-scene app.scene)
-            (local original-clickables app.clickables)
-            (local original-hoverables app.hoverables)
+            (local original-clickables (assert app.clickables "heightfield dialog test requires app.clickables"))
+            (local original-hoverables (assert app.hoverables "heightfield dialog test requires app.hoverables"))
             (local original-intersectables app.intersectables)
             (local original-screen-pos-ray app.screen-pos-ray)
             (local original-movables app.movables)
@@ -2282,7 +2282,7 @@
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
 
-(fn graph-view-node-views-clickables-drive-heightfield-perlin-tool-pick []
+(fn graph-view-node-views-clickables-drive-heightfield-perlin-tool-pick [] (assert app.clickables "heightfield clickables test requires app.clickables") (assert app.hoverables "heightfield clickables test requires app.hoverables")
     (with-temp-data-dir
         (fn [_root]
             (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
@@ -2293,8 +2293,8 @@
             (local Hoverables (require :hoverables))
             (local original-hud app.hud)
             (local original-scene app.scene)
-            (local original-clickables app.clickables)
-            (local original-hoverables app.hoverables)
+            (local original-clickables (assert app.clickables "heightfield clickables test requires app.clickables"))
+            (local original-hoverables (assert app.hoverables "heightfield clickables test requires app.hoverables"))
             (local original-intersectables app.intersectables)
             (local original-screen-pos-ray app.screen-pos-ray)
             (local original-movables app.movables)
@@ -2429,7 +2429,7 @@
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
 
-(fn graph-view-node-views-engine-events-drive-heightfield-perlin-tool-pick []
+(fn graph-view-node-views-engine-events-drive-heightfield-perlin-tool-pick [] (assert app.clickables "heightfield engine-events test requires app.clickables") (assert app.hoverables "heightfield engine-events test requires app.hoverables")
     (with-temp-data-dir
         (fn [_root]
             (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
@@ -2441,8 +2441,8 @@
             (local Hoverables (require :hoverables))
             (local original-hud app.hud)
             (local original-scene app.scene)
-            (local original-clickables app.clickables)
-            (local original-hoverables app.hoverables)
+            (local original-clickables (assert app.clickables "heightfield engine-events test requires app.clickables"))
+            (local original-hoverables (assert app.hoverables "heightfield engine-events test requires app.hoverables"))
             (local original-intersectables app.intersectables)
             (local original-screen-pos-ray app.screen-pos-ray)
             (local original-movables app.movables)
@@ -3041,15 +3041,15 @@
             (view:drop)
             (graph:drop))))
 
-(fn graph-view-click-focuses-node-under-logical-input-scaling []
+(fn graph-view-click-focuses-node-under-logical-input-scaling [] (assert app.clickables "graph focus scaling test requires app.clickables") (assert app.hoverables "graph focus scaling test requires app.hoverables")
     (with-temp-data-dir
         (fn [_root]
             (local Clickables (require :clickables))
             (local Hoverables (require :hoverables))
             (local original-engine app.engine)
             (local original-viewport app.viewport)
-            (local original-clickables app.clickables)
-            (local original-hoverables app.hoverables)
+            (local original-clickables (assert app.clickables "graph focus scaling test requires app.clickables"))
+            (local original-hoverables (assert app.hoverables "graph focus scaling test requires app.hoverables"))
             (local original-intersectables app.intersectables)
             (var view nil)
             (var graph nil)
