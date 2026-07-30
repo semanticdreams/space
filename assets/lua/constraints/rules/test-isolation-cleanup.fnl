@@ -29,22 +29,31 @@
               (set pos (+ pos 1)))
             result)))
 
-    (fn blank-nested-fns [text]
-      "Replace nested (fn ...) form bodies with whitespace so sibling-scope
-       locals are not misread as parent-scope snapshots. The first (fn ...)
-       at position 1 is the parent header — skip it."
+    (fn blank-nested-scope-forms [text]
+      "Replace nested (fn ...), (lambda ...), and (λ ...) form bodies
+       with whitespace so sibling-scope locals are not misread as
+       parent-scope snapshots. The first scope form at position 1
+       is the parent header — skip it."
       (var result text)
       (var search-pos 1)
+      ;; Patterns to match, with their byte-length skip values.
+      ;; λ is 2 bytes in UTF-8, so (λ is 4 bytes total.
+      (local scope-pats [["(fn " 4] ["(lambda " 8] ["(λ " 4]])
       (while search-pos
-        (local fn-start (string.find result "(fn " search-pos true))
-        (if fn-start
-            (if (= fn-start 1)
+        (var best-start nil)
+        (var best-skip 0)
+        (each [_ [pat skip] (ipairs scope-pats)]
+          (local pos (string.find result pat search-pos true))
+          (when (and pos (if (not best-start) true (< pos best-start) true false))
+            (set best-start pos)
+            (set best-skip skip)))
+        (if best-start
+            (if (= best-start 1)
                 ;; Parent function header — skip, do not blank
-                (set search-pos (+ fn-start 4))
+                (set search-pos (+ best-start best-skip))
                 (do
-                  ;; Nested fn — blank its body
-                  (local body-start (+ fn-start 4))
-                  (local close (find-matching-close result fn-start))
+                  (local body-start (+ best-start best-skip))
+                  (local close (find-matching-close result best-start))
                   (if close
                       (do
                         (local before (result:sub 1 (- body-start 1)))
@@ -53,16 +62,16 @@
                         (for [i body-start close]
                           (set blanked (.. blanked " ")))
                         (set result (.. before blanked after))
-                        (set search-pos (+ fn-start 4)))
-                      (set search-pos (+ fn-start 4)))))
+                        (set search-pos (+ best-start best-skip)))
+                      (set search-pos (+ best-start best-skip)))))
             (set search-pos nil)))
       result)
 
     (fn find-snapshot-var-before-byte [parent-form path-text max-byte]
       (local raw-before-text (parent-form:sub 1 (- max-byte 1)))
-      ;; Blank nested fn bodies so sibling-scope locals are not
+      ;; Blank nested scope-form bodies so sibling-scope locals are not
       ;; misread as parent-scope snapshot bindings (R1-1).
-      (local before-text (blank-nested-fns raw-before-text))
+      (local before-text (blank-nested-scope-forms raw-before-text))
       (local segments [])
       (each [seg (path-text:gmatch "[^%.]+")] (table.insert segments seg))
       (find-snapshot-var before-text segments))

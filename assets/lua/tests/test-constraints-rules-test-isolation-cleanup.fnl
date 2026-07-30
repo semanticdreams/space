@@ -209,9 +209,24 @@
   (assert result "C11: tset with mismatched var should flag")
   (assert (> (length result) 0) "C11: should have at least one diagnostic"))
 
+;; R1-1 lambda: sibling lambda snapshot must not count as parent-scope
+(fn mutation-restoration-flags-sibling-lambda-snapshot []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 250
+                                             :form "(fn setup-scene []\n  (local other (lambda []\n    (local snap app.engine)))\n  (fn cleanup []\n    (set app.engine snap)))"}
+                                            {:kind :fn :name "cleanup" :top-level? false :line 13 :column 3 :length 60
+                                             :form "(fn cleanup []\n    (set app.engine snap))"}]
+                              :mutations [{:op :set :path ["app" "engine"] :line 14 :column 5
+                                           :form "(set app.engine snap)" :enclosing-fn "cleanup"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C12: sibling lambda snapshot should not suppress cleanup diagnostic")
+  (assert (> (length result) 0) "C12: should have at least one diagnostic"))
+
 (table.insert tests {:name "C9 flags sibling-scope snapshot" :fn mutation-restoration-flags-sibling-scope-snapshot})
 (table.insert tests {:name "C10 flags tset wrong path" :fn mutation-restoration-flags-tset-wrong-path})
 (table.insert tests {:name "C11 flags tset mismatched var" :fn mutation-restoration-flags-tset-mismatched-var})
+(table.insert tests {:name "C12 flags sibling lambda snapshot" :fn mutation-restoration-flags-sibling-lambda-snapshot})
 
 (local main
   (fn []
