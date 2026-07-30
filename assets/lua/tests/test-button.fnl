@@ -26,8 +26,8 @@
   (AppBootstrap.init-themes)
   (local options (or opts {}))
   (local intersector (or options.intersectables (Intersectables)))
-  (local clickables (or options.clickables (Clickables {:intersectables intersector})))
-  (local hoverables (or options.hoverables (Hoverables {:intersectables intersector})))
+  (local clickables (assert (or options.clickables (Clickables {:intersectables intersector})) "button test context requires clickables"))
+  (local hoverables (assert (or options.hoverables (Hoverables {:intersectables intersector})) "button test context requires hoverables"))
   (BuildContext {:theme options.theme
                  :clickables clickables
                  :hoverables hoverables
@@ -37,8 +37,8 @@
 (fn make-focus-build-ctx [opts]
   (local options (or opts {}))
   (local intersector (or options.intersectables (Intersectables)))
-  (local clickables (or options.clickables (Clickables {:intersectables intersector})))
-  (local hoverables (or options.hoverables (Hoverables {:intersectables intersector})))
+  (local clickables (assert (or options.clickables (Clickables {:intersectables intersector})) "button focus test context requires clickables"))
+  (local hoverables (assert (or options.hoverables (Hoverables {:intersectables intersector})) "button focus test context requires hoverables"))
   (local manager (FocusManager {:root-name "button-test"}))
   (local root (manager:get-root-scope))
   (local scope (manager:create-scope {:name "button-scope"}))

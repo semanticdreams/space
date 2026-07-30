@@ -50,8 +50,8 @@
           :update-text-transform (fn [_batcher _key _opts] nil)
           :remove-text (fn [_batcher _key] nil)}))
   (set ctx.icons options.icons)
-  (set ctx.clickables options.clickables)
-  (set ctx.hoverables options.hoverables)
+  (set ctx.clickables (assert options.clickables "dialog test context requires clickables"))
+  (set ctx.hoverables (assert options.hoverables "dialog test context requires hoverables"))
   (set ctx.system-cursors options.cursors)
   ctx)
 
@@ -196,8 +196,8 @@
 
 (fn with-dialog-stubs [body]
   (local icons (make-icons-stub))
-  (local clickables (make-clickables-stub))
-  (local hoverables (make-hoverables-stub))
+  (local clickables (assert (make-clickables-stub) "dialog test requires clickables"))
+  (local hoverables (assert (make-hoverables-stub) "dialog test requires hoverables"))
   (local cursors (make-system-cursors-stub))
   (local ctx (make-test-ctx {:icons icons
                              :clickables clickables
@@ -1156,7 +1156,7 @@
                         :viewport app.viewport})
       (local camera (make-default-camera))
       (var canvas nil)
-      (fn cleanup []
+      (fn cleanup [] (assert app.clickables "Canvas float panel cleanup requires app.clickables") (assert app.hoverables "Canvas float panel cleanup requires app.hoverables")
         (when canvas
           (canvas:drop)
           (set canvas nil))
