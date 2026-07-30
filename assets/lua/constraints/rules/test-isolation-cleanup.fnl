@@ -142,10 +142,12 @@
                         (if (not snap-var) false
                             (do
                               (var restored false)
+                              (local assigned-init-renderers?
+                                (string.find before-child "%(set%s+AppBootstrap%.init%-renderers%s*$" 1 false))
                               (local pcall-ranges (find-all-pcall-fn-ranges parent.form))
                               (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
                               (each [i span (ipairs call-spans)]
-                                (when (and (not restored) (> span.call-start child-start))
+                                (when (and (not restored) assigned-init-renderers? (> span.call-start child-start))
                                   (local between (parent.form:sub (+ child-end 1) (- span.call-start 1)))
                                   (local range (. pcall-ranges i))
                                   (local body (if range (parent.form:sub range.fn-start range.fn-end) ""))

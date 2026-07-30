@@ -266,9 +266,23 @@
   (assert result "C15: child mutation invoked before parent pcall should flag")
   (assert (> (length result) 0) "C15: should have at least one diagnostic"))
 
+(fn mutation-restoration-flags-unrelated-child-mutation-with-main-init-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+                              :definitions [{:kind :fn :name "setup-scene" :top-level? true :line 10 :column 1 :length 380
+                                             :form "(fn setup-scene []\n  (local snap app.renderers)\n  (set unrelated-callback\n       (fn []\n         (set app.renderers (make-renderer-stub))\n         app.renderers))\n  (local (ok result) (pcall (fn [] (Main.init))))\n  (set app.renderers snap)\n  (if ok result (error result)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 8 :length 90
+                                             :form "(fn []\n         (set app.renderers (make-renderer-stub))\n         app.renderers)"}]
+                              :mutations [{:op :set :path ["app" "renderers"] :line 14 :column 10
+                                           :form "(set app.renderers (make-renderer-stub))" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "C16: unrelated child mutation should not be covered by Main.init pcall")
+  (assert (> (length result) 0) "C16: should have at least one diagnostic"))
+
 (table.insert tests {:name "C13 allows parent pcall restoring child mutation" :fn mutation-restoration-allows-parent-pcall-restoring-child-mutation})
 (table.insert tests {:name "C14 flags unrelated parent pcall" :fn mutation-restoration-flags-child-mutation-with-unrelated-parent-pcall})
 (table.insert tests {:name "C15 flags child call before parent pcall" :fn mutation-restoration-flags-child-mutation-called-before-parent-pcall})
+(table.insert tests {:name "C16 flags unrelated child with Main.init pcall" :fn mutation-restoration-flags-unrelated-child-mutation-with-main-init-pcall})
 
 (local main
   (fn []
