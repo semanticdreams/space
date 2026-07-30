@@ -594,14 +594,16 @@
       (table.remove ancestor)))
   found)
 (fn has-concrete-restore-after-byte? [fn-form fn-def-line path min-byte]
-  "Check for concrete restore evidence at a byte position >= min-byte.
-   Falls back to ancestor path snapshots when exact-path snapshot not found."
+  "Check for concrete restore >= min-byte. Falls back to ancestor paths
+   when exact-path snapshot missing or exact restore scan fails."
   (local snap-var (find-snapshot-var fn-form path))
-  (if (not snap-var)
-      (try-ancestor-concrete-restore fn-form path min-byte)
+  (if snap-var
       (do
         (local path-text (table.concat path "."))
-        (scan-restore-for-path-var fn-form path path-text snap-var min-byte))))
+        (if (scan-restore-for-path-var fn-form path path-text snap-var min-byte)
+            true
+            (try-ancestor-concrete-restore fn-form path min-byte)))
+      (try-ancestor-concrete-restore fn-form path min-byte)))
 (fn find-pcall-call-start [form-text pcall-byte]
   "Given the byte position of 'p' in 'pcall', find the opening '(' of the pcall call.
    Returns the byte position of '(' or nil."

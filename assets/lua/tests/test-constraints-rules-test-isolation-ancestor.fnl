@@ -230,6 +230,29 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag when ancestor let-snapshot exists but not restored")
   (assert (> (length result) 0) "should have at least one diagnostic"))
+(fn mutation-restoration-allows-exact-mutation-snapshot-with-ancestor-restore []
+  "Exact descendant snapshot (original-wheel) exists but only ancestor
+   (original-events) is restored. Ancestor fallback must still cover."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-both-snaps"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-both-snaps []
+  (local original-events app.engine.events)
+  (local original-wheel app.engine.events.mouse-wheel)
+  (set app.engine.events.mouse-wheel nil)
+  (set app.engine.events original-events))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine" "events" "mouse-wheel"]
+                                           :line 8 :column 1
+                                           :form "(set app.engine.events.mouse-wheel nil)"
+                                           :enclosing-fn "test-both-snaps"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "exact descendant snapshot + ancestor restore should pass via ancestor fallback"))
 (table.insert tests {:name "T11-10 allows ancestor snapshot covers descendant mutation" :fn mutation-restoration-allows-ancestor-snapshot-covers-descendant-mutation})
 (table.insert tests {:name "T11-11 allows sensitive base ancestor covers deep descendant" :fn mutation-restoration-allows-sensitive-base-ancestor-covers-deep-descendant})
 (table.insert tests {:name "T11-12 flags ancestor wrong restore var" :fn mutation-restoration-flags-ancestor-wrong-restore-var})
@@ -238,6 +261,7 @@
 (table.insert tests {:name "T11-15 flags bare app not cover" :fn mutation-restoration-flags-bare-app-not-cover})
 (table.insert tests {:name "T11-16 flags unrelated ancestor" :fn mutation-restoration-flags-unrelated-ancestor})
 (table.insert tests {:name "T11-17 flags ancestor let no restore" :fn mutation-restoration-flags-ancestor-let-no-restore})
+(table.insert tests {:name "R1-1 allows exact descendant snapshot with ancestor restore" :fn mutation-restoration-allows-exact-mutation-snapshot-with-ancestor-restore})
 
 (local main
   (fn []
