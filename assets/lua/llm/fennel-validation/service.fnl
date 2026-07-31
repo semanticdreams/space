@@ -55,13 +55,35 @@
    :message message
    :hint (diagnostic-hint message)})
 
-(fn compile-file [path]
-  (local source (fs.read-file path))
+(fn macro-module? [path module]
+  (if (= module "macros")
+      true
+      (and (= (type path) :string)
+           (if (path:match "/macros%.fnl$")
+               true
+               (path:match "/init%-macros%.fnl$")
+               true
+               false))))
+
+(fn compile-options [path module]
+  (local opts {:filename path
+               :module-name module
+               :correlate true})
+  (when (macro-module? path module)
+    (tset opts :env "_COMPILER")
+    (tset opts :scope "_COMPILER"))
+  opts)
+
+(fn compile-file-source [path source module]
   (local (ok err) (pcall (fn []
-                           (fennel.compile-string source {:filename path}))))
+                           (fennel.compile-string source (compile-options path module)))))
   (if ok
       nil
       (compile-diagnostic path err)))
+
+(fn compile-file [path]
+  (local source (fs.read-file path))
+  (compile-file-source path source nil))
 
 (fn unique-sorted-absolute-paths [paths]
   (local absolute [])
@@ -106,6 +128,16 @@
     (table.insert paths record.path))
   paths)
 
+(fn check-records [records]
+  (local checked [])
+  (local diagnostics [])
+  (each [_ record (ipairs (if records records []))]
+    (table.insert checked record.path)
+    (local diagnostic (compile-file-source record.path record.source record.module))
+    (when diagnostic
+      (table.insert diagnostics diagnostic)))
+  (finish-result checked diagnostics))
+
 (fn FennelValidationService [opts]
   (local options (if opts opts {}))
   {:opts options
@@ -116,10 +148,10 @@
    :check-repo (fn [self args]
                  (local target (self:resolve-target (if args args ["--target" "repo"])))
                  (self:check-target target))
-   :check-target (fn [_self target]
-                   (local (ok paths-or-err) (pcall target-paths target))
-                   (if ok
-                       (check-paths paths-or-err)
-                       (finish-result [] [(input-diagnostic "" (tostring paths-or-err))])))})
+    :check-target (fn [_self target]
+                    (local (ok records-or-err) (pcall Source.discover target))
+                    (if ok
+                        (check-records records-or-err)
+                        (finish-result [] [(input-diagnostic "" (tostring records-or-err))])))})
 
 {:FennelValidationService FennelValidationService}

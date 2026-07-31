@@ -84,6 +84,7 @@
     :tests.test-fennel-interpreter-view
     :tests.test-tree-sitter-fennel
     :tests.test-fennel-validation
+    :tests.test-fennel-check-cli
     :tests.test-launchables
     :tests.test-random
     :tests.test-tempfile

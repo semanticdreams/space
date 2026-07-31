@@ -37,7 +37,7 @@
 
     (set client (HackerNews {:requests_per_window 4
                              :window_ms 1000
-                             :app-name test-app-name}))))
+                             :app-name test-app-name})))
 
 (fn await [future]
   (ensure-client)
