@@ -355,8 +355,6 @@
                  (set app.movables movables)
                  (set app.camera camera)
                   (set app.create-default-projection AppProjection.create-default-projection)
-                  (when options.containment-config
-                    (set app.physics-containment-config options.containment-config))
                   (configure-test-physics-world {:config options.containment-config})
                   (scene:ensure-activity-slot "sandbox" {:camera camera})
                   (local sandbox-slot (scene:activate-activity-slot "sandbox"))

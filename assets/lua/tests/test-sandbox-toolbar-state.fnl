@@ -17,7 +17,8 @@
   "State.changed must be a Signal and must fire once per mutation."
   (local state (SandboxToolbarState {}))
   (var emit-count 0)
-  (state.changed:connect (fn [] (set emit-count (+ emit-count 1))))
+  (local changed-handler (fn [] (set emit-count (+ emit-count 1))))
+  (state.changed:connect changed-handler)
   (state:set-camera-mode :grounded)
   (assert (= emit-count 1)
           (.. "Changed signal should fire once after set-camera-mode, got " (tostring emit-count)))
@@ -26,13 +27,15 @@
           (.. "Changed signal should fire twice after set-object-move-enabled!, got " (tostring emit-count)))
   (state:set-drag-attachment :anchor)
   (assert (= emit-count 3)
-          (.. "Changed signal should fire three times after set-drag-attachment, got " (tostring emit-count))))
+          (.. "Changed signal should fire three times after set-drag-attachment, got " (tostring emit-count)))
+  (state.changed:disconnect changed-handler true))
 
 (fn sandbox-toolbar-state-changed-signal-noop-on-same-value []
   "State.changed must not fire when setting the same value."
   (local state (SandboxToolbarState {}))
   (var emit-count 0)
-  (state.changed:connect (fn [] (set emit-count (+ emit-count 1))))
+  (local changed-handler (fn [] (set emit-count (+ emit-count 1))))
+  (state.changed:connect changed-handler)
   (state:set-camera-mode :flight)
   (assert (= emit-count 0)
           (.. "Changed signal should not fire when setting same camera-mode, got " (tostring emit-count)))
@@ -41,7 +44,8 @@
           (.. "Changed signal should not fire when setting same object-move-enabled?, got " (tostring emit-count)))
   (state:set-drag-attachment :center)
   (assert (= emit-count 0)
-          (.. "Changed signal should not fire when setting same drag-attachment, got " (tostring emit-count))))
+          (.. "Changed signal should not fire when setting same drag-attachment, got " (tostring emit-count)))
+  (state.changed:disconnect changed-handler true))
 
 (fn sandbox-toolbar-state-invalid-camera-mode-errors []
   "Setting an invalid camera-mode must error."
