@@ -364,3 +364,30 @@ def test_cli_maps_database_operational_error_to_exit_code_3(
     captured = capsys.readouterr()
     assert exit_code == 3
     assert "database" in captured.err.lower()
+
+
+def test_cli_maps_invalid_existing_database_to_exit_code_3_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, parent = create_fixture_space_worktrees(tmp_path)
+    data_dir = tmp_path / "opencode-data"
+    data_dir.mkdir()
+    (data_dir / "opencode.db").write_text("not a sqlite database", encoding="utf-8")
+
+    exit_code = analyzer.main(
+        [
+            "--repo-root",
+            str(repo),
+            "--opencode-data-dir",
+            str(data_dir),
+            "--worktree-parent",
+            str(parent),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    combined_output = captured.out + captured.err
+    assert exit_code == 3
+    assert "traceback" not in combined_output.lower()
+    assert "operationalerror" not in combined_output.lower()
+    assert "databaseerror" not in combined_output.lower()
