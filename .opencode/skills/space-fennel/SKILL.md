@@ -1,14 +1,15 @@
 ---
 name: space-fennel
-description: Use when editing assets/lua/**/*.fnl, Fennel tests, Fennel constraints, or Space Fennel CLI/MCP tools; provides validation commands, syntax traps, macro path requirements, and parser-repair workflow.
+description: Use when editing any Space .fnl file, Fennel tests, Fennel constraints, or Space Fennel CLI/MCP tools; provides validation commands, syntax traps, macro path requirements, and parser-repair workflow.
 ---
 
 # Space Fennel
 
-Use this skill for all Space `.fnl` work: Fennel source under `assets/lua/`,
-Fennel tests, Fennel constraints, and Fennel validation CLI/MCP tools. When the
-work is specifically about widgets, layout, rendering adapters, interaction
-widgets, widget lifecycle, or widget tests, use `space-fennel-ui` additionally.
+Use this skill for all Space `.fnl` work, including Fennel files outside
+`assets/lua/` such as archived or experimental modules, Fennel tests, Fennel
+constraints, and Fennel validation CLI/MCP tools. When the work is specifically
+about widgets, layout, rendering adapters, interaction widgets, widget lifecycle,
+or widget tests, use `space-fennel-ui` additionally.
 
 ## Validation Ladder
 

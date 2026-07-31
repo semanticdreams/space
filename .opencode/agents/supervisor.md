@@ -95,7 +95,7 @@ before implementation skills.
 
 ### Space Project Skill Routing
 
-- If a request touches `assets/lua/**/*.fnl`, Fennel tests, Fennel constraints,
+- If a request touches any Space `.fnl` file, Fennel tests, Fennel constraints,
   Fennel validation CLI/MCP tooling such as `tools.fennel-check`, or mentions
   `make fennel-check`, invoke `space-fennel` before planning or implementation.
   For widget/layout/rendering overlap, invoke `space-fennel-ui` additionally;
