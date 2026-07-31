@@ -313,21 +313,21 @@
           (set found true)))))
   found)
 
-(fn def-creates-children? [ff def-name]
+(fn def-contains-child-creation-call? [ff def]
   (var found false)
-  (local calls (if (= ff.calls nil) [] ff.calls))
-  (each [_ call (ipairs calls)]
-    (when (and (not found)
-               (. child-creation-callees call.callee)
-               (= (if (= call.enclosing-fn nil) "" call.enclosing-fn) def-name))
-      (set found true)))
+  (each [_ call (ipairs (if (= ff.calls nil) [] ff.calls))]
+    (when (and (not found) (. child-creation-callees call.callee))
+      (local same-name (= (if (= call.enclosing-fn nil) "" call.enclosing-fn) (if (= def.name nil) "" def.name)))
+      (local contains (and def.form call.form (string.find def.form call.form 1 true)))
+      (if (and same-name (not= def.name "<anonymous>")) (set found true)
+          (and contains (= call.enclosing-fn "<anonymous>")) (set found true))))
   found)
 
 (fn def-has-returned-drop? [ff def]
   "Check if def returns a table with :drop (fn ...) or :drop (lambda ...).
   Symbolic :drop <symbol> is NOT accepted — proven same-scope binding
   detection is not reliably available from file-facts."
-  (when (and def.form (def-creates-children? ff def.name))
+  (when (and def.form (def-contains-child-creation-call? ff def))
     (if (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
         true
         (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]")
@@ -387,7 +387,7 @@
           (set all-covered true)
           (each [_ def (ipairs all-defs)]
             (when (and all-covered
-                       (def-creates-children? ff def.name)
+                        (def-contains-child-creation-call? ff def)
                        (not (def-has-returned-drop? ff def)))
               (set all-covered false)))
           ;; Also check file-level creation (nil enclosing-fn) and access-based
@@ -402,17 +402,17 @@
               (when all-covered
                 (local p (if (= access.path nil) [] access.path))
                 (local plen (length p))
-                (when (and (>= plen 2) (. child-creation-access-keys (. p plen)))
-                  (set all-covered false)))))
-          (when all-covered
-            (each [_ access (ipairs (or ff.accesses []))]
-              (when all-covered
-                (local p (if (= access.path nil) [] access.path))
-                (local plen (length p))
-                (when (and (>= plen 2)
-                           (= (. p 1) "renderer")
-                           (. child-creation-access-keys (. p plen)))
-                  (set all-covered false))))))
+                (local last-key (and (>= plen 2) (. p plen)))
+                (local retained-access? (and last-key (. child-creation-access-keys last-key)))
+                (when retained-access?
+                  (var covered false)
+                  (local access-form (if access.form access.form access.text))
+                  (each [_ def (ipairs all-defs)]
+                    (when (and (not covered) access-form (def-has-returned-drop? ff def)
+                               (string.find def.form access-form 1 true))
+                      (set covered true)))
+                  (when (not covered)
+                    (set all-covered false)))))))
         (when (not all-covered)
           (table.insert diagnostics
             (Diagnostics.violation

@@ -545,6 +545,113 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "returned table :drop (fn ...) should satisfy public drop path"))
 
+(fn child-drop-allows-anonymous-builder-returned-table-drop-fn []
+  "Anonymous retained builder with nested callbacks returns inline :drop."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local builder-form "(fn [ctx]
+  (var root-layout nil)
+  (set root-layout (Layout {:children []}))
+  (when root-layout.children
+    (print :has-children))
+  (set changed-handler (events:connect
+                         (fn [_payload]
+                           (request-rebuild!))))
+  {:layout root-layout
+   :update (fn [_self]
+             (request-rebuild!))
+   :drop (fn [_self]
+           (root-layout:drop))})")
+  (local callback-form "(fn [_payload]
+  (request-rebuild!))")
+  (local update-form "(fn [_self]
+  (request-rebuild!))")
+  (local drop-form "(fn [_self]
+  (root-layout:drop))")
+  (local ff (make-file-fact {:path "/src/activity-dock-view.fnl"
+                              :module "activity-dock-view"
+                              :definitions [{:kind :local
+                                             :name "build"
+                                             :top-level? false
+                                             :line 2 :column 3
+                                             :length 250
+                                             :form (.. "(local build\n  " builder-form ")")
+                                             :enclosing-fn "ActivityDockView"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 3 :column 5
+                                             :length 240
+                                             :form builder-form
+                                             :enclosing-fn "ActivityDockView"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 6 :column 26
+                                             :length 40
+                                             :form callback-form
+                                             :enclosing-fn "<anonymous>"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 10 :column 12
+                                             :length 35
+                                             :form update-form
+                                             :enclosing-fn "<anonymous>"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 12 :column 10
+                                             :length 45
+                                             :form drop-form
+                                             :enclosing-fn "<anonymous>"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 20
+                                       :form "(Layout {:children []})"
+                                       :enclosing-fn "<anonymous>"}
+                                      {:callee "root-layout:drop"
+                                       :receiver "root-layout" :method "drop"
+                                       :line 13 :column 12
+                                       :form "(root-layout:drop)"
+                                       :enclosing-fn "<anonymous>"}]
+                              :accesses [{:path ["root-layout" "children"] :text "root-layout.children"
+                                          :line 6 :column 9 :form "root-layout.children"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "anonymous builder returned table :drop fn should satisfy public drop"))
+
+(fn child-drop-allows-returned-table-drop-lambda []
+  "Returned {:drop (lambda [_] ...)} satisfies public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 150
+                                             :form "(fn make-widget []
+  (let [root-layout (Layout {:children []})]
+    {:layout root-layout :drop (lambda [_]
+                                 (root-layout:drop))}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 2 :column 22
+                                       :form "(Layout {:children []})"
+                                       :enclosing-fn "make-widget"}
+                                      {:callee "root-layout:drop"
+                                       :receiver "root-layout" :method "drop"
+                                       :line 4 :column 34
+                                       :form "(root-layout:drop)"
+                                       :enclosing-fn "make-widget"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "returned table :drop (lambda ...) should satisfy public drop path"))
+
 ;; R3-2-negative: returned table :drop symbol is NOT accepted
 ;; Symbolic :drop <symbol> resolution is not reliably available from
 ;; file-facts. Only inline (fn ...)/(lambda ...) is accepted.
@@ -1041,10 +1148,15 @@
                      :fn child-drop-flags-tset-false-drop-assignment})
 ;; R3-1: returned table :drop (fn ...)
 (table.insert tests {:name "child-drop allows returned table drop fn"
-                     :fn child-drop-allows-returned-table-drop-fn})
+                      :fn child-drop-allows-returned-table-drop-fn})
+;; R11-precision: anonymous builder with nested callbacks still passes
+(table.insert tests {:name "child-drop allows anonymous builder returned table drop fn"
+                      :fn child-drop-allows-anonymous-builder-returned-table-drop-fn})
+(table.insert tests {:name "child-drop allows returned table drop lambda"
+                      :fn child-drop-allows-returned-table-drop-lambda})
 ;; R3-2-negative: returned table :drop symbol is NOT accepted
 (table.insert tests {:name "child-drop flags returned table drop symbol"
-                     :fn child-drop-flags-returned-table-drop-symbol})
+                      :fn child-drop-flags-returned-table-drop-symbol})
 ;; V12-1: other-scope function-valued symbol regression
 (table.insert tests {:name "child-drop flags other-scope drop symbol"
                      :fn child-drop-flags-other-scope-drop-symbol})
