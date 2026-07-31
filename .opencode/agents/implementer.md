@@ -1,8 +1,7 @@
 ---
 description: Implements approved plans and accepted review findings using focused tests before broader relevant validation
 mode: subagent
-model: openai/gpt-5.5
-variant: medium
+model: deepseek/deepseek-v4-pro
 temperature: 0.4
 steps: 100
 permission:
