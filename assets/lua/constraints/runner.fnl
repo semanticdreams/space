@@ -170,6 +170,26 @@
       (set found true)))
   found)
 
+(fn rule-applicable-to-target? [rule target target-suites]
+  (assert rule "rule is required")
+  (assert target "target is required")
+  (local rule-targets (or rule.targets [:repo :unit :app :files]))
+  (local rule-family (or rule.family ""))
+  (and (table-contains? rule-targets target.kind)
+       (or (= (length target-suites) 0)
+           (table-contains? target-suites rule-family))))
+
+(fn target-baseline-data [baseline-data target applicable-rule-ids]
+  "Scope baseline policy to the target being analyzed.
+  Repo targets enforce reviewed entries and all configured required ids against
+  executed rules. Non-repo targets still enforce required ids for rules that are
+  applicable to that target, but repo-specific baseline entries do not become
+  stale/worsened for unrelated external files."
+  (if (= target.kind :repo)
+      baseline-data
+      {:required-rule-ids applicable-rule-ids
+       :entries []}))
+
 (fn M.run-target [target opts]
   "Execute the full constraint pipeline for a target:
    1. Discover source files
@@ -190,16 +210,11 @@
   (local all-rules (RuleRegistry.all-rules))
   (local target-suites (or target.suites []))
   (local applicable-rules [])
-  (local registered-rule-ids [])
+  (local applicable-rule-ids [])
   (each [_ rule (ipairs all-rules)]
-    (let [rule-targets (or rule.targets [:repo :unit :app :files])
-          rule-family (or rule.family "")
-          rule-id (or rule.id rule.constraint-id "unknown-rule")]
-      (table.insert registered-rule-ids rule-id)
-      (when (and (table-contains? rule-targets target.kind)
-                  (or (= (length target-suites) 0)
-                      (table-contains? target-suites rule-family)))
-        (table.insert applicable-rules rule))))
+    (when (rule-applicable-to-target? rule target target-suites)
+      (table.insert applicable-rules rule)
+      (table.insert applicable-rule-ids (or rule.id rule.constraint-id "unknown-rule"))))
   ;; 4. Execute each applicable rule with fact context
   (local all-diagnostics [])
   (local present-rule-ids [])
@@ -225,9 +240,10 @@
                          nil
                          (or o.baseline-data (Baseline.load)))]
     (if baseline-data
-        (let [baseline-result (Baseline.apply all-diagnostics
-                                              baseline-data
-                                               registered-rule-ids)
+        (let [scoped-baseline-data (target-baseline-data baseline-data target applicable-rule-ids)
+              baseline-result (Baseline.apply all-diagnostics
+                                               scoped-baseline-data
+                                               present-rule-ids)
               filtered-diagnostics baseline-result.diagnostics]
           ;; Append baseline diagnostics (worsened, stale, missing-required)
           (each [_ bd (ipairs baseline-result.baseline-diagnostics)]

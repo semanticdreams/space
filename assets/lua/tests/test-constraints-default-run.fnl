@@ -22,7 +22,15 @@
 
 (fn write-fixture [dir]
   (local path (fs.join-path dir "bad-style.fnl"))
-  (fs.write-file path "(let [x 1]\n  x)\n")
+  (local lines [])
+  (for [i 1 1201]
+    (table.insert lines (.. "(local x" i " " i ")")))
+  (fs.write-file path (.. (table.concat lines "\n") "\n"))
+  path)
+
+(fn write-clean-fixture [dir]
+  (local path (fs.join-path dir "clean.fnl"))
+  (fs.write-file path "(local x 1)\nx\n")
   path)
 
 (fn missing-required? [diagnostic]
@@ -38,6 +46,9 @@
     (when (= d.constraint-id id)
       (set found true)))
   found)
+
+(fn baseline-diagnostic? [diagnostic]
+  (= diagnostic.family "baseline"))
 
 (fn assert-non-repo-target-runs-static-rules-with-default-baseline [kind]
   (assert kind "target kind is required")
@@ -62,8 +73,35 @@
       (assert (not (missing-required? d))
               (.. "non-repo target should not emit baseline.required-rule-missing; got "
                   (or d.constraint-id "nil") " " (or d.message ""))))
-    (assert (has-constraint-id? result.diagnostics "structure.style-doctrine")
+    (assert (has-constraint-id? result.diagnostics "structure.max-module-length")
             (.. (tostring kind) " target should execute static structure rules")))))
+
+(fn assert-clean-non-repo-target-default-baseline-passes [kind]
+  (assert kind "target kind is required")
+  (local Runner (require :constraints.runner))
+  (with-temp-dir (fn [dir]
+    (local file-path (write-clean-fixture dir))
+    (local target (if (= kind :files)
+                    {:kind :files
+                     :name "clean-files-fixture"
+                     :roots []
+                     :files [file-path]
+                     :module-roots []
+                     :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]}
+                    {:kind kind
+                     :name (.. "clean-" (tostring kind) "-fixture")
+                     :roots [dir]
+                     :files []
+                     :module-roots [dir]
+                     :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]}))
+    (local result (Runner.run-target target {}))
+    (assert (= result.status :pass)
+            (.. (tostring kind) " clean target should pass with default baseline, got "
+                (tostring result.status)))
+    (each [_ d (ipairs result.diagnostics)]
+      (assert (not (baseline-diagnostic? d))
+              (.. "clean non-repo target should not emit baseline diagnostics; got "
+                  (or d.constraint-id "nil") " " (or d.message "")))))))
 
 ;; --- RuleRegistry tests ---
 
@@ -206,6 +244,44 @@
   and should not fail with baseline.required-rule-missing false positives."
   (assert-non-repo-target-runs-static-rules-with-default-baseline :app))
 
+(fn runner-run-target-clean-files-default-baseline-has-no-false-baseline []
+  "A clean files target should pass with the default baseline and must not be
+  blocked by unrelated repo stale/worsened baseline entries."
+  (assert-clean-non-repo-target-default-baseline-passes :files))
+
+(fn runner-run-target-clean-unit-default-baseline-has-no-false-baseline []
+  "A clean unit target should pass with the default baseline and must not be
+  blocked by unrelated repo stale/worsened baseline entries."
+  (assert-clean-non-repo-target-default-baseline-passes :unit))
+
+(fn runner-run-target-clean-app-default-baseline-has-no-false-baseline []
+  "A clean app target should pass with the default baseline and must not be
+  blocked by unrelated repo stale/worsened baseline entries."
+  (assert-clean-non-repo-target-default-baseline-passes :app))
+
+(fn runner-run-target-repo-required-filtered-rule-is-missing []
+  "Repo required-rule validation must use executed/applicable ids, not every
+  registered id, so filtering out a required repo rule fails loudly."
+  (local Runner (require :constraints.runner))
+  (with-temp-dir (fn [dir]
+    (write-clean-fixture dir)
+    (local target {:kind :repo
+                   :name "repo-filter-regression"
+                   :roots [dir]
+                   :files []
+                   :module-roots [dir]
+                   :suites [:lifecycle]})
+    (local baseline-data {:required-rule-ids ["structure.style-doctrine"]
+                          :entries []})
+    (local result (Runner.run-target target {:baseline-data baseline-data}))
+    (var found-missing false)
+    (each [_ d (ipairs result.diagnostics)]
+      (when (and d.missing-required
+                 (= d.constraint-id "structure.style-doctrine"))
+        (set found-missing true)))
+    (assert found-missing
+            "repo target should report baseline.required-rule-missing when a required rule is filtered out"))))
+
 (fn runner-run-target-with-repo-target-runs-full-pipeline []
   "Prove that run-target with a repo target discovers files, extracts facts,
   runs rules, and applies baseline — returns a structured, non-empty result."
@@ -332,6 +408,14 @@
                       :fn runner-run-target-unit-default-baseline-runs-static-rules})
 (table.insert tests {:name "runner run-target app default baseline runs static rules"
                       :fn runner-run-target-app-default-baseline-runs-static-rules})
+(table.insert tests {:name "runner run-target clean files default baseline has no false baseline"
+                      :fn runner-run-target-clean-files-default-baseline-has-no-false-baseline})
+(table.insert tests {:name "runner run-target clean unit default baseline has no false baseline"
+                      :fn runner-run-target-clean-unit-default-baseline-has-no-false-baseline})
+(table.insert tests {:name "runner run-target clean app default baseline has no false baseline"
+                      :fn runner-run-target-clean-app-default-baseline-has-no-false-baseline})
+(table.insert tests {:name "runner run-target repo required filtered rule is missing"
+                      :fn runner-run-target-repo-required-filtered-rule-is-missing})
 (table.insert tests {:name "runner run-target with repo target runs full pipeline"
                       :fn runner-run-target-with-repo-target-runs-full-pipeline})
 (table.insert tests {:name "default target suites match rule families"
