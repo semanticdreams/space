@@ -817,7 +817,7 @@
 
 ;; R9-1: returned :drop in one function does NOT exempt creation in another
 (fn child-drop-flags-unrelated-returned-drop []
-  "Returned :drop in A must not cover B's same-text child access."
+  "Returned :drop in A must not cover same-line B's same-text child access."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.owned-child-drop"))
@@ -829,23 +829,19 @@
                                               :top-level? true
                                               :line 1 :column 1
                                               :length 100
-                                              :form "(fn helper-with-drop []
-  (let [root (Layout {:children []})]
-    (when root.children (print :owned))
-    {:layout root :drop (fn [] (root:drop))}))"}
+                                              :form "(fn helper-with-drop [] (let [root (Layout {:children []})] (when root.children (print :owned)) {:layout root :drop (fn [] (root:drop))}))"}
                                              {:kind :fn
                                               :name "make-widget"
                                               :top-level? true
-                                              :line 5 :column 1
+                                              :line 1 :column 150
                                               :length 100
-                                              :form "(fn make-widget []
-  (when root.children (print :leaked)))"}]
-                               :calls [{:callee "Layout" :receiver nil :method nil :line 2 :column 15
+                                              :form "(fn make-widget [] (when root.children (print :leaked)))"}]
+                               :calls [{:callee "Layout" :receiver nil :method nil :line 1 :column 36
                                         :form "(Layout {:children []})" :enclosing-fn "helper-with-drop"}
-                                       {:callee "root:drop" :receiver "root" :method "drop" :line 4 :column 32
+                                       {:callee "root:drop" :receiver "root" :method "drop" :line 1 :column 121
                                         :form "(root:drop)" :enclosing-fn "helper-with-drop"}]
-                               :accesses [{:path ["root" "children"] :text "root.children" :line 3 :column 11 :form "root.children"}
-                                          {:path ["root" "children"] :text "root.children" :line 6 :column 9 :form "root.children"}]}))
+                               :accesses [{:path ["root" "children"] :text "root.children" :line 1 :column 70 :form "root.children"}
+                                          {:path ["root" "children"] :text "root.children" :line 1 :column 174 :form "root.children"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "unrelated returned :drop should not exempt access-only child creator")
   (var found-missing-drop false)

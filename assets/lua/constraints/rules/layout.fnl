@@ -332,7 +332,7 @@
         true
         false)))
 
-(fn def-covers-access? [ff def access] (var newlines 0) (when def.form (each [_ _ (def.form:gmatch "\n")] (set newlines (+ newlines 1)))) (local access-form (if access.form access.form access.text)) (and (def-has-returned-drop? ff def) access-form def.form access.line def.line (<= def.line access.line) (<= access.line (+ def.line newlines)) (string.find def.form access-form 1 true)))
+(fn def-covers-access? [ff def access] (var newlines 0) (when def.form (each [_ _ (def.form:gmatch "\n")] (set newlines (+ newlines 1)))) (local access-form (if access.form access.form access.text)) (local last-line (if def.form (def.form:match "[^\n]*$") "")) (local end-line (and def.line (+ def.line newlines))) (local end-column (if (= newlines 0) (- (+ def.column (length last-line)) 1) (length last-line))) (local after-start (if (and access.line access.column def.line def.column) (if (> access.line def.line) true (= access.line def.line) (>= access.column def.column) false) false)) (local before-end (if (and access.line access.column end-line end-column) (if (< access.line end-line) true (= access.line end-line) (<= access.column end-column) false) false)) (and (def-has-returned-drop? ff def) access-form def.form after-start before-end (string.find def.form access-form 1 true)))
 
 (fn has-global-drop-path? [ff]
   "Check for file-level public drop paths: export key 'drop',
