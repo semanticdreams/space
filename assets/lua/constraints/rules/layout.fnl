@@ -420,7 +420,7 @@
         false)))
 
 (fn def-covers-access? [ff def access] (var newlines 0) (when def.form (each [_ _ (def.form:gmatch "\n")] (set newlines (+ newlines 1)))) (local access-form (if access.form access.form access.text)) (local last-line (if def.form (def.form:match "[^\n]*$") "")) (local end-line (and def.line (+ def.line newlines))) (local end-column (if (= newlines 0) (- (+ def.column (length last-line)) 1) (length last-line))) (local after-start (if (and access.line access.column def.line def.column) (if (> access.line def.line) true (= access.line def.line) (>= access.column def.column) false) false)) (local before-end (if (and access.line access.column end-line end-column) (if (< access.line end-line) true (= access.line end-line) (<= access.column end-column) false) false)) (and (def-has-returned-drop? ff def) access-form def.form after-start before-end (string.find def.form access-form 1 true)))
-
+(var detach-cleanup-call? nil)
 (fn has-global-drop-path? [ff]
   "Check for file-level public drop paths: export key 'drop',
   definitions named 'drop', or set/tset mutations assigning .drop
@@ -440,7 +440,7 @@
   ;; values like nil/false/symbol do NOT count as a public drop path.
   (each [_ mut (ipairs (if (= ff.mutations nil) [] ff.mutations))]
     (when (and (not found)
-               (if (= mut.op :set) true (= mut.op :tset) true false))
+                (if (= mut.op :set) true (= mut.op :tset) true false))
       (local p (if (= mut.path nil) [] mut.path))
       (local plen (length p))
       (when (and (>= plen 1) (= (. p plen) "drop")
@@ -455,7 +455,7 @@
     (when (and (not found) (callee-is-drop-method? call.callee))
       (set found true)))
   (each [_ call (ipairs (or ff.calls []))]
-    (when (and (not found) (or (. child-cleanup-calrees call.callee) (and call.callee (string.find call.callee ":" 1 true) (. child-cleanup-calrees call.method)) (and call.callee (string.find call.callee ":" 1 true) (= call.method "detach") (has-global-drop-path? ff) (if (= call.receiver "self") true (= call.receiver "child") true (= call.receiver "node") true (= call.receiver "manager") true false))))
+    (when (and (not found) (or (. child-cleanup-calrees call.callee) (and call.callee (string.find call.callee ":" 1 true) (. child-cleanup-calrees call.method)) (detach-cleanup-call? ff call)))
       (set found true)))
   found)
 
@@ -1094,6 +1094,45 @@
 ;; ---------------------------------------------------------------------------
 ;; Rule registry
 ;; ---------------------------------------------------------------------------
+
+(fn drop-assignment-mutation? [mut]
+  "Return true for .drop mutations assigning a function literal."
+  (local p (if (= mut.path nil) [] mut.path))
+  (local plen (length p))
+  (and (>= plen 1)
+       (= (. p plen) "drop")
+       (string.find (if (= mut.form nil) "" mut.form) "(fn " 1 true)))
+
+(fn supported-detach-receiver? [receiver]
+  "Return true for method receivers used by explicit child tree detach cleanup."
+  (if (= receiver "self") true
+      (= receiver "child") true
+      (= receiver "node") true
+      (= receiver "manager") true
+      false))
+
+(fn drop-assignment-contains-call? [ff call]
+  "Return true when an anonymous call is contained in a .drop function assignment."
+  (var matched false)
+  (each [_ mut (ipairs (if (= ff.mutations nil) [] ff.mutations))]
+    (when (and (not matched)
+               (drop-assignment-mutation? mut)
+               call.form
+               (string.find mut.form call.form 1 true))
+      (set matched true)))
+  matched)
+
+(set detach-cleanup-call?
+     (fn [ff call]
+       (and call.callee
+            (string.find call.callee ":" 1 true)
+            (= call.method "detach")
+            (supported-detach-receiver? call.receiver)
+            (if (= call.enclosing-fn "drop")
+                true
+                (= call.enclosing-fn "<anonymous>")
+                (drop-assignment-contains-call? ff call)
+                false))))
 
 (fn M.rules []
   "Return the list of layout-rendering rules."

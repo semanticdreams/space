@@ -304,6 +304,40 @@
       (set found-missing-cleanup true)))
   (assert found-missing-cleanup "should flag missing cleanup for dotted detach call"))
 
+(fn child-drop-flags-unrelated-method-detach-outside-drop []
+  "A child:detach call outside the public drop path must not satisfy cleanup."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn :name "drop" :top-level? true
+                                             :line 20 :column 1 :length 80
+                                             :form "(fn drop [self]
+  (set self.active? false))"}
+                                            {:kind :fn :name "detach-other" :top-level? true
+                                             :line 30 :column 1 :length 40
+                                             :form "(fn detach-other [child]
+  (child:detach))"}]
+                              :accesses [{:path ["self" "children"] :text "self.children"
+                                          :line 10 :column 1 :form "self.children"}]
+                              :mutations [{:op :set :path ["self" "children"]
+                                           :line 10 :column 1
+                                           :form "(set self.children [])"}]
+                              :calls [{:callee "child:detach"
+                                       :receiver "child" :method "detach"
+                                       :line 31 :column 3
+                                       :form "(child:detach)"
+                                       :enclosing-fn "detach-other"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "method detach outside drop should not satisfy child cleanup")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should flag missing cleanup when detach is outside drop"))
+
 (fn child-drop-allows-cleaned-up-test-module-without-public-drop []
   "Test modules that locally own temporary Layout objects and clean them up
   should not need a public module drop API."
@@ -410,6 +444,8 @@
                      :fn child-drop-allows-public-drop-with-method-detach-cleanup})
 (table.insert tests {:name "child-drop flags unrelated dotted detach call"
                      :fn child-drop-flags-unrelated-dotted-detach-call})
+(table.insert tests {:name "child-drop flags unrelated method detach outside drop"
+                     :fn child-drop-flags-unrelated-method-detach-outside-drop})
 (table.insert tests {:name "child-drop allows cleaned-up test module without public drop"
                      :fn child-drop-allows-cleaned-up-test-module-without-public-drop})
 (table.insert tests {:name "child-drop flags cleaned-up production module without public drop"
