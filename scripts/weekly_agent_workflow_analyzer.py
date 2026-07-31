@@ -58,14 +58,19 @@ REQUIRED_COLUMNS = {
 SECRET_PATTERNS = [
     (
         "private-key",
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)",
+            re.DOTALL,
+        ),
     ),
     ("authorization", re.compile(r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+")),
     ("bearer-token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")),
     (
         "secret-assignment",
         re.compile(
-            r"(?i)\b(api[_-]?key|apikey|token|secret|password|authorization|x-api-key)(\s*[:=]\s*)([^\s,;]+)"
+            r"(?i)(?<![A-Za-z0-9_-])"
+            r"([\"']?(?:api[_-]?key|apikey|token|secret|password|authorization|x-api-key)[\"']?\s*[:=]\s*)"
+            r"([\"']?)([^\"',}\s;]+)(\2)"
         ),
     ),
     (
@@ -88,8 +93,10 @@ def redact_text(text: str) -> tuple[str, list[str]]:
             labels.append(label)
 
             def replacement(match: re.Match[str], *, item: str = label) -> str:
-                if item in {"authorization", "secret-assignment"} and match.lastindex and match.lastindex >= 2:
-                    return f"{match.group(1)}{match.group(2) if item == 'secret-assignment' else ''}[REDACTED:{item}]"
+                if item == "authorization" and match.lastindex and match.lastindex >= 1:
+                    return f"{match.group(1)}[REDACTED:{item}]"
+                if item == "secret-assignment" and match.lastindex and match.lastindex >= 4:
+                    return f"{match.group(1)}{match.group(2)}[REDACTED:{item}]{match.group(4)}"
                 return f"[REDACTED:{item}]"
 
             redacted = pattern.sub(replacement, redacted)
@@ -150,8 +157,11 @@ def analyze(config: AnalyzerConfig) -> dict[str, Any]:
         safe_agent, _ = redact_text(row.get("agent") or "")
         safe_model, model_redactions = redact_text(row.get("model") or "")
         excerpts = _external_excerpts(config, row["id"], session_ref)
-        evidence_excerpt, evidence_redactions = redact_text(
-            _replace_session_id(bounded_excerpt(text_blob, config.max_excerpt_chars), row["id"], session_ref)
+        evidence_excerpt, evidence_redactions = _sanitized_excerpt(
+            text_blob,
+            config.max_excerpt_chars,
+            row["id"],
+            session_ref,
         )
         if evidence_excerpt:
             excerpts.insert(
@@ -220,6 +230,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not path.exists():
             print(f"missing input path: {path}", file=sys.stderr)
             return 2
+    if not (args.opencode_data_dir / "opencode.db").exists():
+        print(f"missing input path: {args.opencode_data_dir / 'opencode.db'}", file=sys.stderr)
+        return 2
     config = AnalyzerConfig(
         repo_root=args.repo_root,
         opencode_data_dir=args.opencode_data_dir,
@@ -363,9 +376,15 @@ def _external_excerpts(config: AnalyzerConfig, raw_session_id: str, session_ref:
                 continue
             if raw_session_id not in path.name and raw_session_id not in text:
                 continue
-            text = _replace_session_id(text, raw_session_id, session_ref)
-            safe, labels = redact_text(bounded_excerpt(text, config.max_excerpt_chars))
-            excerpts.append({"source": subdir, "path": path.name, "text": safe, "redactions": labels})
+            safe, labels = _sanitized_excerpt(text, config.max_excerpt_chars, raw_session_id, session_ref)
+            excerpts.append(
+                {
+                    "source": subdir,
+                    "path": _replace_session_id(path.name, raw_session_id, session_ref),
+                    "text": safe,
+                    "redactions": labels,
+                }
+            )
     return excerpts
 
 
@@ -375,6 +394,18 @@ def _session_ref(raw_session_id: str) -> str:
 
 def _replace_session_id(text: str, raw_session_id: str, session_ref: str) -> str:
     return text.replace(raw_session_id, f"session:{session_ref}")
+
+
+def _sanitized_excerpt(
+    text: str,
+    max_chars: int,
+    raw_session_id: str | None = None,
+    session_ref: str | None = None,
+) -> tuple[str, list[str]]:
+    if raw_session_id and session_ref:
+        text = _replace_session_id(text, raw_session_id, session_ref)
+    safe, labels = redact_text(text)
+    return bounded_excerpt(safe, max_chars), labels
 
 
 def _findings(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -397,7 +428,7 @@ def _findings(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if matches:
                 count += len(matches)
                 refs.append(session["session_ref"])
-                safe, _ = redact_text(bounded_excerpt(text, 200))
+                safe, _ = _sanitized_excerpt(text, 200)
                 evidence.append(safe)
         if count >= threshold:
             findings.append(
@@ -424,7 +455,7 @@ def _prior_reports(config: AnalyzerConfig) -> list[str]:
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or re.search(r"(?i)finding id|deferred|re-check", stripped):
-                safe, _ = redact_text(bounded_excerpt(stripped, config.max_excerpt_chars))
+                safe, _ = _sanitized_excerpt(stripped, config.max_excerpt_chars)
                 lines.append(safe)
     return lines[:50]
 

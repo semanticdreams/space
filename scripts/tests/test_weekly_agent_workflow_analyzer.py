@@ -87,6 +87,26 @@ def config_for(tmp_path: Path, *, repeated_failures: bool = False) -> analyzer.A
     )
 
 
+def append_fixture_part(data_dir: Path, session_id: str, text: str, index: int) -> None:
+    conn = sqlite3.connect(data_dir / "opencode.db")
+    message_id = f"extra-msg-{index}"
+    part_id = f"extra-part-{index}"
+    conn.execute(
+        "INSERT INTO message VALUES (?, ?, 1785500000000, 1785500000000, ?)",
+        (message_id, session_id, json.dumps({"role": "assistant"})),
+    )
+    conn.execute(
+        "INSERT INTO part VALUES (?, ?, ?, 1785500000000, 1785500000000, ?)",
+        (part_id, message_id, session_id, json.dumps({"type": "text", "text": text})),
+    )
+    conn.commit()
+    conn.close()
+
+
+def long_private_key(secret: str = "private-key-body-should-not-leak") -> str:
+    return "-----BEGIN PRIVATE KEY-----\n" + ("A" * 120) + secret + "\n-----END PRIVATE KEY-----"
+
+
 def test_redact_text_removes_common_secrets() -> None:
     private_key = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----"
     text = (
@@ -103,6 +123,34 @@ def test_redact_text_removes_common_secrets() -> None:
     assert "abc123" not in redacted
     assert "[REDACTED" in redacted
     assert {"authorization", "secret-assignment", "token-prefix", "private-key"}.issubset(set(labels))
+
+
+def test_redact_text_removes_json_style_secret_assignments() -> None:
+    text = '{"password": "hunter2", "api_key": "plain-secret-value", "token": "opaque-session-value"}'
+
+    redacted, labels = analyzer.redact_text(text)
+
+    assert "hunter2" not in redacted
+    assert "plain-secret-value" not in redacted
+    assert "opaque-session-value" not in redacted
+    assert "secret-assignment" in labels
+
+
+def test_analyze_redacts_json_style_secret_assignments(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    append_fixture_part(
+        config.opencode_data_dir,
+        "project-session-1",
+        '{"password": "hunter2", "api_key": "plain-secret-value", "token": "opaque-session-value"}',
+        1,
+    )
+
+    result = analyzer.analyze(config)
+    serialized = json.dumps(result)
+
+    assert "hunter2" not in serialized
+    assert "plain-secret-value" not in serialized
+    assert "opaque-session-value" not in serialized
 
 
 def test_discover_worktrees_includes_matching_origin_only(tmp_path: Path) -> None:
@@ -145,12 +193,65 @@ def test_analyze_adds_bounded_redacted_tool_output_excerpts(tmp_path: Path) -> N
     assert excerpts[0]["redactions"]
 
 
+def test_analyze_redacts_long_private_keys_before_database_excerpt_truncation(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    config.max_excerpt_chars = 80
+    append_fixture_part(config.opencode_data_dir, "project-session-1", long_private_key(), 1)
+
+    result = analyzer.analyze(config)
+    serialized = json.dumps(result)
+
+    assert "private-key-body-should-not-leak" not in serialized
+    assert "AAAAAAAAAAAAAAAAAAAAAAAA" not in serialized
+    assert "BEGIN PRIVATE KEY" not in serialized
+
+
+def test_analyze_redacts_long_private_keys_before_external_excerpt_truncation(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    config.max_excerpt_chars = 80
+    for dirname in ("tool-output", "log"):
+        directory = config.opencode_data_dir / dirname
+        directory.mkdir(exist_ok=True)
+        (directory / "project-session-1-sensitive-output.txt").write_text(
+            "project-session-1 " + long_private_key(f"{dirname}-secret-should-not-leak"),
+            encoding="utf-8",
+        )
+
+    result = analyzer.analyze(config)
+    serialized = json.dumps(result)
+
+    assert "project-session-1" not in serialized
+    assert "tool-output-secret-should-not-leak" not in serialized
+    assert "log-secret-should-not-leak" not in serialized
+    assert "BEGIN PRIVATE KEY" not in serialized
+
+
 def test_repeated_validation_failure_aggregates_evidence(tmp_path: Path) -> None:
     result = analyzer.analyze(config_for(tmp_path, repeated_failures=True))
 
     finding = next(item for item in result["findings"] if item["id"] == "repeated-validation-failure")
     assert finding["count"] >= 3
     assert finding["session_refs"] == [result["sessions"][0]["session_ref"]]
+
+
+def test_finding_evidence_redacts_long_private_keys_before_truncation(tmp_path: Path) -> None:
+    config = config_for(tmp_path, repeated_failures=True)
+    config.max_excerpt_chars = 80
+    append_fixture_part(
+        config.opencode_data_dir,
+        "project-session-1",
+        "pytest failed " + long_private_key("finding-secret-should-not-leak"),
+        1,
+    )
+
+    result = analyzer.analyze(config)
+    serialized = json.dumps(result)
+
+    finding = next(item for item in result["findings"] if item["id"] == "repeated-validation-failure")
+
+    assert finding["evidence"]
+    assert "finding-secret-should-not-leak" not in serialized
+    assert "BEGIN PRIVATE KEY" not in serialized
 
 
 def test_schema_drift_raises_for_missing_required_columns(tmp_path: Path) -> None:
