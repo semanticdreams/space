@@ -12,6 +12,11 @@
 #include <AL/alext.h>
 
 namespace {
+bool audio_disabled() {
+    const char* disableAudio = std::getenv("SPACE_DISABLE_AUDIO");
+    return disableAudio && std::string(disableAudio) == "1";
+}
+
 void ensure_openal_drivers() {
     if (std::getenv("ALSOFT_DRIVERS")) {
         return;
@@ -162,6 +167,10 @@ bool loadWavFile(const std::string& filepath,
 }
 
 Audio::Audio() {
+    if (audio_disabled()) {
+        return;
+    }
+
     device = open_al_device();
     if (!device) {
         std::cerr << "Failed to open OpenAL device." << std::endl;
