@@ -148,8 +148,9 @@ def analyze(config: AnalyzerConfig) -> dict[str, Any]:
     with _connect_read_only(db_path) as conn:
         _verify_schema(conn)
         projects = _load_projects(conn)
+        workspace_paths = _load_workspace_paths(conn)
         rows = _load_session_rows(conn, cutoff_ms)
-        raw_sessions = [row for row in rows if _session_in_scope(row, projects, included_paths)]
+        raw_sessions = [row for row in rows if _session_in_scope(row, projects, workspace_paths, included_paths)]
         texts = _load_session_texts(conn, [row["id"] for row in raw_sessions])
 
     sessions = []
@@ -255,6 +256,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         message = str(exc)
         print(message, file=sys.stderr)
         return 4 if "sanitizer leak" in message else 3
+    except (sqlite3.Error, OSError) as exc:
+        print(f"database access failed: {exc}", file=sys.stderr)
+        return 3
     payload = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +315,32 @@ def _load_projects(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     return {row["id"]: row for row in conn.execute("SELECT id, worktree, name FROM project")}
 
 
+def _load_workspace_paths(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    if not _table_exists(conn, "workspace"):
+        return {}
+    rows = conn.execute("PRAGMA table_info(workspace)").fetchall()
+    columns = {row["name"] for row in rows}
+    if "project_id" not in columns:
+        return {}
+    path_columns = [name for name in ("path", "directory", "worktree", "root") if name in columns]
+    if not path_columns:
+        return {}
+    select_columns = ", ".join(["project_id", *path_columns])
+    paths: dict[str, list[str]] = {}
+    for row in conn.execute(f"SELECT {select_columns} FROM workspace"):
+        project_paths = paths.setdefault(row["project_id"], [])
+        for column in path_columns:
+            value = row[column]
+            if value:
+                project_paths.append(value)
+    return paths
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?", (table_name,)).fetchone()
+    return row is not None
+
+
 def _load_session_rows(conn: sqlite3.Connection, cutoff_ms: int) -> list[dict[str, Any]]:
     query = """
         SELECT id, project_id, directory, title, agent, model, cost, tokens_input, tokens_output,
@@ -322,11 +352,17 @@ def _load_session_rows(conn: sqlite3.Connection, cutoff_ms: int) -> list[dict[st
     return [dict(row) for row in conn.execute(query, (cutoff_ms, cutoff_ms))]
 
 
-def _session_in_scope(row: dict[str, Any], projects: dict[str, sqlite3.Row], included_paths: list[Path]) -> bool:
+def _session_in_scope(
+    row: dict[str, Any],
+    projects: dict[str, sqlite3.Row],
+    workspace_paths: dict[str, list[str]],
+    included_paths: list[Path],
+) -> bool:
     project = projects.get(row.get("project_id"))
     candidates = [row.get("directory")]
     if project is not None:
         candidates.append(project["worktree"])
+    candidates.extend(workspace_paths.get(row.get("project_id"), []))
     for value in candidates:
         if value and _path_is_under(Path(value), included_paths):
             return True

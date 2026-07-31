@@ -189,6 +189,53 @@ def test_analyze_excludes_unrelated_sessions_and_sensitive_tables(tmp_path: Path
     assert len(result["sessions"][0]["session_ref"]) == 12
 
 
+def test_analyze_includes_session_when_only_workspace_path_matches_worktree(tmp_path: Path) -> None:
+    repo, parent = create_fixture_space_worktrees(tmp_path)
+    data_dir = tmp_path / "opencode-data"
+    data_dir.mkdir()
+    conn = sqlite3.connect(data_dir / "opencode.db")
+    conn.execute(
+        "CREATE TABLE project (id text primary key, worktree text, name text, time_created integer, time_updated integer)"
+    )
+    conn.execute("CREATE TABLE workspace (id text primary key, project_id text, path text)")
+    conn.execute(
+        "CREATE TABLE session (id text primary key, project_id text, directory text, title text, agent text, model text, cost real, tokens_input integer, tokens_output integer, tokens_reasoning integer, time_created integer, time_updated integer)"
+    )
+    conn.execute(
+        "CREATE TABLE message (id text primary key, session_id text, time_created integer, time_updated integer, data text)"
+    )
+    conn.execute(
+        "CREATE TABLE part (id text primary key, message_id text, session_id text, time_created integer, time_updated integer, data text)"
+    )
+    conn.execute("INSERT INTO project VALUES ('space-project', NULL, 'space', 1, 1)")
+    conn.execute("INSERT INTO workspace VALUES ('space-workspace', 'space-project', ?)", (str(repo),))
+    conn.execute(
+        "INSERT INTO session VALUES ('workspace-session-1', 'space-project', NULL, 'Workspace session', 'implementer', '{}', 0, 1, 1, 0, 1785500000000, 1785500100000)"
+    )
+    conn.execute(
+        "INSERT INTO message VALUES ('workspace-msg-1', 'workspace-session-1', 1785500000000, 1785500000000, ?)",
+        (json.dumps({"role": "assistant"}),),
+    )
+    conn.execute(
+        "INSERT INTO part VALUES ('workspace-part-1', 'workspace-msg-1', 'workspace-session-1', 1785500000000, 1785500000000, ?)",
+        (json.dumps({"type": "text", "text": "workspace evidence"}),),
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyzer.analyze(
+        analyzer.AnalyzerConfig(
+            repo_root=repo,
+            opencode_data_dir=data_dir,
+            worktree_parent=parent,
+            since_days=7,
+            now=datetime(2026, 7, 31, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert [session["title"] for session in result["sessions"]] == ["Workspace session"]
+
+
 def test_analyze_adds_bounded_redacted_tool_output_excerpts(tmp_path: Path) -> None:
     config = config_for(tmp_path)
     tool_dir = config.opencode_data_dir / "tool-output"
@@ -287,3 +334,33 @@ def test_schema_drift_raises_for_missing_required_columns(tmp_path: Path) -> Non
                 now=datetime(2026, 7, 31, 12, 0, tzinfo=timezone.utc),
             )
         )
+
+
+def test_cli_maps_database_operational_error_to_exit_code_3(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, parent = create_fixture_space_worktrees(tmp_path)
+    data_dir = tmp_path / "opencode-data"
+    data_dir.mkdir()
+    create_fixture_db(data_dir, repo)
+
+    def raise_operational_error(conn: sqlite3.Connection, cutoff_ms: int) -> list[dict[str, object]]:
+        del conn, cutoff_ms
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(analyzer, "_load_session_rows", raise_operational_error)
+
+    exit_code = analyzer.main(
+        [
+            "--repo-root",
+            str(repo),
+            "--opencode-data-dir",
+            str(data_dir),
+            "--worktree-parent",
+            str(parent),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 3
+    assert "database" in captured.err.lower()

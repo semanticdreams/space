@@ -20,7 +20,7 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
 
 1. `git fetch origin main`.
 2. Create or reset the run branch from `origin/main`: `automation/weekly-agent-workflow/YYYY-Www`.
-3. Run the analyzer and save sanitized evidence, for example:
+3. Run the analyzer and save sanitized evidence to a local scratch path that is not under `docs/`, for example:
 
    ```bash
    python3 scripts/weekly_agent_workflow_analyzer.py \
@@ -28,8 +28,10 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
      --opencode-data-dir ~/.local/share/opencode \
      --worktree-parent ~/space \
      --since-days 7 \
-     --output docs/dev/reports/agent-workflow/YYYY-Www-evidence.json
+     --output .superpowers/sdd/weekly-agent-workflow/YYYY-Www-evidence.json
    ```
+
+   Do not commit analyzer evidence JSON. It contains local source paths for scoping and diagnostics; published docs reports must include only intentionally selected sanitized excerpts.
 
 4. Fail closed if the analyzer fails, reports redaction failures, includes unrelated projects, or requires raw OpenCode browsing to justify findings.
 5. Read prior reports in `docs/dev/reports/agent-workflow/` and the feature contract in `docs/dev/features/weekly-agent-workflow-automation.md`.
