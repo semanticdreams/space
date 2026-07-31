@@ -159,6 +159,7 @@
     :tests.test-renderers
     :tests.test-widget-cuboid
     :tests.test-radial
+    :tests.test-audio-disabled
     :tests.test-volume
     :tests.test-kernels
     :tests.test-physics-containment

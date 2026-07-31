@@ -316,6 +316,9 @@ TextureCubemap& ResourceManager::loadCubemapAsync(const std::string& name, const
 }
 
 bool ResourceManager::loadAudioAsync(const std::string& name, const std::string& file, ReadyCallback onReady) {
+    if (audio && !audio->available()) {
+        return false;
+    }
     if (!jobSystem) {
         return false;
     }

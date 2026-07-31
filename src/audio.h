@@ -18,6 +18,7 @@ public:
     Audio();
     ~Audio();
 
+    bool available() const;
     void update(uint32_t); // For streaming or timed cleanup
 
     // Sound loading and management
