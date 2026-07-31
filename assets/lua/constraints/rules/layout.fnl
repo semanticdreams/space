@@ -324,15 +324,15 @@
   found)
 
 (fn def-has-returned-drop? [ff def]
-  "Check if def returns a table with :drop (fn ...) or :drop (lambda ...).
-  Symbolic :drop <symbol> is NOT accepted — proven same-scope binding
-  detection is not reliably available from file-facts."
+  "Check if def returns a table with inline :drop fn/lambda. Symbols do not count."
   (when (and def.form (def-contains-child-creation-call? ff def))
     (if (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
         true
         (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]")
         true
         false)))
+
+(fn def-covers-access? [ff def access] (var newlines 0) (when def.form (each [_ _ (def.form:gmatch "\n")] (set newlines (+ newlines 1)))) (local access-form (if access.form access.form access.text)) (and (def-has-returned-drop? ff def) access-form def.form access.line def.line (<= def.line access.line) (<= access.line (+ def.line newlines)) (string.find def.form access-form 1 true)))
 
 (fn has-global-drop-path? [ff]
   "Check for file-level public drop paths: export key 'drop',
@@ -406,10 +406,8 @@
                 (local retained-access? (and last-key (. child-creation-access-keys last-key)))
                 (when retained-access?
                   (var covered false)
-                  (local access-form (if access.form access.form access.text))
                   (each [_ def (ipairs all-defs)]
-                    (when (and (not covered) access-form (def-has-returned-drop? ff def)
-                               (string.find def.form access-form 1 true))
+                    (when (and (not covered) (def-covers-access? ff def access))
                       (set covered true)))
                   (when (not covered)
                     (set all-covered false)))))))
@@ -434,6 +432,8 @@
                           :missing "child drop evidence"}
                :hint "Add :drop calls, clear-children, or drop-children"}))))))
   (if (> (length diagnostics) 0) diagnostics nil))
+
+
 
 ;; ---------------------------------------------------------------------------
 ;; Rule 3: layout.interactive-context-assertion

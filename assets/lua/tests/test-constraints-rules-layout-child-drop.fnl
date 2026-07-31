@@ -817,9 +817,7 @@
 
 ;; R9-1: returned :drop in one function does NOT exempt creation in another
 (fn child-drop-flags-unrelated-returned-drop []
-  "A file where function A has a returned :drop but function B (different
-  scope) creates child Layout without any drop path should still flag
-  function B's creation."
+  "Returned :drop in A must not cover B's same-text child access."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.owned-child-drop"))
@@ -828,32 +826,34 @@
                               :module "widget"
                               :definitions [{:kind :fn
                                              :name "helper-with-drop"
-                                             :top-level? true
-                                             :line 1 :column 1
-                                             :length 100
-                                             :form "(fn helper-with-drop []
-  {:drop (fn [] (print :cleanup))})"}
-                                            {:kind :fn
-                                             :name "make-widget"
-                                             :top-level? true
-                                             :line 5 :column 1
-                                             :length 100
-                                             :form "(fn make-widget []
-  (Layout {:child child}))"}]
-                              :calls [{:callee "Layout"
-                                       :receiver nil :method nil
-                                       :line 6 :column 3
-                                       :form "(Layout {:child child})"
-                                       :enclosing-fn "make-widget"}]}))
+                                              :top-level? true
+                                              :line 1 :column 1
+                                              :length 100
+                                              :form "(fn helper-with-drop []
+  (let [root (Layout {:children []})]
+    (when root.children (print :owned))
+    {:layout root :drop (fn [] (root:drop))}))"}
+                                             {:kind :fn
+                                              :name "make-widget"
+                                              :top-level? true
+                                              :line 5 :column 1
+                                              :length 100
+                                              :form "(fn make-widget []
+  (when root.children (print :leaked)))"}]
+                               :calls [{:callee "Layout" :receiver nil :method nil :line 2 :column 15
+                                        :form "(Layout {:children []})" :enclosing-fn "helper-with-drop"}
+                                       {:callee "root:drop" :receiver "root" :method "drop" :line 4 :column 32
+                                        :form "(root:drop)" :enclosing-fn "helper-with-drop"}]
+                               :accesses [{:path ["root" "children"] :text "root.children" :line 3 :column 11 :form "root.children"}
+                                          {:path ["root" "children"] :text "root.children" :line 6 :column 9 :form "root.children"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert result "unrelated returned :drop should not exempt other creation")
+  (assert result "unrelated returned :drop should not exempt access-only child creator")
   (var found-missing-drop false)
   (each [_ d (ipairs result)]
     (when (= d.evidence.missing "drop definition or returned table :drop")
       (set found-missing-drop true)))
-  (assert found-missing-drop "should flag missing public drop for unrelated creation"))
+  (assert found-missing-drop "should flag missing public drop for unrelated access"))
 
-;; R9-2 negative: :drop symbol where symbol is non-function
 (fn child-drop-flags-returned-drop-non-fn-symbol []
   "A returned table {:drop x} where x is a local bound to non-function
   should NOT count as a public drop path."
