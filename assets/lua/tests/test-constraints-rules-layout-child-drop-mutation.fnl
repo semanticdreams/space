@@ -248,6 +248,62 @@
       (set found-missing-cleanup true)))
   (assert found-missing-cleanup "should flag missing cleanup for dotted cleanup-like call"))
 
+(fn child-drop-allows-public-drop-with-method-detach-cleanup []
+  "A public drop path that explicitly detaches owned child links should satisfy cleanup."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/focus-tree.fnl"
+                              :module "focus-tree"
+                              :definitions [{:kind :fn :name "drop" :top-level? true
+                                             :line 20 :column 1 :length 120
+                                             :form "(fn drop [self]
+  (each [_ child (ipairs self.children)]
+    (child:detach)))"}]
+                              :accesses [{:path ["self" "children"] :text "self.children"
+                                          :line 10 :column 1 :form "self.children"}]
+                              :mutations [{:op :set :path ["self" "children"]
+                                           :line 10 :column 1
+                                           :form "(set self.children [])"}]
+                              :calls [{:callee "child:detach"
+                                       :receiver "child" :method "detach"
+                                       :line 22 :column 5
+                                       :form "(child:detach)"
+                                       :enclosing-fn "drop"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "method-style child:detach in public drop should satisfy cleanup evidence"))
+
+(fn child-drop-flags-unrelated-dotted-detach-call []
+  "An unrelated dotted metrics.detach call must not satisfy child cleanup."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn :name "drop" :top-level? true
+                                             :line 20 :column 1 :length 80
+                                             :form "(fn drop [self]
+  (metrics.detach))"}]
+                              :accesses [{:path ["self" "children"] :text "self.children"
+                                          :line 10 :column 1 :form "self.children"}]
+                              :mutations [{:op :set :path ["self" "children"]
+                                           :line 10 :column 1
+                                           :form "(set self.children [])"}]
+                              :calls [{:callee "metrics.detach"
+                                       :receiver "metrics" :method "detach"
+                                       :line 21 :column 1
+                                       :form "(metrics.detach)"
+                                       :enclosing-fn "drop"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "unrelated dotted detach call should not satisfy child cleanup")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should flag missing cleanup for dotted detach call"))
+
 (fn child-drop-allows-cleaned-up-test-module-without-public-drop []
   "Test modules that locally own temporary Layout objects and clean them up
   should not need a public module drop API."
@@ -350,6 +406,10 @@
                      :fn child-drop-still-flags-public-drop-without-cleanup})
 (table.insert tests {:name "child-drop flags dotted cleanup-like call"
                       :fn child-drop-flags-dotted-cleanup-like-call})
+(table.insert tests {:name "child-drop allows public drop with method detach cleanup"
+                     :fn child-drop-allows-public-drop-with-method-detach-cleanup})
+(table.insert tests {:name "child-drop flags unrelated dotted detach call"
+                     :fn child-drop-flags-unrelated-dotted-detach-call})
 (table.insert tests {:name "child-drop allows cleaned-up test module without public drop"
                      :fn child-drop-allows-cleaned-up-test-module-without-public-drop})
 (table.insert tests {:name "child-drop flags cleaned-up production module without public drop"

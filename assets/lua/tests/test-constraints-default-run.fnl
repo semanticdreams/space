@@ -234,8 +234,8 @@
   (assert parsed.counts (.. "parsed JSON should have counts, got: " (tostring printed)))
   (assert parsed.diagnostics (.. "parsed JSON should have diagnostics, got: " (tostring printed)))
   (assert exit-code "expected exit to be called")
-  (assert (not= exit-code 0)
-          "repo target with real codebase should have violations → exit non-zero"))
+  (assert (= exit-code 0)
+          "repo target with cleaned real codebase should exit zero"))
 
 ;; Register tests
 (table.insert tests {:name "rule-registry all-rules returns all required ids"

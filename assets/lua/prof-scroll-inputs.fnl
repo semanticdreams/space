@@ -130,8 +130,8 @@
 
 (fn build-root-layout [element size]
   (Layout {:name "scroll-profile-root"
-           :children [element.layout]
-           :measurer (fn [self]
+            :children [element.layout] :drop (fn [self] (self:clear-children))
+            :measurer (fn [self]
                        (element.layout:measurer)
                        (set self.measure size))
            :layouter (fn [self]
@@ -180,7 +180,7 @@
   {:layout-root layout-root
    :root-layout root-layout
    :element element
-   :list list})
+   :list list :drop (fn [self] (when (and self.root-layout self.root-layout.drop) (self.root-layout:drop)) (when (and self.element self.element.drop) (self.element:drop)))})
 
 (fn profile-scroll [profiler]
   (logging.info "[prof-scroll-inputs] build")
@@ -202,10 +202,7 @@
       (list:set-scroll-offset (* step-size i)))
     (layout-root:update))
   (profiler.stop_and_flush)
-  (when (and ui.element ui.element.drop)
-    (ui.element:drop))
-  (when (and ui.root-layout ui.root-layout.drop)
-    (ui.root-layout:drop))
+  (ui:drop)
   (logging.info "[prof-scroll-inputs] done")
   (io.flush))
 

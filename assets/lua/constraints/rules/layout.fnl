@@ -455,7 +455,7 @@
     (when (and (not found) (callee-is-drop-method? call.callee))
       (set found true)))
   (each [_ call (ipairs (or ff.calls []))]
-    (when (and (not found) (or (. child-cleanup-calrees call.callee) (and call.callee (string.find call.callee ":" 1 true) (. child-cleanup-calrees call.method))))
+    (when (and (not found) (or (. child-cleanup-calrees call.callee) (and call.callee (string.find call.callee ":" 1 true) (. child-cleanup-calrees call.method)) (and call.callee (string.find call.callee ":" 1 true) (= call.method "detach") (has-global-drop-path? ff) (if (= call.receiver "self") true (= call.receiver "child") true (= call.receiver "node") true (= call.receiver "manager") true false))))
       (set found true)))
   found)
 

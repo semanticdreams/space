@@ -85,8 +85,10 @@
   (root:set-root layout-root)
   (root:mark-measure-dirty)
   {:root root
-   :layout-root layout-root
-   :leaves leaves})
+    :layout-root layout-root
+    :leaves leaves
+    :drop (fn [_self]
+            (root:drop))})
 
 (fn node-run-measure [node mw mh md]
   (if node.run-measure-subtree
@@ -180,7 +182,9 @@
                       (when (< i (length self.children))
                         (set y (+ y y-gap)))))}))
   {:root root
-   :leaves leaves})
+    :leaves leaves
+    :drop (fn [_self]
+            (root:drop))})
 
 (fn tick-leaves [leaves frame]
   (local leaf-count (length leaves))
@@ -214,6 +218,9 @@
 (fn ms-per-frame [seconds frames]
   (* (/ seconds frames) 1000.0))
 
+(fn drop [scene]
+  (scene:drop))
+
 (fn main []
   (local frames 360)
   (local old-scene (build-old-tree))
@@ -229,6 +236,8 @@
   (print (.. "old_layout_ms_per_frame=" (string.format "%.4f" old-ms)))
   (print (.. "next_layout_ms_per_frame=" (string.format "%.4f" next-ms)))
   (print (.. "speedup_old_over_next=" (string.format "%.3fx" speedup)))
+  (drop old-scene)
+  (drop next-scene)
   true)
 
 {:main main}
