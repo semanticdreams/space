@@ -33,11 +33,11 @@ Record BASE (`git rev-parse HEAD`) before dispatching.
 3. Interfaces and decisions from earlier tasks the brief cannot know
 4. The report-file path (`task-N-report.md` in the workspace)
 5. Context: whether this is a fresh dispatch or a fix-round resume
-6. For Fennel-facing tasks, relevant constraint validation expectations from `AGENTS.md`/`docs/dev/experimental-constraints.md`
+6. For Fennel-facing tasks, relevant compile-check and constraint validation expectations from `AGENTS.md`/`docs/dev/experimental-constraints.md`: `make fennel-check` or touched-file `tools.fennel-check` first, `make constraints` second, focused tests third, broader suite last.
 
 **Report file:** `task-N-report.md` in the plan's workspace. The implementer writes its full report there and returns only status summary.
 
-For Fennel-facing feature or bugfix tasks, expect the report to include constraint validation evidence and a constraint-impact note when relevant. Include the same lightweight constraint-impact signal in ledger entries when it is useful for follow-up triage.
+For Fennel-facing feature or bugfix tasks, expect the report to include compile-check evidence before constraint validation evidence, plus a constraint-impact note when relevant. Missing compile evidence is a ledger triage item unless the reported command clearly included the `fennel-check` gate. Include the same lightweight constraint-impact signal in ledger entries when it is useful for follow-up triage, and note recurring delimiter/enclosing form repair issues for follow-up if they obstruct tasks.
 
 **Never make a subagent read the whole plan file.** The brief is the single source of requirements. Exact values (numbers, magic strings, signatures, test cases) appear only in the brief.
 

@@ -6,7 +6,14 @@ The gate is still explicitly experimental, but it is blocking. If a constraint i
 
 ## Daily Workflow
 
-Run the constraints gate before focused Fennel test runs:
+Run the compile gate before the constraints gate, then run focused Fennel test
+runs:
+
+```bash
+make fennel-check
+```
+
+Then run constraints:
 
 ```bash
 make constraints
@@ -15,6 +22,18 @@ make constraints
 `make constraints` runs the default repository target over `assets/lua/` with the runtime environment configured for the Space asset tree and Fennel module paths. A clean repository run exits successfully with status `pass` and 0 diagnostics.
 
 `make test` already depends on `make constraints`, so full test runs execute the experimental constraints gate first. You do not need to run `make constraints` separately immediately before `make test`, but running it before narrowed Fennel tests gives faster feedback and keeps focused runs honest.
+
+## Relationship to Fennel Compile Check
+
+`make fennel-check` is the first-stage syntax oracle for Space Fennel. It runs
+the vendored compiler through `./build/space -m tools.fennel-check:main -- --target repo`,
+so agents should use it instead of system `fennel`, system `lua`, `fennel-ls`,
+or `fnlfmt` validation.
+
+`make constraints` runs after the compile check. The compile gate catches invalid
+Fennel syntax and delimiter/enclosing form errors before structural constraints
+attempt to analyze source facts; constraints then enforce higher-level lifecycle,
+layout, rendering, Scene, Sandbox, and structure rules.
 
 ## CI Workflow
 

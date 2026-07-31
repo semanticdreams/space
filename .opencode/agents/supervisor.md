@@ -95,6 +95,11 @@ before implementation skills.
 
 ### Space Project Skill Routing
 
+- If a request touches `assets/lua/**/*.fnl`, Fennel tests, Fennel constraints,
+  Fennel validation CLI/MCP tooling such as `tools.fennel-check`, or mentions
+  `make fennel-check`, invoke `space-fennel` before planning or implementation.
+  For widget/layout/rendering overlap, invoke `space-fennel-ui` additionally;
+  it complements rather than replaces `space-fennel`.
 - If a request touches Fennel widgets, layout, rendering adapters, interaction
   widgets, widget lifecycle, or widget tests, invoke `space-fennel-ui` before
   planning or implementation.
