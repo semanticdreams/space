@@ -22,6 +22,7 @@ Space is a 3D spatial computing platform and malleable software environment — 
 - [Bugs](/dev/project/bugs/)
 - [Technical Debt](/dev/project/tech-debt/)
 - [Lifecycle Hardening Plan](/dev/lifecycle-hardening-plan)
+- [Agent Workflow Reports](/dev/reports/agent-workflow/)
 
 ## Journal
 
@@ -52,6 +53,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 
 - [Agent Runner System](/dev/features/agent-runner-system)
 - [Agent Tools](/dev/features/agent-tools)
+- [Weekly Agent Workflow Automation](/dev/features/weekly-agent-workflow-automation)
 - [Activities Architecture](/dev/features/activities)
 - [Board Canvas Mode](/dev/features/board-canvas-mode) (legacy, migrated to [Activities](/dev/features/activities))
 - [Canvas Mode System](/dev/features/canvas-mode-system) (legacy, migrated to [Activities](/dev/features/activities))
