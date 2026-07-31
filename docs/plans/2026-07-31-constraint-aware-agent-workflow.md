@@ -16,7 +16,7 @@
 - Feature and bugfix reports should include a lightweight constraint-impact note: helped, obstructed/noisy, changed, or not applicable.
 - If an intentional architecture change conflicts with an existing constraint, update the code and constraint contract together through reviewed changes; do not blindly contort production code, skip the gate, or add broad baselines/allowlists.
 - `make test` already depends on `make constraints`; do not duplicate full-suite work unnecessarily when `make test` is the validation command.
-- Do not create `.github/workflows/**` in this slice.
+- Do not create or modify `.github/workflows/**` in this slice; existing CTest-based workflows are left unchanged.
 - Do not change constraint runner output behavior in this slice.
 - Edits to `.opencode/skills/**` must be treated as process-documentation TDD: use the RED pressure-scenario evidence below and verify the changed wording with GREEN pressure checks before declaring the plan complete.
 
@@ -46,7 +46,7 @@ The supervisor ran three read-only baseline pressure scenarios before any workfl
 
 - [ ] **Step 1: Read the current workflow files**
 
-  Inspect the six files listed above. Confirm there is still no `.github/workflows/**` file in this worktree and do not create one.
+  Inspect the six files listed above. Confirm any existing `.github/workflows/**` files are left unchanged.
 
 - [ ] **Step 2: Update `AGENTS.md`**
 
@@ -134,7 +134,7 @@ The supervisor ran three read-only baseline pressure scenarios before any workfl
 - Reviewer instructions make missing or failed constraint validation reviewable.
 - Reports include lightweight constraint-impact learning without creating a new persistent reporting system.
 - Documentation explains that constraints are efficiency tools and may need contract updates during intentional architecture changes.
-- No GitHub Actions workflow is added.
+- No GitHub Actions workflow is added or modified.
 - No constraint runner output behavior changes.
 - `make constraints` still passes.
 

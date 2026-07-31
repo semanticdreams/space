@@ -49,7 +49,7 @@ No instruction should imply that constraints replace tests or human review.
 
 ## Deferred Follow-Ups
 
-- GitHub Actions: no checked-in `.github/workflows` exists in this worktree. Add CI in a separate slice once the desired workflow is known.
+- GitHub Actions: `.github/workflows/test.yml` exists and runs CTest; the experimental constraints CTest fixture means that workflow exercises constraints. A separate explicit `make constraints` CI step can be considered later for faster failure/log clarity.
 - Output ergonomics: measure real pass/fail output first. If agent context is polluted, add a quiet/summarized command or runner mode later.
 - Aggregation: begin with a lightweight report field rather than a new database or log format.
 
