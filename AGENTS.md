@@ -73,9 +73,9 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 - `make run` executes `space` with `SPACE_ASSETS_PATH=../assets` (via `./space -m main`).
 - When running Lua/Fennel tests from the CLI, always set `SPACE_ASSETS_PATH` to the absolute `assets` path (e.g. ``SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main``) so path-sensitive suites like `FsView` can resolve fixtures correctly.
 - Fennel macros live under `assets/lua`; when invoking tests directly with `./build/space -m ...` set `FENNEL_PATH` and `FENNEL_MACRO_PATH` to `$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl` to ensure `(import-macros ...)` resolves.
-- Run `make constraints` before focused Fennel test commands. The experimental constraints gate is blocking even though it is experimental; every result other than `pass` (`violations`, `fail`, or `interrupted`) exits nonzero and should be fixed through reviewed code or reviewed baseline data, not bypassed. See [Experimental Fennel Constraints](docs/dev/experimental-constraints.md).
+- For Fennel-facing work, run `make constraints` before focused Fennel test commands so constraint violations surface before slower debugging loops. The experimental constraints gate is blocking even though it is experimental; every result other than `pass` (`violations`, `fail`, or `interrupted`) exits nonzero and should be diagnosed and fixed through reviewed code or reviewed baseline data, not bypassed. See [Experimental Fennel Constraints](docs/dev/experimental-constraints.md).
 - Default test invocation is `make test` (or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure`) after a build; prefer this unless you specifically need a narrowed `./build/space -m tests.test-...` run. Use `ctest -V` or `TEST_VERBOSE=1` only when debugging test output.
-- `make test` already depends on `make constraints`, so full-suite runs execute the experimental constraints gate before normal Fennel tests.
+- `make test` already depends on `make constraints`, so full-suite runs execute the experimental constraints gate before normal Fennel tests; do not duplicate `make constraints` immediately before `make test` unless the early, faster feedback is useful.
 - Disable audio for CLI test runs by default to avoid sandbox/PortAudio warnings: prefix commands with `SPACE_DISABLE_AUDIO=1` (e.g. `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main`).
 - When running tests, point `XDG_DATA_HOME` outside the repo to avoid littering the workspace (use `XDG_DATA_HOME=/tmp/space/tests/xdg-data` unless otherwise specified). Agents should always skip keyring-backed tests (`SKIP_KEYRING_TESTS=1`). Standard full-suite command: `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
 - `make debug` configures `build/debug/` and launches `gdb ./space`.
@@ -139,6 +139,7 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 ## Commit Conventions
 - Use the `type(scope)` format as described by the `git-commit` skill.
 - Scopes (when useful): `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
+- For Fennel-facing feature or bugfix handoffs, include a lightweight constraint-impact line when relevant: helped, obstructed/noisy, changed, or not applicable.
 - Before committing, run the full test suite:
   `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
 

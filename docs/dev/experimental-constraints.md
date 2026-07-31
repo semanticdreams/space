@@ -16,6 +16,16 @@ make constraints
 
 `make test` already depends on `make constraints`, so full test runs execute the experimental constraints gate first. You do not need to run `make constraints` separately immediately before `make test`, but running it before narrowed Fennel tests gives faster feedback and keeps focused runs honest.
 
+## Agent Workflow
+
+Treat experimental constraints as early feedback that reduces review and fix cycles, not as a ritual to satisfy after the fact. For Fennel-facing implementation work, run `make constraints` before narrowed Fennel test commands when feasible, then run the focused test with the usual runtime environment. If the final validation is the full `make test`, that command already gates constraints; do not duplicate the same gate unless earlier feedback would save time.
+
+Handoffs for Fennel-facing feature or bugfix work should include a lightweight constraint-impact note: `helped catch`, `obstructed/noisy`, `changed constraint`, or `not applicable`. Reviewers should verify that constraint validation was reported, or that the report explains why it does not apply. Unresolved `violations`, `fail`, or `interrupted` statuses are validation failures.
+
+When an intentional architecture transition conflicts with a constraint that encodes the old contract, update the production code and the constraint contract together through reviewed changes. Do not contort production code around a stale rule, skip the gate, or add broad baselines/allowlists just to make the gate green. If the new contract is ambiguous, pause for clarification before changing constraints.
+
+CI wiring and runner output verbosity remain deferred follow-ups; this document describes local agent workflow for the existing gate.
+
 ## Runner Statuses
 
 The runner reports one of four result statuses:

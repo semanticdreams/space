@@ -18,6 +18,12 @@ Running, adding, or debugging Space tests, E2E snapshots, remote-control debuggi
 - Default full suite: `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
 - Use absolute `SPACE_ASSETS_PATH=$(pwd)/assets` for direct Lua/Fennel test runs.
 
+## Experimental Constraints
+
+- `make constraints` is the fast pre-test gate for Fennel-facing work; run it before narrowed Fennel test commands when feasible.
+- `make test` already depends on constraints, so do not duplicate the gate immediately before a full-suite run unless early feedback is useful.
+- Use `docs/dev/experimental-constraints.md` for runner statuses, targets, and baseline policy.
+
 ## E2E Snapshots
 
 - E2E snapshots use `make test-e2e`.
@@ -32,4 +38,5 @@ Running, adding, or debugging Space tests, E2E snapshots, remote-control debuggi
 ## Canonical References
 
 - `AGENTS.md`
+- `docs/dev/experimental-constraints.md`
 - `docs/dev/features/development-tooling.md`

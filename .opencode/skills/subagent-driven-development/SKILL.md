@@ -33,8 +33,11 @@ Record BASE (`git rev-parse HEAD`) before dispatching.
 3. Interfaces and decisions from earlier tasks the brief cannot know
 4. The report-file path (`task-N-report.md` in the workspace)
 5. Context: whether this is a fresh dispatch or a fix-round resume
+6. For Fennel-facing tasks, relevant constraint validation expectations from `AGENTS.md`/`docs/dev/experimental-constraints.md`
 
 **Report file:** `task-N-report.md` in the plan's workspace. The implementer writes its full report there and returns only status summary.
+
+For Fennel-facing feature or bugfix tasks, expect the report to include constraint validation evidence and a constraint-impact note when relevant. Include the same lightweight constraint-impact signal in ledger entries when it is useful for follow-up triage.
 
 **Never make a subagent read the whole plan file.** The brief is the single source of requirements. Exact values (numbers, magic strings, signatures, test cases) appear only in the brief.
 
@@ -120,6 +123,8 @@ Mark the todo complete only after the ledger entry is written.
 ## Final Whole-Branch Review
 
 After all tasks, dispatch the **reviewer** in FULL REVIEW MODE with the complete branch diff (`.opencode/skills/subagent-driven-development/scripts/review-package PLAN_FILE MERGE_BASE HEAD`) and the ledger's deferred-minor and parked findings for triage.
+
+During final review preparation, triage repeated `constraint obstructed/noisy` notes as possible constraint-system follow-ups rather than one-off task failures.
 
 ## Finish
 
