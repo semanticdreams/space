@@ -248,6 +248,86 @@
       (set found-missing-cleanup true)))
   (assert found-missing-cleanup "should flag missing cleanup for dotted cleanup-like call"))
 
+(fn child-drop-allows-cleaned-up-test-module-without-public-drop []
+  "Test modules that locally own temporary Layout objects and clean them up
+  should not need a public module drop API."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/repo/assets/lua/tests/test-temp-layout.fnl"
+                              :module "tests.test-temp-layout"
+                              :definitions [{:kind :fn :name "layout-test" :top-level? true
+                                             :line 1 :column 1 :length 120
+                                             :form "(fn layout-test []
+  (local root (Layout {:children []}))
+  (root:drop))"}]
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 2 :column 15
+                                       :form "(Layout {:children []})"
+                                       :enclosing-fn "layout-test"}
+                                      {:callee "root:drop" :receiver "root" :method "drop"
+                                       :line 3 :column 3
+                                       :form "(root:drop)"
+                                       :enclosing-fn "layout-test"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "cleaned-up test-local Layout should pass without public drop"))
+
+(fn child-drop-flags-cleaned-up-production-module-without-public-drop []
+  "Production modules with retained child evidence still need a public drop
+  path even when local cleanup calls exist."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/repo/assets/lua/prod-temp-layout.fnl"
+                              :module "prod-temp-layout"
+                              :definitions [{:kind :fn :name "build" :top-level? true
+                                             :line 1 :column 1 :length 120
+                                             :form "(fn build []
+  (local root (Layout {:children []}))
+  (root:drop))"}]
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 2 :column 15
+                                       :form "(Layout {:children []})"
+                                       :enclosing-fn "build"}
+                                      {:callee "root:drop" :receiver "root" :method "drop"
+                                       :line 3 :column 3
+                                       :form "(root:drop)"
+                                       :enclosing-fn "build"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "production module without public drop should flag")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for production module"))
+
+(fn child-drop-flags-test-module-without-cleanup []
+  "Test modules with retained child evidence and no cleanup still report the
+  missing cleanup diagnostic."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/repo/assets/lua/tests/test-leaky-layout.fnl"
+                              :module "tests.test-leaky-layout"
+                              :definitions [{:kind :fn :name "layout-test" :top-level? true
+                                             :line 1 :column 1 :length 80
+                                             :form "(fn layout-test []
+  (Layout {:children []}))"}]
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 2 :column 3
+                                       :form "(Layout {:children []})"
+                                       :enclosing-fn "layout-test"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "test module without cleanup should flag")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should flag missing child cleanup in tests"))
+
 (table.insert tests {:name "child-drop allows read-only entity children"
                      :fn child-drop-allows-read-only-entity-children})
 (table.insert tests {:name "child-drop allows read-only scene children"
@@ -269,7 +349,13 @@
 (table.insert tests {:name "child-drop still flags public drop without cleanup"
                      :fn child-drop-still-flags-public-drop-without-cleanup})
 (table.insert tests {:name "child-drop flags dotted cleanup-like call"
-                     :fn child-drop-flags-dotted-cleanup-like-call})
+                      :fn child-drop-flags-dotted-cleanup-like-call})
+(table.insert tests {:name "child-drop allows cleaned-up test module without public drop"
+                     :fn child-drop-allows-cleaned-up-test-module-without-public-drop})
+(table.insert tests {:name "child-drop flags cleaned-up production module without public drop"
+                     :fn child-drop-flags-cleaned-up-production-module-without-public-drop})
+(table.insert tests {:name "child-drop flags test module without cleanup"
+                     :fn child-drop-flags-test-module-without-cleanup})
 
 (local main
   (fn []

@@ -535,11 +535,11 @@
   (local files (if (= (. ctx.facts :files) nil) [] (. ctx.facts :files)))
   (each [_ ff (ipairs files)]
     (when (has-child-creation-evidence? ff)
-      (local has-global-drop (has-global-drop-path? ff))
       (local has-cleanup (has-child-cleanup-evidence? ff))
       (local all-defs (if (= ff.definitions nil) [] ff.definitions))
-      (local all-covered (if has-global-drop true (all-owned-child-evidence-covered? ff all-defs)))
       (local module-name (if (= ff.module nil) ff.path ff.module))
+      (local public-drop-satisfied (if (has-global-drop-path? ff) true (if has-cleanup (if (and ff.path (string.find ff.path "/tests/" 1 true)) true (= (string.sub (if (= ff.module nil) "" ff.module) 1 6) "tests.")) false)))
+      (local all-covered (if public-drop-satisfied true (all-owned-child-evidence-covered? ff all-defs)))
       (when (not all-covered)
         (table.insert diagnostics
           (Diagnostics.violation
