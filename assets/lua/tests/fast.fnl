@@ -193,7 +193,8 @@
      :tests.test-constraints-rules-test-isolation-precision
     :tests.test-constraints-rules-layout
     :tests.test-constraints-rules-structure
-    :tests.test-constraints-default-run]})
+    :tests.test-constraints-default-run
+    :tests.test-constraints-integration-config]})
 
 (local main
   (fn []
