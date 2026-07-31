@@ -127,6 +127,28 @@
       (assert (= (type result.diagnostics) :table))
       (assert (= (# result.diagnostics) 0)))))
 
+(fn enclosing-form-at-opening-delimiter-returns-whole-form []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "opening.fnl" "(fn outer [item]\n  (let [wrapped item]\n    (print item)\n    wrapped))\n"))
+      (local service (new-service))
+      (local result (service:enclosing-form {:file path :line 3 :column 5}))
+      (assert result.ok)
+      (assert (= result.form "(print item)")))))
+
+(fn enclosing-form-rejects-column-past-line-end []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "outside-column.fnl" "(fn outer [item]\n  (print item))\n"))
+      (local service (new-service))
+      (local result (service:enclosing-form {:file path :line 1 :column 24}))
+      (assert (not result.ok))
+      (assert (= result.file (fs.absolute path)))
+      (assert (> (# result.diagnostics) 0))
+      (local diagnostic (. result.diagnostics 1))
+      (assert (= diagnostic.kind :input))
+      (assert (string.find diagnostic.message "outside the file" 1 true)))))
+
 (fn structure-metrics-return-module-and-function-data []
   (with-temp-dir
     (fn [dir]
@@ -169,6 +191,10 @@
                      :fn parse-tree-degrades-on-invalid-fennel})
 (table.insert tests {:name "enclosing-form-finds-smallest-delimited-form"
                      :fn enclosing-form-finds-smallest-delimited-form})
+(table.insert tests {:name "enclosing-form-at-opening-delimiter-returns-whole-form"
+                     :fn enclosing-form-at-opening-delimiter-returns-whole-form})
+(table.insert tests {:name "enclosing-form-rejects-column-past-line-end"
+                     :fn enclosing-form-rejects-column-past-line-end})
 (table.insert tests {:name "structure-metrics-return-module-and-function-data"
                      :fn structure-metrics-return-module-and-function-data})
 (table.insert tests {:name "constraints-files-wrapper-returns-runner-status"

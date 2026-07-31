@@ -194,19 +194,31 @@
         (if (not= current-line target-line)
             nil
             (do
+              (var line-end (+ (# source) 1))
+              (var j line-start)
+              (while (and (< j line-end) (<= j (# source)))
+                (if (= (source:sub j j) "\n")
+                    (set line-end j)
+                    (set j (+ j 1))))
               (local pos (+ line-start target-column -1))
-              (if (if (< pos line-start) true (> pos (+ (# source) 1)))
+              (if (if (< pos line-start) true (>= pos line-end))
                   nil
                   (- pos 1)))))))
 
+(fn closing-delimiter-for [first]
+  (if (= first "(")
+      ")"
+      (= first "[")
+      "]"
+      (= first "{")
+      "}"
+      nil))
+
 (fn delimited-text? [text]
   (local first (text:sub 1 1))
-  (if (= first "(")
-      true
-      (= first "[")
-      true
-      (= first "{")
-      true
+  (local closing (closing-delimiter-for first))
+  (if closing
+      (= (text:sub (# text)) closing)
       false))
 
 (fn node-contains-offset? [node offset]
