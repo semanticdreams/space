@@ -70,7 +70,7 @@ SECRET_PATTERNS = [
         re.compile(
             r"(?i)(?<![A-Za-z0-9_-])"
             r"([\"']?(?:api[_-]?key|apikey|token|secret|password|authorization|x-api-key)[\"']?\s*[:=]\s*)"
-            r"([\"']?)([^\"',}\s;]+)(\2)"
+            r"(?:\"([^\"]*)\"|'([^']*)'|([^\s,;}]+))"
         ),
     ),
     (
@@ -96,7 +96,11 @@ def redact_text(text: str) -> tuple[str, list[str]]:
                 if item == "authorization" and match.lastindex and match.lastindex >= 1:
                     return f"{match.group(1)}[REDACTED:{item}]"
                 if item == "secret-assignment" and match.lastindex and match.lastindex >= 4:
-                    return f"{match.group(1)}{match.group(2)}[REDACTED:{item}]{match.group(4)}"
+                    if match.group(2) is not None:
+                        return f'{match.group(1)}"[REDACTED:{item}]"'
+                    if match.group(3) is not None:
+                        return f"{match.group(1)}'[REDACTED:{item}]'"
+                    return f"{match.group(1)}[REDACTED:{item}]"
                 return f"[REDACTED:{item}]"
 
             redacted = pattern.sub(replacement, redacted)

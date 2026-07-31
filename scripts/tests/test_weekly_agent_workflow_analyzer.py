@@ -136,21 +136,36 @@ def test_redact_text_removes_json_style_secret_assignments() -> None:
     assert "secret-assignment" in labels
 
 
+def test_redact_text_removes_json_style_secret_values_with_spaces() -> None:
+    text = (
+        '{"password": "correct horse battery staple", '
+        '"api_key": "plain secret value", '
+        '"token": "opaque session value"}'
+    )
+
+    redacted, labels = analyzer.redact_text(text)
+
+    assert "correct horse battery staple" not in redacted
+    assert "plain secret value" not in redacted
+    assert "opaque session value" not in redacted
+    assert "secret-assignment" in labels
+
+
 def test_analyze_redacts_json_style_secret_assignments(tmp_path: Path) -> None:
     config = config_for(tmp_path)
     append_fixture_part(
         config.opencode_data_dir,
         "project-session-1",
-        '{"password": "hunter2", "api_key": "plain-secret-value", "token": "opaque-session-value"}',
+        '{"password": "correct horse battery staple", "api_key": "plain secret value", "token": "opaque session value"}',
         1,
     )
 
     result = analyzer.analyze(config)
     serialized = json.dumps(result)
 
-    assert "hunter2" not in serialized
-    assert "plain-secret-value" not in serialized
-    assert "opaque-session-value" not in serialized
+    assert "correct horse battery staple" not in serialized
+    assert "plain secret value" not in serialized
+    assert "opaque session value" not in serialized
 
 
 def test_discover_worktrees_includes_matching_origin_only(tmp_path: Path) -> None:
