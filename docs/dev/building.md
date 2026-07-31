@@ -146,6 +146,34 @@ make run
 To run the app directly, use `./build/space -m main`.
 By default, `./build/space` also starts the main app; use `./build/space --repl` for the embedded Fennel REPL.
 
+### Runtime asset discovery
+
+Direct binary execution is supported from arbitrary working directories. After a normal build, assets are copied next to the executable at `build/assets`, so commands such as this work even outside the repository root:
+
+```bash
+tmp="$(mktemp -d)"
+cd "$tmp"
+SPACE_DISABLE_AUDIO=1 /path/to/space/build/space --no-dotenv -c '(print (+ 5 3))'
+```
+
+Asset roots are searched in this order:
+
+1. `SPACE_ASSETS_PATH`, when non-empty.
+2. User data assets: `get_user_data_dir("space") / "assets"`.
+3. Developer/build sibling assets: `<exe_dir>/assets`.
+4. Install or portable layout: `<exe_dir>/../share/space/assets`.
+5. macOS-style bundle layout, if applicable: `<exe_dir>/../Resources/assets`.
+6. Working-directory fallback: `<cwd>/assets`.
+7. Legacy system fallback: `/usr/share/space/assets`.
+
+`SPACE_ASSETS_PATH` is an explicit override for custom asset roots and remains the highest-priority lookup location. It is not required for normal build, installed, or portable runtime layouts.
+
+### Runtime log location
+
+Native logging is configured during C++ startup before any entry mode runs. By default, logs are written to `get_user_log_dir("space") / "space.log"`; on Linux this is `${XDG_CACHE_HOME:-~/.cache}/space/log/space.log`.
+
+Set `SPACE_LOG_DIR` to a non-empty directory to override the log directory. The runtime writes `space.log` inside that directory. `LOGS_DIR` is not used by Space. Direct CLI modes such as `space --no-dotenv -c ...` do not write `gl.log` into the current working directory as part of normal startup.
+
 Optional packaging dependencies (only needed for `make pack`):
 
 Ubuntu/Pop!_OS:

@@ -431,7 +431,9 @@
 (fn normal-state-forwards-events []
   (reset-engine-events)
   (local controls (create-controls-stub))
+  (local original-presentation-controls app.presentation-input-controls)
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (local original-hoverables app.hoverables)
   (local hoverables (make-hoverables-stub))
   (set app.hoverables hoverables)
@@ -467,6 +469,7 @@
   (app.engine.events.key-down.emit {:key 99})
   (assert (= controls.record.key_down nil))
   (set app.first-person-controls nil)
+  (set app.presentation-input-controls original-presentation-controls)
   (set app.hoverables original-hoverables))
 
 (fn normal-state-injects-single-touch-as-mouse []
@@ -478,6 +481,7 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-touch-targets app.touch-gesture-targets)
+  (local original-presentation-controls app.presentation-input-controls)
   (local clickables (create-clickables-stub))
   (set app.active-pointer-controls nil)
   (set app.hoverables {:on-enter (fn [])
@@ -494,32 +498,36 @@
                        :on-mouse-button-up (fn [_self _payload])})
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state.on-enter)
-  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
-  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
-  (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
-  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
-  (assert (= controls.record.mouse_button_down 1))
-  (assert controls.record.mouse_motion)
-  (assert (= controls.record.mouse_button_up 1))
-  (assert (= clickables.record.mouse-button-down 1)
-          "single-touch should press clickables through synthetic mouse events")
-  (assert (= clickables.record.mouse-button-up 1)
-          "single-touch should release clickables through synthetic mouse events")
-  (assert (= (rawget clickables.record.last-down "touch-id") 1)
-          "synthetic button-down payload should preserve the touch device id")
-  (assert (= (rawget clickables.record.last-up "finger-id") 11)
-          "synthetic button-up payload should preserve the finger id")
-  (state:on-leave)
+  (set app.presentation-input-controls (fn [] controls))
+  (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state.on-enter)
+    (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+    (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
+    (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
+    (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
+    (assert (= controls.record.mouse_button_down 1))
+    (assert controls.record.mouse_motion)
+    (assert (= controls.record.mouse_button_up 1))
+    (assert (= clickables.record.mouse-button-down 1)
+            "single-touch should press clickables through synthetic mouse events")
+    (assert (= clickables.record.mouse-button-up 1)
+            "single-touch should release clickables through synthetic mouse events")
+    (assert (= (rawget clickables.record.last-down "touch-id") 1)
+            "synthetic button-down payload should preserve the touch device id")
+    (assert (= (rawget clickables.record.last-up "finger-id") 11)
+            "synthetic button-up payload should preserve the finger id")
+    (state:on-leave))))
   (set app.active-pointer-controls original-active-controls)
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls nil)
-  (set app.touch-gesture-targets original-touch-targets))
+  (set app.presentation-input-controls original-presentation-controls)
+  (set app.touch-gesture-targets original-touch-targets)
+  (when (not ok) (error err)))
 
 (fn normal-state-routes-canvas-multitouch-to-active-controls []
   (reset-engine-events)
@@ -594,6 +602,7 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (set app.hoverables {:on-enter (fn [])
                         :on-leave (fn [])
                         :on-mouse-motion (fn [_self _payload])})
@@ -607,25 +616,30 @@
                        :on-mouse-motion (fn [_self _payload])
                        :on-mouse-button-down (fn [_self _payload])
                        :on-mouse-button-up (fn [_self _payload])})
-  (set app.first-person-controls
-       {:on-mouse-button-down (fn [_self _payload] nil)
-        :on-mouse-button-up (fn [_self _payload] nil)
-        :on-mouse-motion (fn [_self _payload] nil)
-        :drag-active? (fn [_self] false)
-        :should-suppress-click? (fn [_self payload]
-                                  (= payload.button 3))})
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state:on-mouse-button-up {:button 3 :x 12 :y 14})
-  (assert (= clickables.record.mouse-button-up 1)
-          "normal state should still forward releases to clickables")
-  (assert (= (and clickables.record.last-up clickables.record.last-up.suppress-click?) true)
-          "normal state should propagate pointer-control click suppression to clickables")
+  (local controls
+    {:on-mouse-button-down (fn [_self _payload] nil)
+     :on-mouse-button-up (fn [_self _payload] nil)
+     :on-mouse-motion (fn [_self _payload] nil)
+     :drag-active? (fn [_self] false)
+     :should-suppress-click? (fn [_self payload]
+                               (= payload.button 3))})
+  (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
+  (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state:on-mouse-button-up {:button 3 :x 12 :y 14})
+    (assert (= clickables.record.mouse-button-up 1)
+            "normal state should still forward releases to clickables")
+    (assert (= (and clickables.record.last-up clickables.record.last-up.suppress-click?) true)
+            "normal state should propagate pointer-control click suppression to clickables"))))
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
   (set app.movables original-movables)
   (set app.resizables original-resizables)
-  (set app.first-person-controls original-controls))
+  (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
+  (when (not ok) (error err)))
 
 (fn normal-state-touch-focuses-graph-node-under-logical-input-scaling []
   (reset-engine-events)
@@ -723,21 +737,26 @@
   (reset-engine-events)
   (local controls (create-controls-stub))
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-touch-targets app.touch-gesture-targets)
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
-  (local state (FpcState))
-  (state:on-enter)
-  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
-  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
-  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
-  (assert (= controls.record.mouse_button_down 1))
-  (assert (= controls.record.mouse_button_up 1))
-  (assert controls.record.mouse_motion
-          "touch motion should reach first-person controls")
-  (state:on-leave)
+  (local (ok err) (pcall (fn []
+    (local state (FpcState))
+    (state:on-enter)
+    (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+    (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
+    (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
+    (assert (= controls.record.mouse_button_down 1))
+    (assert (= controls.record.mouse_button_up 1))
+    (assert controls.record.mouse_motion
+            "touch motion should reach first-person controls")
+    (state:on-leave))))
   (set app.first-person-controls original-controls)
-  (set app.touch-gesture-targets original-touch-targets))
+  (set app.presentation-input-controls original-presentation-controls)
+  (set app.touch-gesture-targets original-touch-targets)
+  (when (not ok) (error err)))
 
 (fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool []
   (reset-engine-events)
@@ -748,6 +767,7 @@
   (local original-resizables app.resizables)
   (local original-touch-targets app.touch-gesture-targets)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-controller app.drawing-controller)
   (local original-canvas-interactive app.canvas-interactive?)
   (local original-mode app.active-activity-id)
@@ -769,6 +789,7 @@
                        :on-mouse-button-up (fn [_self _payload])})
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.canvas-interactive? true)
   (set app.active-activity-id "drawing")
   (set app.activity-drawing-enabled? true)
@@ -779,100 +800,108 @@
         :tool "brush"
         :set-active-tool (fn [self tool]
                            (table.insert tool-log tool)
-                           (set self.tool tool))})
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state:on-enter)
-  (state:on-pen-proximity-in {:pen-id 77
-                              :x 10
-                              :y 20
-                              :xrel 0
-                              :yrel 0
-                              :timestamp 1
-                              :in-range true})
-  (state:on-pen-down {:pen-id 77
+                            (set self.tool tool))})
+  (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state:on-enter)
+    (state:on-pen-proximity-in {:pen-id 77
+                                :x 10
+                                :y 20
+                                :xrel 0
+                                :yrel 0
+                                :timestamp 1
+                                :in-range true})
+    (state:on-pen-down {:pen-id 77
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :timestamp 2
+                        :in-range true
+                        :eraser true})
+    (state:on-touch-down {:touch-id 1
+                          :finger-id 11
+                          :x 14
+                          :y 24
+                          :xrel 0
+                          :yrel 0
+                          :pressure 0.5
+                          :timestamp 3})
+    (state:on-pen-up {:pen-id 77
                       :x 10
                       :y 20
                       :xrel 0
                       :yrel 0
-                      :timestamp 2
+                      :timestamp 4
                       :in-range true
-                      :eraser true})
-  (state:on-touch-down {:touch-id 1
-                        :finger-id 11
-                        :x 14
-                        :y 24
-                        :xrel 0
-                        :yrel 0
-                        :pressure 0.5
-                        :timestamp 3})
-  (state:on-pen-up {:pen-id 77
-                    :x 10
-                    :y 20
-                    :xrel 0
-                    :yrel 0
-                    :timestamp 4
-                    :in-range true
-                    :eraser false})
-  (assert (= controls.record.mouse_button_down 1))
-  (assert (= controls.record.mouse_button_up 1))
-  (assert (= (# tool-log) 2))
-  (assert (= (. tool-log 1) "eraser"))
-  (assert (= (. tool-log 2) "brush"))
-  (assert (= (app.drawing-controller:active-tool) "brush"))
-  (state:on-leave)
+                      :eraser false})
+    (assert (= controls.record.mouse_button_down 1))
+    (assert (= controls.record.mouse_button_up 1))
+    (assert (= (# tool-log) 2))
+    (assert (= (. tool-log 1) "eraser"))
+    (assert (= (. tool-log 2) "brush"))
+    (assert (= (app.drawing-controller:active-tool) "brush"))
+    (state:on-leave))))
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.touch-gesture-targets original-touch-targets)
   (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
   (set app.drawing-controller original-controller)
   (set app.canvas-interactive? original-canvas-interactive)
   (set app.activity-drawing-enabled? nil)
-  (set app.active-activity-id original-mode))
+  (set app.active-activity-id original-mode)
+  (when (not ok) (error err)))
 
 (fn fpc-state-injects-pen-as-mouse []
   (reset-engine-events)
   (local controls (create-controls-stub))
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (set app.first-person-controls controls)
-  (local state (FpcState))
-  (state:on-enter)
-  (state:on-pen-proximity-in {:pen-id 77
-                              :x 10
-                              :y 20
-                              :xrel 0
-                              :yrel 0
-                              :timestamp 1
-                              :in-range true})
-  (state:on-pen-down {:pen-id 77
-                      :x 10
-                      :y 20
+  (set app.presentation-input-controls (fn [] controls))
+  (local (ok err) (pcall (fn []
+    (local state (FpcState))
+    (state:on-enter)
+    (state:on-pen-proximity-in {:pen-id 77
+                                :x 10
+                                :y 20
+                                :xrel 0
+                                :yrel 0
+                                :timestamp 1
+                                :in-range true})
+    (state:on-pen-down {:pen-id 77
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :timestamp 2
+                        :in-range true})
+    (state:on-pen-motion {:pen-id 77
+                          :x 18
+                          :y 24
+                          :xrel 8
+                          :yrel 4
+                          :timestamp 3
+                          :in-range true})
+    (state:on-pen-up {:pen-id 77
+                      :x 18
+                      :y 24
                       :xrel 0
                       :yrel 0
-                      :timestamp 2
+                      :timestamp 4
                       :in-range true})
-  (state:on-pen-motion {:pen-id 77
-                        :x 18
-                        :y 24
-                        :xrel 8
-                        :yrel 4
-                        :timestamp 3
-                        :in-range true})
-  (state:on-pen-up {:pen-id 77
-                    :x 18
-                    :y 24
-                    :xrel 0
-                    :yrel 0
-                    :timestamp 4
-                    :in-range true})
-  (assert (= controls.record.mouse_button_down 1))
-  (assert (= controls.record.mouse_button_up 1))
-  (assert controls.record.mouse_motion
-          "pen motion should reach first-person controls")
-  (state:on-leave)
-  (set app.first-person-controls original-controls))
+    (assert (= controls.record.mouse_button_down 1))
+    (assert (= controls.record.mouse_button_up 1))
+    (assert controls.record.mouse_motion
+            "pen motion should reach first-person controls")
+    (state:on-leave))))
+  (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
+  (when (not ok) (error err)))
 
 (fn normal-state-tab-cycles-focus []
   (reset-engine-events)
@@ -1122,6 +1151,7 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-hoverables app.hoverables)
   (local states (States))
   (local controls (create-controls-stub))
@@ -1132,27 +1162,31 @@
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.hoverables (make-hoverables-stub))
-  (states:set-state :normal)
-  (local session
-    {:active? (fn [_self] true)
-     :begin (fn [_self] true)
-     :cancel-selection (fn [_self] nil)
-     :begin-drag (fn [_self _payload] true)
-     :drag-active? (fn [_self] true)
-     :update-drag (fn [_self _payload] true)
-     :end-drag (fn [_self _payload] true)
-     :on-key-down (fn [_self _payload] nil)})
-  (TerrainRectPickManager.begin session)
-  (app.engine.events.mouse-wheel.emit {:x 0 :y 2})
-  (app.engine.events.updated.emit 0.125)
-  (assert (= controls.record.mouse_wheel 2))
-  (assert (= controls.record.updated 0.125))
+  (local (ok err) (pcall (fn []
+    (states:set-state :normal)
+    (local session
+      {:active? (fn [_self] true)
+       :begin (fn [_self] true)
+       :cancel-selection (fn [_self] nil)
+       :begin-drag (fn [_self _payload] true)
+       :drag-active? (fn [_self] true)
+       :update-drag (fn [_self _payload] true)
+       :end-drag (fn [_self _payload] true)
+       :on-key-down (fn [_self _payload] nil)})
+    (TerrainRectPickManager.begin session)
+    (app.engine.events.mouse-wheel.emit {:x 0 :y 2})
+    (app.engine.events.updated.emit 0.125)
+    (assert (= controls.record.mouse_wheel 2))
+    (assert (= controls.record.updated 0.125)))))
   (set app.hoverables original-hoverables)
   (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
   (set app.hud original-hud)
   (set-app-states! original-states)
-  (TestSupport.resume-active-state suspended-state))
+  (TestSupport.resume-active-state suspended-state)
+  (when (not ok) (error err)))
 
 (fn terrain-paint-state-routes-and-restores []
   (reset-engine-events)
@@ -1530,12 +1564,14 @@
 (fn terrain-paint-state-forwards-mouse-wheel []
   (reset-engine-events)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-hoverables app.hoverables)
   (local original-states app.states)
   (local controls (create-controls-stub))
   (local hoverables (make-hoverables-stub))
   (local states (States))
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.hoverables hoverables)
   (set-app-states! states)
   (local state (TerrainPaintState))
@@ -1546,17 +1582,20 @@
   (assert (= controls.record.mouse_wheel 3))
   (set-app-states! original-states)
   (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
   (set app.hoverables original-hoverables))
 
 (fn terrain-paint-state-forwards-camera-updates []
   (reset-engine-events)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-hoverables app.hoverables)
   (local original-states app.states)
   (local controls (create-controls-stub))
   (local hoverables (make-hoverables-stub))
   (local states (States))
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.hoverables hoverables)
   (set-app-states! states)
   (local state (TerrainPaintState))
@@ -1567,6 +1606,7 @@
   (assert (= controls.record.updated 0.125))
   (set-app-states! original-states)
   (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
   (set app.hoverables original-hoverables))
 
 (fn terrain-rect-pick-manager-cleans-up-dropped-session []
@@ -1821,13 +1861,17 @@
   (reset-engine-events)
   (local original-states app.states)
   (local controls (create-controls-stub))
+  (local original-presentation-controls app.presentation-input-controls)
+  (local original-presentation-camera app.presentation-camera)
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (local calls [])
   (local camera {:id :cam})
   (local states
     (States {:focus_manager_provider (fn [_self]
                                        app.focus)}))
   (set app.camera camera)
+  (set app.presentation-camera (fn [opts] camera))
   (set app.focus {:focus-direction (fn [_self opts]
                                      (table.insert calls opts))})
   (set-app-states! states)
@@ -1846,7 +1890,9 @@
   (set-app-states! original-states)
   (set app.focus nil)
   (set app.camera nil)
-  (set app.first-person-controls nil))
+  (set app.presentation-camera original-presentation-camera)
+  (set app.first-person-controls nil)
+  (set app.presentation-input-controls original-presentation-controls))
 
 (fn normal-state-directional-focus-skips-with-input []
   (reset-engine-events)
@@ -2142,24 +2188,32 @@
       (assert (= (. transitions 1) :normal)))))
 
 (fn camera-state-zero-resets-camera []
-  (with-state-recorder
-    (fn [transitions install-state]
-      (local original-camera app.camera)
-      (local camera (Camera {:position (glm.vec3 1 2 3)
+  (local original-presentation-camera app.presentation-camera)
+  (local original-camera app.camera)
+  (var camera nil)
+  (let [(ok err) (pcall (fn []
+    (with-state-recorder
+      (fn [transitions install-state]
+        (set camera (Camera {:position (glm.vec3 1 2 3)
                              :rotation (glm.quat 0 1 0 0)}))
-      (set app.camera camera)
-      (local state (install-state :camera (CameraState)))
-      (state.on-key-down {:key (string.byte "0")})
-      (assert (= (# transitions) 0))
-      (assert (= camera.position.x 0))
-      (assert (= camera.position.y 0))
-      (assert (= camera.position.z 0))
-      (assert (= camera.rotation.w 1))
-      (assert (= camera.rotation.x 0))
-      (assert (= camera.rotation.y 0))
-      (assert (= camera.rotation.z 0))
-      (camera:drop)
-      (set app.camera original-camera))))
+        (set app.camera camera)
+        (set app.presentation-camera (fn [opts] camera))
+        (local state (install-state :camera (CameraState)))
+        (state.on-key-down {:key (string.byte "0")})
+        (assert (= (# transitions) 0))
+        (assert (= camera.position.x 0))
+        (assert (= camera.position.y 0))
+        (assert (= camera.position.z 0))
+        (assert (= camera.rotation.w 1))
+        (assert (= camera.rotation.x 0))
+        (assert (= camera.rotation.y 0))
+        (assert (= camera.rotation.z 0))
+        (camera:drop)))))]
+    (set app.camera original-camera)
+    (set app.presentation-camera original-presentation-camera)
+    (when (not ok)
+      (when camera (camera:drop))
+      (error err))))
 
 (fn fpc-state-escape-exits-to-normal []
   (with-state-recorder
@@ -2175,10 +2229,21 @@
   (local controls (create-controls-stub))
   (local original-states app.states)
   (local original-controls app.first-person-controls)
+  (local original-presentation-controls app.presentation-input-controls)
   (local original-clickables (assert app.clickables "test requires app.clickables"))
   (local original-hoverables (assert app.hoverables "test requires app.hoverables"))
   (local original-movables app.movables)
+  (local input {:on-key-down (fn [_self _payload]
+                               (set calls.input (+ calls.input 1))
+                               true)
+                :on-mouse-button-down (fn [_self _payload]
+                                        (set calls.input (+ calls.input 1))
+                                        true)})
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal {})
+  (states:set-state :normal)
   (set app.first-person-controls controls)
+  (set app.presentation-input-controls (fn [] controls))
   (set app.clickables {:on-mouse-button-down (fn [_self _payload] (assert calls.clickables "test requires calls.clickables") (set calls.clickables (+ calls.clickables 1)))
                        :on-mouse-button-up (fn [_self _payload] (assert calls.clickables "test requires calls.clickables") (set calls.clickables (+ calls.clickables 1)))
                        :active? false})
@@ -2189,36 +2254,30 @@
   (set app.movables {:on-mouse-motion (fn [_self _payload]
                                          (set calls.movables (+ calls.movables 1)))
                       :drag-active? (fn [_self] false)})
-  (local input {:on-key-down (fn [_self _payload]
-                               (set calls.input (+ calls.input 1))
-                               true)
-                :on-mouse-button-down (fn [_self _payload]
-                                        (set calls.input (+ calls.input 1))
-                                        true)})
-  (local states (States {:hud_provider command-hints-hud-provider}))
-  (states:add-state :normal {})
-  (states:set-state :normal)
-  (set-app-states! states)
-  (InputState.connect-input input)
-  (local state (FpcState))
-  (states:add-state :fpc state)
-  (state.on-enter)
-  (app.engine.events.key-down.emit {:key 44})
-  (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
-  (app.engine.events.mouse-motion.emit {:x 5 :y 6})
-  (assert (= calls.input 0) "InputState should not receive events in fpc state")
-  (assert (= calls.clickables 0) "Clickables should not receive events in fpc state")
-  (assert (= calls.hover 0) "Hoverables should not receive events in fpc state")
-  (assert (= calls.movables 0) "Movables should not receive events in fpc state")
-  (assert (= controls.record.key_down 44))
-  (assert (= controls.record.mouse_button_down 1))
-  (state.on-leave)
+  (local (ok err) (pcall (fn []
+    (set-app-states! states)
+    (InputState.connect-input input)
+    (local state (FpcState))
+    (states:add-state :fpc state)
+    (state.on-enter)
+    (app.engine.events.key-down.emit {:key 44})
+    (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
+    (app.engine.events.mouse-motion.emit {:x 5 :y 6})
+    (assert (= calls.input 0) "InputState should not receive events in fpc state")
+    (assert (= calls.clickables 0) "Clickables should not receive events in fpc state")
+    (assert (= calls.hover 0) "Hoverables should not receive events in fpc state")
+    (assert (= calls.movables 0) "Movables should not receive events in fpc state")
+    (assert (= controls.record.key_down 44))
+    (assert (= controls.record.mouse_button_down 1))
+    (state.on-leave))))
   (InputState.disconnect-input input)
   (set-app-states! original-states)
   (set app.clickables original-clickables)
   (set app.hoverables original-hoverables)
   (set app.movables original-movables)
-  (set app.first-person-controls original-controls))
+  (set app.first-person-controls original-controls)
+  (set app.presentation-input-controls original-presentation-controls)
+  (when (not ok) (error err)))
 
 (fn leader-state-q-and-escape-transitions []
   (with-state-recorder

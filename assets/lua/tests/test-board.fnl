@@ -967,7 +967,7 @@
                                        :direction (glm.vec3 2 4 -10)})}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
-                                 :scene (make-scene-stub)
+                                 :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1011,7 +1011,7 @@
                                       (error "screen-pos-ray should not be called when event.ray is present"))}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
-                                 :scene (make-scene-stub)
+                                 :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1107,7 +1107,7 @@
                                       (error "screen-pos-ray should not be called when event.ray is present"))}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
-                                 :scene (make-scene-stub)
+                                 :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1153,7 +1153,7 @@
                                        :direction (glm.vec3 0 0 1)})}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
-                                 :scene (make-scene-stub)
+                                 :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1195,7 +1195,7 @@
       (local fixture (make-activity-canvas))
       (local canvas fixture.canvas)
       (local runtime {:canvas canvas
-                       :scene (make-scene-stub)
+                       :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                        :board-state {:items [{:id "bad"
                                               :type "missing-board-item-type"}]
                                     :connectors []}})
@@ -1242,7 +1242,7 @@
       (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
-                                      :scene (make-scene-stub)
+                                      :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                       :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
       (BoardActivityUnit.load-board-activity!)
@@ -1298,7 +1298,7 @@
       (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
-                                      :scene (make-scene-stub)
+                                      :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                                       :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
       (BoardActivityUnit.load-board-activity!)
@@ -1566,7 +1566,7 @@
   (set app.canvas canvas)
   (set app.active-interaction-surface :canvas)
   (local runtime {:canvas canvas
-                  :scene (make-scene-stub)
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :scene (make-scene-stub)
                   :board-state (or options.board-state {:items [] :connectors []})})
   (when options.object-selector
     (set runtime.object-selector options.object-selector))

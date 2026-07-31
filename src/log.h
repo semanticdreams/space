@@ -22,6 +22,7 @@ enum LogLevel {
 struct LogConfig {
     LogLevel reporting_level = Info;
     bool restart = false;
+    std::string output_path;
 };
 
 struct LogField {

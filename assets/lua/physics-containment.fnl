@@ -222,17 +222,6 @@
    {:key "min-z" :normal (bt.Vector3 0 0 1) :constant bounds.min.z}
    {:key "max-z" :normal (bt.Vector3 0 0 -1) :constant (- bounds.max.z)}])
 
-(fn drop-installed []
-  (local existing app.__physics-global-containment)
-  (when (and existing existing.visualization existing.visualization.drop)
-    (existing.visualization:drop))
-  (when (and existing existing.planes)
-    (each [_ plane (ipairs existing.planes)]
-      (when (and plane plane.body plane.physics)
-        (pcall (fn []
-                 (plane.physics:removeRigidBody plane.body))))))
-  (set app.__physics-global-containment nil))
-
 (fn containment-corners [bounds]
   (local min bounds.min)
   (local max bounds.max)
@@ -315,127 +304,185 @@
     :physics physics
     :constant spec.constant})
 
-(fn clear []
-  (when app.__physics_containment_refresh_debouncer
-    (app.__physics_containment_refresh_debouncer:drop)
-    (set app.__physics_containment_refresh_debouncer nil))
-  (drop-installed)
-  (set app.physics-containment-scene nil)
-  true)
+;; ── Manager factory ────────────────────────────────────────────────────
 
-(fn ensure-installed [opts]
-  (if (not (available?))
-      false
-      (do
-        (local options (or opts {}))
-        (local config (normalize-config (or options.config app.physics-containment-config)))
-        (set app.physics-containment-config (serialize-config config))
-        (if (not config.enabled?)
-            (do
-              (clear)
-              false)
-            (do
-              (local scene (or options.scene app.physics-containment-scene))
-              (when (and scene scene.update)
-                (scene:update))
-              (local bounds (resolve-active-bounds config scene))
-              (local physics app.engine.physics)
-              (local existing app.__physics-global-containment)
-              ;; R7-2: Track the build context used for visualization
-              ;; so we can recreate when the active slot changes but
-              ;; config/bounds/mode are otherwise identical.
-              (local viz-build-ctx
-                (or (and scene scene.resolve-active-build-context
-                         (scene:resolve-active-build-context))
-                    (and scene scene.build-context)))
-              (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
-              (local already-installed?
-                (and existing
-                     (= existing.physics physics)
-                     (= existing.restitution config.restitution)
-                     (bounds-approx= existing.bounds bounds)
-                     (= existing.mode config.mode)))
-              (set app.physics-containment-scene scene)
-              (if already-installed?
-                  (do
-                    ;; Refresh visualization when the active build context
-                    ;; (slot) has changed, even though physics params match.
-                    (if (not (= existing.viz-lines viz-lines))
-                        (do
-                          (when (and existing.visualization existing.visualization.drop)
-                            (existing.visualization:drop))
-                          (set existing.visualization (create-visualization scene bounds config))
-                          (set existing.viz-lines viz-lines)))
-                    true)
-                  (do
-                    (drop-installed)
-                    (local planes
-                      (icollect [_ spec (ipairs (plane-specs bounds))]
-                        (install-plane physics spec config.restitution)))
-                    (set app.__physics-global-containment
-                         {:physics physics
-                          :bounds bounds
-                          :mode config.mode
-                          :restitution config.restitution
-                          :planes planes
-                          :visualization (create-visualization scene bounds config)
-                          :viz-lines viz-lines})
-                    true)))))))
+(fn create-manager [opts]
+  "Create a per-owner physics containment manager.
+  Requires :owner (any identity value) and :physics (Bullet physics world)."
+  (assert opts "PhysicsContainment.create-manager requires an opts table")
+  (assert opts.owner "PhysicsContainment.create-manager requires :owner")
+  (assert opts.physics "PhysicsContainment.create-manager requires :physics")
+  (local self {:owner opts.owner
+               :physics opts.physics
+               :installation nil
+               :config nil
+               :scene nil
+               :debouncer nil
+               :dropped? false})
 
-(fn refresh-visualization [opts]
-  (local existing app.__physics-global-containment)
-  (if (not existing)
-      false
-      (do
-        (local options (or opts {}))
-        (local config (normalize-config (or options.config app.physics-containment-config)))
-        (local scene (or options.scene app.physics-containment-scene))
-        (set app.physics-containment-config (serialize-config config))
-        (set app.physics-containment-scene scene)
-        (when (and existing.visualization existing.visualization.drop)
-          (existing.visualization:drop))
-        (local viz-build-ctx
-          (or (and scene scene.resolve-active-build-context
-                   (scene:resolve-active-build-context))
-              (and scene scene.build-context)))
-        (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
-        (set existing.visualization (create-visualization scene existing.bounds config))
-        (set existing.viz-lines viz-lines)
-        true)))
+  ;; ── Internal helpers ───────────────────────────────────────────────
 
-(fn ensure-refresh-debouncer []
-  (if app.__physics_containment_refresh_debouncer
-      app.__physics_containment_refresh_debouncer
-      (do
-        (set app.__physics_containment_refresh_debouncer
-             (RuntimeTimers.Debouncer
-               {:delay-ms default-debounce-ms
-                :callback
-                (fn [payload]
-                  (when payload
-                    (ensure-installed {:scene payload.scene
-                                       :config payload.config})))}))
-        app.__physics_containment_refresh_debouncer)))
+  (fn drop-installation []
+    (local existing self.installation)
+    (when (and existing existing.visualization existing.visualization.drop)
+      (existing.visualization:drop))
+    (when (and existing existing.planes)
+      (each [_ plane (ipairs existing.planes)]
+        (when (and plane plane.body plane.physics)
+          (pcall (fn []
+                   (plane.physics:removeRigidBody plane.body))))))
+    (set self.installation nil))
 
-(fn schedule-refresh [opts]
-  (local options (or opts {}))
-  (local config (normalize-config (or options.config app.physics-containment-config)))
-  (local scene (or options.scene app.physics-containment-scene))
-  (set app.physics-containment-config (serialize-config config))
-  (set app.physics-containment-scene scene)
-  (if (<= config.debounce-ms 0)
-      (do
-        (when app.__physics_containment_refresh_debouncer
-          (app.__physics_containment_refresh_debouncer:cancel))
-        (ensure-installed {:scene scene
-                           :config config}))
-      (do
-        (local debouncer (ensure-refresh-debouncer))
-        (debouncer:cancel)
-        (debouncer:set-delay-ms config.debounce-ms)
-        (debouncer:trigger {:scene scene
-                            :config config})))
-  true)
+  (fn ensure-debouncer [delay-ms]
+    (if self.debouncer
+        self.debouncer
+        (do
+          (set self.debouncer
+               (RuntimeTimers.Debouncer
+                 {:delay-ms (or delay-ms default-debounce-ms)
+                   :callback
+                   (fn [payload]
+                     ;; Owner identity check: the captured owner must still
+                     ;; match and the manager must not have been dropped.
+                     ;; R6-3: Also verify that the owner slot is still the
+                     ;; active/visible scene slot and still owns this exact
+                     ;; manager.  After a slot switch, the stale refresh
+                     ;; must no-op rather than installing into the wrong context.
+                     (when (and payload
+                                (not self.dropped?)
+                                (= payload.owner self.owner)
+                                (and payload.scene payload.scene.active-activity-slot
+                                     (= payload.scene.active-activity-slot self.owner)
+                                     (= (. self.owner :physics-containment-manager) self)))
+                       (self:ensure-installed {:scene payload.scene
+                                                :config payload.config})))}))
+          self.debouncer)))
+
+  ;; ── Public methods ─────────────────────────────────────────────────
+
+  (set self.ensure-installed
+       (fn [self install-opts]
+         (if (or self.dropped? (not (available?)))
+             false
+             (do
+               (local options (or install-opts {}))
+               (local config (normalize-config (or options.config self.config)))
+               (set self.config (serialize-config config))
+               (if (not config.enabled?)
+                   (do
+                     (self:clear)
+                     false)
+                   (do
+                     (local scene (or options.scene self.scene))
+                     (when (and scene scene.update)
+                       (scene:update))
+                     (local bounds (resolve-active-bounds config scene))
+                     (local existing self.installation)
+                     ;; R7-2: Track the build context used for visualization
+                     ;; so we can recreate when the active slot changes but
+                     ;; config/bounds/mode are otherwise identical.
+                     (local viz-build-ctx
+                       (or (and scene scene.resolve-active-build-context
+                                (scene:resolve-active-build-context))
+                           (and scene scene.build-context)))
+                     (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
+                     (local already-installed?
+                       (and existing
+                            (= existing.physics self.physics)
+                            (= existing.restitution config.restitution)
+                            (bounds-approx= existing.bounds bounds)
+                            (= existing.mode config.mode)))
+                     (set self.scene scene)
+                     (if already-installed?
+                         (do
+                           ;; Refresh visualization when the active build context
+                           ;; (slot) has changed, even though physics params match.
+                           (if (not (= existing.viz-lines viz-lines))
+                               (do
+                                 (when (and existing.visualization existing.visualization.drop)
+                                   (existing.visualization:drop))
+                                 (set existing.visualization (create-visualization scene bounds config))
+                                 (set existing.viz-lines viz-lines)))
+                           true)
+                         (do
+                           (drop-installation)
+                           (local planes
+                             (icollect [_ spec (ipairs (plane-specs bounds))]
+                               (install-plane self.physics spec config.restitution)))
+                           (set self.installation
+                                {:physics self.physics
+                                 :bounds bounds
+                                 :mode config.mode
+                                 :restitution config.restitution
+                                 :planes planes
+                                 :visualization (create-visualization scene bounds config)
+                                 :viz-lines viz-lines})
+                           true))))))))
+
+  (set self.refresh-visualization
+       (fn [self refresh-opts]
+         (local existing self.installation)
+         (if (or self.dropped? (not existing))
+             false
+             (do
+               (local options (or refresh-opts {}))
+               (local config (normalize-config (or options.config self.config)))
+               (local scene (or options.scene self.scene))
+               (set self.config (serialize-config config))
+               (set self.scene scene)
+               (when (and existing.visualization existing.visualization.drop)
+                 (existing.visualization:drop))
+               (local viz-build-ctx
+                 (or (and scene scene.resolve-active-build-context
+                          (scene:resolve-active-build-context))
+                     (and scene scene.build-context)))
+               (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
+               (set existing.visualization (create-visualization scene existing.bounds config))
+               (set existing.viz-lines viz-lines)
+               true))))
+
+  (set self.schedule-refresh
+       (fn [self refresh-opts]
+         (if self.dropped?
+             false
+             (do
+               (local options (or refresh-opts {}))
+               (local config (normalize-config (or options.config self.config)))
+               (local scene (or options.scene self.scene))
+               (set self.config (serialize-config config))
+               (set self.scene scene)
+               (if (<= config.debounce-ms 0)
+                   (do
+                     (when self.debouncer
+                       (self.debouncer:cancel))
+                     (self:ensure-installed {:scene scene
+                                              :config config}))
+                   (do
+                     (local debouncer (ensure-debouncer config.debounce-ms))
+                     (debouncer:cancel)
+                     (debouncer:set-delay-ms config.debounce-ms)
+                     (debouncer:trigger {:scene scene
+                                         :config config
+                                         :owner self.owner})))
+               true))))
+
+  (set self.clear
+       (fn [self]
+         (when (and self.debouncer self.debouncer.drop)
+           (self.debouncer:drop))
+         (set self.debouncer nil)
+         (drop-installation)
+         (set self.scene nil)
+         true))
+
+  (set self.drop
+       (fn [self]
+         (self:clear)
+         (set self.config nil)
+         (set self.dropped? true)
+         true))
+
+  self)
 
 {:available? available?
  :default-mode default-mode
@@ -449,7 +496,4 @@
  :serialize-config serialize-config
  :automatic-terrain-bounds automatic-terrain-bounds
  :resolve-active-bounds resolve-active-bounds
- :ensure-installed ensure-installed
- :refresh-visualization refresh-visualization
- :schedule-refresh schedule-refresh
- :clear clear}
+ :create-manager create-manager}

@@ -153,30 +153,53 @@
             nil))
       nil))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn assert-finite-vec3 [vec label]
+  (when (or (not vec)
+            (not (finite-number? vec.x))
+            (not (finite-number? vec.y))
+            (not (finite-number? vec.z)))
+    (error (.. "HeightfieldTerrainQuery.screen-rect-target produced non-finite " label))))
+
+(fn screen-pos-ray-from-matrices [pos view projection viewport]
+  (local vp (viewport-utils.to-table viewport))
+  (assert vp "screen-rect-target requires a viewport")
+  (assert view "screen-rect-target requires a view matrix")
+  (assert projection "screen-rect-target requires a projection matrix")
+  (local sample-pos
+    (or (viewport-utils.input-pos->viewport-pos pos vp app.engine)
+        {:x (+ vp.x (/ vp.width 2))
+         :y (+ vp.y (/ vp.height 2))}))
+  (local px (or sample-pos.x vp.x))
+  (local py (or sample-pos.y vp.y))
+  (local inverted-y (- (+ vp.height vp.y) py))
+  (local viewport-vec (viewport-utils.to-glm-vec4 vp))
+  (local near (glm.unproject (glm.vec3 px inverted-y 0.0) view projection viewport-vec))
+  (local far (glm.unproject (glm.vec3 px inverted-y 1.0) view projection viewport-vec))
+  (local direction (glm.normalize (- far near)))
+  (assert-finite-vec3 near "near")
+  (assert-finite-vec3 far "far")
+  (assert-finite-vec3 direction "direction")
+  {:origin near :direction direction})
+
 (fn screen-rect-target [record start-pos end-pos opts]
   (local options (or opts {}))
-  (local view (or options.view
-                  (and app.scene app.scene.get-view-matrix (app.scene:get-view-matrix))
-                  (and app.camera app.camera.get-view-matrix (app.camera:get-view-matrix))))
-  (local projection (or options.projection
-                        (and app.scene app.scene.projection)
-                        app.projection))
-  (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
-  (if (or (not record)
-          (not start-pos)
-          (not end-pos)
-          (not view)
-          (not projection))
+  (if (or (not record) (not start-pos) (not end-pos))
       nil
       (do
-        (local start-ray (app.screen-pos-ray start-pos
-                                             {:view view
-                                              :projection projection
-                                              :viewport viewport}))
-        (local end-ray (app.screen-pos-ray end-pos
-                                           {:view view
-                                            :projection projection
-                                            :viewport viewport}))
+        (local start-ray
+          (if (and options.view options.projection options.viewport)
+              (screen-pos-ray-from-matrices start-pos options.view options.projection options.viewport)
+              (app.screen-pos-ray start-pos options)))
+        (local end-ray
+          (if (and options.view options.projection options.viewport)
+              (screen-pos-ray-from-matrices end-pos options.view options.projection options.viewport)
+              (app.screen-pos-ray end-pos options)))
         (local start-hit (and start-ray (M.raycast-record record start-ray)))
         (local end-hit (and end-ray (M.raycast-record record end-ray)))
         (if (or (not start-hit) (not end-hit))

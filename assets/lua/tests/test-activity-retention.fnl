@@ -129,7 +129,7 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller
                   :board-state {:items [] :connectors []}})
@@ -780,7 +780,7 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller
                   :board-state {:items [] :connectors []}})
@@ -818,8 +818,10 @@
                      (= (. app.background-state.color 2) 0.3)
                      (= (. app.background-state.color 3) 0.4))
                 "Sandbox activation should apply custom background color")
-        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
-                "Sandbox containment should be enabled")
+        (let [sb-slot (scene:activity-slot "sandbox")
+              sb-manager (and sb-slot sb-slot.physics-containment-manager)]
+          (assert (and sb-manager sb-manager.config sb-manager.config.enabled?)
+                  "Sandbox containment should be enabled"))
         (let [sb-slot (scene:activity-slot "sandbox")]
           (assert (app.pointer-target-enabled? (. sb-slot :pointer-target))
                   "Sandbox pointer target should be enabled while sandbox is active"))
@@ -855,8 +857,11 @@
                        (= (. app.background-state.color 3) 0.0))
                   (.. activity-id " activation should reset background to default"))
           ;; Containment should be disabled
-          (assert (and app.physics-containment-config (not app.physics-containment-config.enabled?))
-                  (.. activity-id " activation should disable containment"))
+          (let [act-slot (scene:activity-slot activity-id)
+                act-manager (and act-slot act-slot.physics-containment-manager)]
+            (assert (and act-manager act-manager.config
+                         (not act-manager.config.enabled?))
+                    (.. activity-id " activation should disable containment")))
           ;; Sandbox pointer target should be rejected
           (let [sb-slot (scene:activity-slot "sandbox")]
             (assert (not (app.pointer-target-enabled? (. sb-slot :pointer-target)))
@@ -873,8 +878,10 @@
                      (= (. app.background-state.color 2) 0.3)
                      (= (. app.background-state.color 3) 0.4))
                 "Sandbox reactivation should restore custom background color")
-        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
-                "Sandbox reactivation should restore containment")
+        (let [sb-slot2 (scene:activity-slot "sandbox")
+              sb-manager2 (and sb-slot2 sb-slot2.physics-containment-manager)]
+          (assert (and sb-manager2 sb-manager2.config sb-manager2.config.enabled?)
+                  "Sandbox reactivation should restore containment"))
         true)))
   (pcall SandboxActivityUnit.unload-sandbox-activity!)
   (pcall GraphActivityUnit.unload-graph-activity!)
@@ -1062,6 +1069,55 @@
 
 (table.insert tests {:name "Board activity restore fails loudly without runtime.scene"
                       :fn board-restore-fails-loudly-without-runtime-scene})
+
+(fn activity-hooks-include-toolbar-and-sandbox-interaction-providers []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (set app.activity-top-toolbar-builder nil)
+  (set app.activity-object-move-predicate nil)
+  (set app.activity-drag-attachment-provider nil)
+  (local toolbar-builder (fn [] :toolbar-builder))
+  (local move-predicate (fn [] :move-predicate))
+  (local drag-provider (fn [] :drag-provider))
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "toolbar-test"
+           :label "Toolbar Test"
+           :activate (fn [ctx]
+                       (ctx:set-top-toolbar-builder! toolbar-builder)
+                       (ctx:set-object-move-predicate! move-predicate)
+                       (ctx:set-drag-attachment-provider! drag-provider)
+                       {})})
+        (Activities.activate-activity "toolbar-test")
+        (assert (= app.activity-top-toolbar-builder toolbar-builder)
+                "app.activity-top-toolbar-builder should be set after activation")
+        (assert (= app.activity-object-move-predicate move-predicate)
+                "app.activity-object-move-predicate should be set after activation")
+        (assert (= app.activity-drag-attachment-provider drag-provider)
+                "app.activity-drag-attachment-provider should be set after activation")
+        (Activities.deactivate-active-activity)
+        (assert (= app.activity-top-toolbar-builder nil)
+                "app.activity-top-toolbar-builder should be nil after deactivation")
+        (assert (= app.activity-object-move-predicate nil)
+                "app.activity-object-move-predicate should be nil after deactivation")
+        (assert (= app.activity-drag-attachment-provider nil)
+                "app.activity-drag-attachment-provider should be nil after deactivation")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "toolbar-test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Activity hooks include toolbar and sandbox interaction providers"
+                     :fn activity-hooks-include-toolbar-and-sandbox-interaction-providers})
 
 (local main
   (fn []

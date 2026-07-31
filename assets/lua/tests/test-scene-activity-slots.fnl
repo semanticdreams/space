@@ -547,9 +547,7 @@
   ;; and activation applying lights/skybox/background/containment.
   ;; R1-6: Use valid terrain record, assert containment installs/clears, assert content preserved.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local LightingViewState (require :lighting-view-state))
@@ -620,9 +618,12 @@
               "Sandbox activation should apply custom background color")
 
       ;; R1-6: Assert Sandbox containment installs
-      (assert (not (= app.physics-containment-config nil))
-              "Sandbox activation should set physics-containment-config")
-      (assert app.physics-containment-config.enabled?
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (local sandbox-manager sandbox-slot.physics-containment-manager)
+      (assert sandbox-manager "Sandbox slot should have a containment manager after activation")
+      (assert (not (= sandbox-manager.config nil))
+              "Sandbox activation should set containment config on manager")
+      (assert sandbox-manager.config.enabled?
               "Sandbox containment config should have enabled? true")
 
       ;; Restore graph with empty state
@@ -643,8 +644,11 @@
               "Graph activation with empty state should set neutral background")
 
       ;; R1-6: Assert Graph activation clears containment
-      (assert (and app.physics-containment-config
-                   (not app.physics-containment-config.enabled?))
+      (local graph-slot (scene:activity-slot "graph"))
+      (local graph-manager graph-slot.physics-containment-manager)
+      (assert graph-manager "Graph slot should have a containment manager after activation")
+      (assert (and graph-manager.config
+                   (not graph-manager.config.enabled?))
               "Graph activation should disable containment")
 
       ;; Capture graph state: should have empty terrain/panels
@@ -669,8 +673,10 @@
       (assert (= skybox-state.brightness 0.5)
               "Switching back to sandbox should restore skybox brightness")
       ;; R1-6: Assert Sandbox containment returns
-      (assert (and app.physics-containment-config
-                   app.physics-containment-config.enabled?)
+      (local sb-slot2 (scene:activity-slot "sandbox"))
+      (local sb-manager2 sb-slot2.physics-containment-manager)
+      (assert (and sb-manager2 sb-manager2.config
+                   sb-manager2.config.enabled?)
               "Switching back to sandbox should re-enable containment")
       ;; R1-6: Assert terrain record was preserved through switches
       (local sandbox-captured (scene:capture-activity-slot-state "sandbox"))
@@ -778,9 +784,7 @@
   ;; The existing environment-isolation test restores before activation;
   ;; this exercises the active-slot restore path directly.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -836,9 +840,7 @@
   ;; R1-3: restore-activity-slot-state called twice on an already-active slot
   ;; with the same one-terrain state must leave exactly one runtime terrain.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -901,9 +903,7 @@
   ;; R1-3: restoring a state with an additional terrain while the slot is active
   ;; must add exactly the missing terrain without duplicating existing ones.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -971,9 +971,7 @@
 (fn containment-enabled-flag-controls-install []
   ;; Task 2: Containment :enabled? false should clear and install nothing.
   (with-restored-app-fields
-    [:physics-containment-config :physics-containment-scene
-     :__physics-global-containment :__physics_containment_refresh_debouncer
-     :engine]
+    [:engine]
     (fn []
       (local PhysicsContainment (require :physics-containment))
       (local AppProjection (require :app-projection))
@@ -996,27 +994,26 @@
 
       ;; Mock physics for ensure-installed
       (var installed-planes [])
-      (var cleared? false)
-      ;; Capture original clear to use within mock
-      (local original-clear PhysicsContainment.clear)
       (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-planes body))}})
-      ;; Override clear for test to detect it was called
-      (var ensure-installed-calls [])
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
+
+      ;; Create a manager
+      (local manager (PhysicsContainment.create-manager
+                       {:owner {}
+                        :physics app.engine.physics}))
 
       ;; Setup: install enabled containment
-      (orig-ensure-installed {:config {:enabled? true}})
+      (manager:ensure-installed {:config {:enabled? true}})
       (assert (> (length installed-planes) 0)
               "ensure-installed with enabled? true should install containment planes")
-      (assert (not (= app.physics-containment-config nil))
-              "ensure-installed should set physics-containment-config")
+      (assert (not (= manager.config nil))
+              "ensure-installed should set manager.config")
 
       ;; Clean up and test disabled
-      (original-clear)
+      (manager:clear)
       (set installed-planes [])
 
       ;; Install disabled containment: should clear and install nothing
-      (local result (orig-ensure-installed {:config {:enabled? false}}))
+      (local result (manager:ensure-installed {:config {:enabled? false}}))
       ;; When enabled? is false, ensure-installed clears and returns false
       (assert (= result false)
               "ensure-installed with enabled? false should return false")
@@ -1024,7 +1021,7 @@
               "ensure-installed with enabled? false should not install planes")
 
       ;; Clean up
-      (original-clear))))
+      (manager:drop))))
 
 (table.insert tests {:name "Scene activity slots return same slot on repeat"
                      :fn ensure-activity-slot-returns-same-slot})
@@ -1069,6 +1066,122 @@
 (table.insert tests {:name "Scene activate-activity-slot fails on unknown"
                         :fn activate-activity-slot-fails-on-unknown})
 
+;; ── Task 1: Scene Slot Presentation Targets ─────────────────────────
+
+(fn empty-scene-slot-exposes-no-presentation-target []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (scene:ensure-activity-slot "drawing")
+  (scene:activate-activity-slot "drawing")
+  (assert (= (scene:presentation-target) nil)
+          "An empty scene slot must not expose a render target")
+  (drop-fixture fixture))
+
+(fn scene-presentation-target-uses-slot-camera []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local slot-camera-a (Camera {:position (glm.vec3 1 2 3)}))
+  (local slot-camera-b (Camera {:position (glm.vec3 10 20 30)}))
+  (local slot (scene:ensure-activity-slot "sandbox" {:camera slot-camera-a}))
+  (scene:activate-activity-slot "sandbox")
+  (slot:expose-render-target! {:layers [:geometry :text]})
+  (local target-a (scene:presentation-target))
+  (assert (= target-a.camera slot-camera-a)
+          "Scene target must use the slot-owned camera")
+  (slot:set-camera slot-camera-b)
+  (local target-b (scene:presentation-target))
+  (assert (= target-b.camera slot-camera-b)
+          "Changing the slot camera must change the presentation target camera")
+  (slot-camera-a:drop)
+  (slot-camera-b:drop)
+  (drop-fixture fixture))
+
+(table.insert tests {:name "Task 1: empty scene slot exposes no presentation target"
+                     :fn empty-scene-slot-exposes-no-presentation-target})
+(table.insert tests {:name "Task 1: scene presentation target uses slot camera"
+                     :fn scene-presentation-target-uses-slot-camera})
+
+;; ── R1-1: active slot without camera fails loudly ────────────────────
+
+(fn active-slot-without-camera-fails-loudly []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (scene:ensure-activity-slot "sandbox")
+  (scene:activate-activity-slot "sandbox")
+  ;; get-view-matrix must fail because the active slot has no camera
+  (local (ok-v err-v) (pcall (fn [] (scene:get-view-matrix))))
+  (assert (not ok-v)
+          "get-view-matrix must fail when active slot has no camera")
+  (assert (string.find (tostring err-v) "requires its own camera" 1 true)
+          (.. "get-view-matrix error must mention missing slot camera, got: "
+              (tostring err-v)))
+  ;; screen-pos-ray must also fail (it delegates to get-view-matrix)
+  (local (ok-s err-s) (pcall (fn [] (scene:screen-pos-ray {:x 100 :y 200}))))
+  (assert (not ok-s)
+          "screen-pos-ray must fail when active slot has no camera")
+  (assert (string.find (tostring err-s) "requires its own camera" 1 true)
+          (.. "screen-pos-ray error must mention missing slot camera, got: "
+              (tostring err-s)))
+  (drop-fixture fixture))
+
+(table.insert tests {:name "R1-1: active slot without camera fails loudly"
+                     :fn active-slot-without-camera-fails-loudly})
+
+;; ── R1-2: presentation target parameter handling and ownership ───────
+
+(fn presentation-target-screen-pos-ray-uses-slot-camera []
+  "R1-2: target:screen-pos-ray must use the slot-owned camera, not
+  the current active Scene camera.  Verify argument handling (receiver
+  parameter) and captured camera/projection ownership."
+  (with-restored-app-fields
+    [:viewport]
+    (fn []
+      (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Ensure the scene has a valid projection for ray computation
+      (set scene.projection (glm.ortho -40 40 -30 30 -100.0 1000.0))
+      (local slot-camera (Camera {:position (glm.vec3 50 50 100)}))
+      (local slot (scene:ensure-activity-slot "sandbox" {:camera slot-camera}))
+      (scene:activate-activity-slot "sandbox")
+      (slot:expose-render-target! {:layers [:geometry]})
+      (local target (scene:presentation-target))
+      (assert target "presentation-target must return non-nil")
+      (assert target.camera "target must have camera")
+      ;; R1-2a: target:screen-pos-ray must handle receiver parameter correctly.
+      ;; When called as target:screen-pos-ray({:x 10 :y 20}), the first
+      ;; argument is the target object and the second is the pointer.
+      (local ray (target:screen-pos-ray {:x 10 :y 20}))
+      (assert ray "target:screen-pos-ray must return a ray")
+      (assert ray.origin "ray must have origin")
+      (assert ray.direction "ray must have direction")
+      ;; R1-2b: target.get-render-contexts must return slot.ctx
+      (local contexts (target:get-render-contexts))
+      (assert contexts "target:get-render-contexts must return a table")
+      (assert (= (type contexts) :table)
+              "target:get-render-contexts must return a table")
+      (assert (= (length contexts) 1)
+              (.. "expected exactly 1 render context, got " (tostring (length contexts))))
+      (assert (= (. contexts 1) slot.ctx)
+              "target:get-render-contexts must return the slot's ctx, not active-render-context")
+      ;; R1-2c: target:screen-pos-ray must use slot camera, not surface camera.
+      ;; Verify by moving the surface camera away and confirming the ray still
+      ;; uses the slot camera position.
+      (scene:set-camera (Camera {:position (glm.vec3 -999 -999 -999)}))
+      (local ray-after-surface-move (target:screen-pos-ray {:x 10 :y 20}))
+      (assert ray-after-surface-move "ray must still work after surface camera move")
+      (assert ray-after-surface-move.origin "ray origin must exist after surface camera move")
+      ;; The ray origin should be near slot-camera position (50,50,100), not the
+      ;; surface camera at (-999,-999,-999).
+      (assert (< (math.abs (- ray-after-surface-move.origin.x 50)) 200)
+              (.. "ray origin x should be near slot camera 50, got "
+                  (tostring ray-after-surface-move.origin.x)))
+      (slot-camera:drop)
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R1-2: target screen-pos-ray uses slot camera and context"
+                     :fn presentation-target-screen-pos-ray-uses-slot-camera})
+
 ;; ── R2-1 ──────────────────────────────────────────────────────────────
 
 (fn inactive-capture-uses-authoritative-terrains []
@@ -1077,9 +1190,7 @@
   This prevents stale runtime terrain from overwriting canonical state
   during inactive capture."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1152,9 +1263,7 @@
   authoritative slot.scene-state.terrains.  Stale terrains should be
   removed and new canonical terrains should be added."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1217,9 +1326,7 @@
   terrains.  The result is zero runtime terrains and zero canonical
   terrain records — no leftover stale entries and no recapture."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1276,9 +1383,7 @@
   retain the complete policy (:default, :by-theme) — not be overwritten
   by the renderer's resolved format during slot switch."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1352,8 +1457,7 @@
   instead of skipping the same terrain id.  The stale runtime capture must
   not overwrite the updated canonical state."
   (with-restored-app-fields
-    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:renderers :skybox-state :background-state :lights-state
      :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1431,8 +1535,7 @@
   inactive, reactivation must drop stale retained runtime panels so the
   graph-mode view does not carry forward deleted panels."
   (with-restored-app-fields
-    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:renderers :skybox-state :background-state :lights-state
      :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1530,8 +1633,7 @@
   skybox applied to the renderer must resolve for the current active theme,
   not just use the default entry."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:skybox-state :background-state :lights-state
      :renderers :themes :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1700,7 +1802,7 @@
   must propagate out so callers can handle it."
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :renderers
-     :engine :physics-containment-config]
+     :engine]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
@@ -1758,7 +1860,7 @@
   content/services/visibility) must be fully restored."
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :renderers
-     :engine :physics-containment-config]
+     :engine]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
@@ -1830,7 +1932,76 @@
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3b corrupt terrain activation rolls back to previous slot"
-                     :fn corrupt-terrain-activation-rolls-back-previous-slot})
+                      :fn corrupt-terrain-activation-rolls-back-previous-slot})
+
+;; ── Task 6: Stale containment refresh does not install into wrong slot ──
+
+(fn stale-containment-refresh-does-not-install-into-new-active-slot []
+  (with-restored-app-fields
+    [:engine]
+    (fn []
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Mock engine with events support for the debouncer.
+      ;; The debouncer uses updated:connect to subscribe and updated:emit
+      ;; to receive delta values.  We simulate the full event lifecycle.
+      (var update-handlers [])
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}
+                        :events {:updated {:connect (fn [_self handler]
+                                                      (table.insert update-handlers handler)
+                                                      handler)
+                                          :disconnect (fn [_self handler _ok?]
+                                                        (for [i (length update-handlers) 1 -1]
+                                                          (when (= (. update-handlers i) handler)
+                                                            (table.remove update-handlers i)))
+                                                        true)
+                                          :emit (fn [_self delta]
+                                                  (each [_ handler (ipairs update-handlers)]
+                                                    (pcall (fn [] (handler delta)))))}}
+                        :now-ms (fn [self] 0)})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (scene:ensure-activity-slot "sandbox")
+      (scene:ensure-activity-slot "drawing")
+      ;; Verify no managers exist before activation
+      (assert (= (. (scene:activity-slot "drawing") :physics-containment-manager) nil)
+              "Drawing slot should have no manager before any activation")
+      (scene:activate-activity-slot "sandbox")
+      ;; After sandbox activation, drawing still has no manager
+      (assert (= (. (scene:activity-slot "drawing") :physics-containment-manager) nil)
+              "Drawing slot should have no manager after sandbox activation")
+      ;; Create the sandbox slot's containment manager
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (local sandbox-manager (sandbox-slot:ensure-containment-manager))
+      (assert sandbox-manager "Sandbox slot should have a containment manager when active")
+      ;; Schedule a debounced refresh with a long delay
+      (sandbox-manager:schedule-refresh
+        {:scene scene
+         :config {:debounce-ms 10000
+                  :mode "manual-bounds"
+                  :bounds {:min [-10 -10 -10]
+                           :max [10 10 10]}}})
+      ;; Verify the debouncer was created
+      (assert sandbox-manager.debouncer "Sandbox manager should have a debouncer after schedule-refresh")
+      ;; Switch to drawing slot — this deactivates sandbox slot
+      (scene:activate-activity-slot "drawing")
+      ;; Fire the debounce by emitting a large delta.  The debounced callback
+      ;; captured the sandbox manager's owner identity.  The callback fires
+      ;; on the SANDBOX manager, not the drawing slot's manager.
+      (pcall (fn [] (app.engine.events.updated:emit 10000)))
+      ;; Assert: the drawing slot's manager must NOT have an active containment
+      ;; installation (the stale refresh from sandbox must not install into drawing).
+      (local drawing-slot2 (scene:activity-slot "drawing"))
+      (assert drawing-slot2.physics-containment-manager
+              "Drawing slot should have a manager from normal activation")
+      (assert (= drawing-slot2.physics-containment-manager.installation nil)
+              "Drawing slot manager must not have containment installation (stale refresh from sandbox)")
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "Task 6: stale containment refresh does not install into new active slot"
+                     :fn stale-containment-refresh-does-not-install-into-new-active-slot})
 
 ;; ── R4-3c no-previous-slot rollback consistency ─────────────────────────
 
@@ -1842,12 +2013,10 @@
   on the corrupt slot to verify rollback resets everything."
   (with-restored-app-fields
     [:lights-state :skybox-state :background-state :renderers
-     :engine :physics-containment-config :physics-containment-scene
-     :__physics-global-containment :lights]
+     :engine :lights]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
-      (local PhysicsContainment (require :physics-containment))
 
       ;; Mock lights — captures the last set state
       (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
@@ -1867,14 +2036,6 @@
             :set-background-state (fn [_ state] (set background-state state))})
       (set app.engine {:physics {:addRigidBody (fn [_phys _body])
                                   :removeRigidBody (fn [_phys _body])}})
-      ;; Track containment config
-      (var containment-installed? nil)
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
-      (set PhysicsContainment.ensure-installed
-           (fn [opts]
-             (set containment-installed? (and opts.config opts.config.enabled?))
-             (orig-ensure-installed opts)))
-      (set app.__physics-global-containment nil)
 
       (local fixture (make-scene))
       (local scene fixture.scene)
@@ -1958,12 +2119,15 @@
                    (= (. background-state.color 2) 0.0)
                    (= (. background-state.color 3) 0.0))
               "Background must be reset to default [0 0 0] after rollback")
-      ;;     (d) Containment: disabled
-      (assert (not containment-installed?)
-              "Physics containment must be not-installed/disabled after rollback")
+      ;;     (d) Containment: slot manager must have no active installation
+      ;;         after rollback.  The manager itself survives on the slot but
+      ;;         its planes are removed and config is disabled.
+      (let [sb-mgr sandbox-slot.physics-containment-manager]
+        (assert (or (not sb-mgr) (= sb-mgr.installation nil))
+                "Physics containment must be not-installed/disabled after rollback"))
+      (sandbox-slot.physics-containment-manager:drop)
+      (set sandbox-slot.physics-containment-manager nil)
 
-      ;; Restore PhysicsContainment.ensure-installed
-      (set PhysicsContainment.ensure-installed orig-ensure-installed)
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3c corrupt terrain activation no-previous-slot consistent cleanup"
@@ -1981,14 +2145,12 @@
     slot.scene-terrains) intact
   - Leave the slot invisible/inactive"
   (with-restored-app-fields
-    [:renderers :engine :lights :physics-containment-config
-     :physics-containment-scene :__physics-global-containment
+    [:renderers :engine :lights
      :skybox-state :background-state :lights-state]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
       (local LayoutPhysicsBodies (require :layout-physics-bodies))
-      (local PhysicsContainment (require :physics-containment))
       ;; Ensure bt is loaded so physics-available? in layout-physics-bodies resolves
       (pcall require :bt)
 
@@ -2002,10 +2164,9 @@
             :set-background-state (fn [_ state])})
        (set app.lights {:get-state (fn [_] {:ambient {:enabled? false :color [0 0 0] :intensity 0} :directional [] :point [] :spot []})
                         :set-state (fn [_ _state])})
-      ;; Suppress containment
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
-      (set PhysicsContainment.ensure-installed (fn [_opts] true))
-      (set app.__physics-global-containment nil)
+      ;; Containment is handled by the slot's manager during activation.
+      ;; The slot's scene-state has :containment {:enabled? false}, so the
+      ;; manager will be created with disabled containment — no planes installed.
 
       (local fixture (make-scene))
       (local scene fixture.scene)
@@ -2158,7 +2319,6 @@
 
       ;; Restore mock
       (set LayoutPhysicsBodies.deactivate orig-deactivate)
-      (set PhysicsContainment.ensure-installed orig-ensure-installed)
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3d corrupt activation preserves retained slot content"
@@ -2172,9 +2332,7 @@
   removed from runtime.  When a terrain record changes (different data
   for the same id), the runtime entry must be replaced."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -2271,9 +2429,7 @@
   into slot.scene-state.terrains, and a repeat restore must remain
   idempotent (no duplicate terrain entries)."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -2349,6 +2505,239 @@
 
 (table.insert tests {:name "R7-1b active restore captures generated terrain id"
                      :fn active-restore-captures-generated-terrain-id})
+
+;; ── Task 7: Empty scene slot service leakage ─────────────────────────
+
+(fn empty-scene-slot-applies-empty-services-without-render-target []
+  "Task 7: An empty drawing scene slot activated after sandbox (with
+  non-empty lights, skybox, background, and containment) must reset all
+  engine services to the canonical empty state so sandbox service state
+  does not leak through the scene surface."
+  (with-restored-app-fields
+    [:lights :renderers :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local PhysicsContainment (require :physics-containment))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Derive expected empty service state shapes
+      (local empty (ActivitySceneState.empty-state))
+      (local expected-empty-lights empty.lights)
+      ;; Resolved format: what the renderer actually receives after
+      ;; apply-slot-service-state resolves the complete skybox for the
+      ;; current theme (nil = no active theme = use :default).
+      (local expected-empty-skybox
+        (SkyboxState.resolve-for-theme empty.skybox nil))
+      ;; Background is already in its normalized complete form.
+      (local expected-empty-background empty.background)
+      ;; Containment is already serialized by empty-containment.
+      (local expected-empty-containment empty.containment)
+
+      ;; Mock lights — captures the last set state
+      (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
+                         :directional []
+                         :point []
+                         :spot []})
+      (set app.lights {:set-state (fn [_self state] (set lights-state state))
+                       :get-state (fn [_self] lights-state)})
+
+      ;; Mock renderer skybox / background — captures last set state
+      (var skybox-state {:enabled? false
+                         :name "lake"
+                         :brightness 0.1
+                         :tint-color [1.0 1.0 1.0]})
+      (var background-state {:color [0 0 0]})
+      (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                                   :set-state (fn [_ state] (set skybox-state state))}
+                          :get-background-state (fn [_] background-state)
+                          :set-background-state (fn [_ state] (set background-state state))})
+
+      ;; Mock physics for containment
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+
+      ;; (1) Activate sandbox with non-empty service state (enabled lights,
+      ;;     enabled skybox, custom background, enabled containment).
+      (scene:ensure-activity-slot "sandbox")
+      (local sandbox-state
+        {:panels []
+         :terrains []
+         :lights {:ambient {:enabled? true :color [0.9 0.8 0.7] :intensity 2.0}
+                  :directional []
+                  :point []
+                  :spot []}
+         :skybox {:enabled? true
+                  :name "ocean"
+                  :brightness 0.75
+                  :tint-color [0.5 0.6 1.0]}
+         :background {:color [0.1 0.2 0.3]}
+         :containment {:enabled? true}})
+      (scene:restore-activity-slot-state "sandbox" sandbox-state)
+      (scene:activate-activity-slot "sandbox")
+
+      ;; Verify sandbox services were applied (sanity check)
+      (assert lights-state.ambient.enabled?
+              "Sandbox activation must enable ambient light")
+      (assert skybox-state.enabled?
+              "Sandbox activation must enable skybox")
+      (assert (= skybox-state.brightness 0.75)
+              "Sandbox activation must apply skybox brightness")
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (assert (and sandbox-slot.physics-containment-manager
+                   sandbox-slot.physics-containment-manager.config
+                   sandbox-slot.physics-containment-manager.config.enabled?)
+              "Sandbox slot must have enabled containment")
+
+      ;; (2) Switch to drawing — the empty slot must reset all services.
+      (local drawing-slot (scene:ensure-activity-slot "drawing"))
+      (scene:activate-activity-slot "drawing")
+
+      ;; ── Lights: compare observed against expected empty lights ──────
+      (assert (not lights-state.ambient.enabled?)
+              (.. "ambient must be disabled, expected "
+                  (tostring expected-empty-lights.ambient.enabled?)))
+      (assert (= (length lights-state.directional)
+                 (length expected-empty-lights.directional))
+              (.. "directional array length mismatch, expected "
+                  (tostring (length expected-empty-lights.directional))))
+      (assert (= (length lights-state.point)
+                 (length expected-empty-lights.point))
+              (.. "point array length mismatch, expected "
+                  (tostring (length expected-empty-lights.point))))
+      (assert (= (length lights-state.spot)
+                 (length expected-empty-lights.spot))
+              (.. "spot array length mismatch, expected "
+                  (tostring (length expected-empty-lights.spot))))
+      ;; Compare ambient color components
+      (each [idx expected-v (ipairs expected-empty-lights.ambient.color)]
+        (assert (<= (math.abs (- (. lights-state.ambient.color idx) expected-v)) 0.01)
+                (.. "ambient.color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. lights-state.ambient.color idx)))))
+      ;; Compare ambient intensity
+      (assert (<= (math.abs (- (. lights-state.ambient.intensity)
+                               expected-empty-lights.ambient.intensity)) 0.01)
+              (.. "ambient.intensity mismatch, expected "
+                  (tostring expected-empty-lights.ambient.intensity) " got "
+                  (tostring (. lights-state.ambient.intensity))))
+
+      ;; ── Skybox: compare observed against resolved empty skybox ─────
+      (assert (= skybox-state.enabled? expected-empty-skybox.enabled?)
+              (.. "skybox enabled? mismatch, expected "
+                  (tostring expected-empty-skybox.enabled?) " got "
+                  (tostring skybox-state.enabled?)))
+      (assert (= skybox-state.name expected-empty-skybox.name)
+              (.. "skybox name mismatch, expected "
+                  (tostring expected-empty-skybox.name) " got "
+                  (tostring skybox-state.name)))
+      (assert (<= (math.abs (- skybox-state.brightness
+                               expected-empty-skybox.brightness)) 0.01)
+              (.. "skybox brightness mismatch, expected "
+                  (tostring expected-empty-skybox.brightness) " got "
+                  (tostring skybox-state.brightness)))
+      (each [idx expected-v (ipairs expected-empty-skybox.tint-color)]
+        (assert (<= (math.abs (- (. skybox-state.tint-color idx) expected-v)) 0.01)
+                (.. "skybox tint-color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. skybox-state.tint-color idx)))))
+
+      ;; ── Background: compare observed against canonical empty bg ────
+      (each [idx expected-v (ipairs expected-empty-background.color)]
+        (assert (<= (math.abs (- (. background-state.color idx) expected-v)) 0.01)
+                (.. "background.color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. background-state.color idx)))))
+
+      ;; ── Containment: compare manager.config against empty containment ─
+      (assert drawing-slot.physics-containment-manager
+              "Drawing slot should have a containment manager after activation")
+      (local drawing-config drawing-slot.physics-containment-manager.config)
+      (assert drawing-config "Drawing containment manager must have config")
+
+      ;; Compare every serialized field against the canonical empty config
+      (assert (= drawing-config.enabled?
+                 expected-empty-containment.enabled?)
+              (.. "containment enabled? mismatch, expected "
+                  (tostring expected-empty-containment.enabled?) " got "
+                  (tostring drawing-config.enabled?)))
+
+      (assert (= drawing-config.mode
+                 expected-empty-containment.mode)
+              (.. "containment mode mismatch, expected "
+                  (tostring expected-empty-containment.mode) " got "
+                  (tostring drawing-config.mode)))
+
+      ;; Bounds: compare min/max triplets
+      (assert drawing-config.bounds
+              "Drawing containment config must have :bounds")
+      (each [idx expected-v (ipairs expected-empty-containment.bounds.min)]
+        (assert (<= (math.abs (- (. drawing-config.bounds.min idx) expected-v)) 0.01)
+                (.. "containment bounds.min[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. drawing-config.bounds.min idx)))))
+      (each [idx expected-v (ipairs expected-empty-containment.bounds.max)]
+        (assert (<= (math.abs (- (. drawing-config.bounds.max idx) expected-v)) 0.01)
+                (.. "containment bounds.max[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. drawing-config.bounds.max idx)))))
+
+      ;; Padding: compare horizontal, bottom, top
+      (assert drawing-config.padding
+              "Drawing containment config must have :padding")
+      (assert (<= (math.abs (- drawing-config.padding.horizontal
+                               expected-empty-containment.padding.horizontal)) 0.01)
+              (.. "containment padding.horizontal mismatch, expected "
+                  (tostring expected-empty-containment.padding.horizontal) " got "
+                  (tostring drawing-config.padding.horizontal)))
+      (assert (<= (math.abs (- drawing-config.padding.bottom
+                               expected-empty-containment.padding.bottom)) 0.01)
+              (.. "containment padding.bottom mismatch, expected "
+                  (tostring expected-empty-containment.padding.bottom) " got "
+                  (tostring drawing-config.padding.bottom)))
+      (assert (<= (math.abs (- drawing-config.padding.top
+                               expected-empty-containment.padding.top)) 0.01)
+              (.. "containment padding.top mismatch, expected "
+                  (tostring expected-empty-containment.padding.top) " got "
+                  (tostring drawing-config.padding.top)))
+
+      ;; Restitution, debounce-ms
+      (assert (<= (math.abs (- drawing-config.restitution
+                               expected-empty-containment.restitution)) 0.01)
+              (.. "containment restitution mismatch, expected "
+                  (tostring expected-empty-containment.restitution) " got "
+                  (tostring drawing-config.restitution)))
+      (assert (= drawing-config.debounce-ms
+                 expected-empty-containment.debounce-ms)
+              (.. "containment debounce-ms mismatch, expected "
+                  (tostring expected-empty-containment.debounce-ms) " got "
+                  (tostring drawing-config.debounce-ms)))
+
+      ;; Visualization
+      (assert drawing-config.visualization
+              "Drawing containment config must have :visualization")
+      (assert (= drawing-config.visualization.enabled
+                 expected-empty-containment.visualization.enabled)
+              (.. "containment visualization.enabled mismatch, expected "
+                  (tostring expected-empty-containment.visualization.enabled) " got "
+                  (tostring drawing-config.visualization.enabled)))
+
+      ;; ── Presentation target and slot state ──────────────────────────
+      (assert (= (scene:presentation-target) nil)
+              "Empty drawing scene slot must not expose a render target")
+      (assert drawing-slot.scene-state
+              "Empty slot must own explicit empty service state")
+
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "Task 7: empty scene slot applies empty services without render target"
+                     :fn empty-scene-slot-applies-empty-services-without-render-target})
 
 (local main
   (fn []

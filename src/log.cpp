@@ -262,6 +262,14 @@ void log_init(const LogConfig& config)
     std::lock_guard<std::mutex> lock(log_mutex);
     spdlog::shutdown();
 
+    std::string selected_output_path = config.output_path.empty()
+        ? log_output_path
+        : config.output_path;
+    if (selected_output_path.empty()) {
+        selected_output_path = std::string(GL_LOG_FILE);
+    }
+    log_output_path = selected_output_path;
+
     auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     stdout_sink->set_formatter(std::make_unique<ColorKeyValueFormatter>());
     auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
@@ -277,6 +285,8 @@ void log_init(const LogConfig& config)
 
     spdlog::init_thread_pool(8192, 1);
     LOG_CONFIG.reporting_level = config.reporting_level;
+    LOG_CONFIG.restart = config.restart;
+    LOG_CONFIG.output_path = log_output_path;
     log_ready = true;
 
     static const std::vector<std::string> default_loggers = {
@@ -414,8 +424,8 @@ void log_set_frame_id_provider(const std::atomic<uint64_t>* provider)
 
 void log_set_output_path(const std::string& path)
 {
-    log_output_path = path.empty() ? std::string(GL_LOG_FILE) : path;
     LogConfig config = LOG_CONFIG;
+    config.output_path = path.empty() ? std::string(GL_LOG_FILE) : path;
     config.restart = false;
     log_init(config);
 }

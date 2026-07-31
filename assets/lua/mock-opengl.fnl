@@ -346,6 +346,10 @@
        (fn [value]
          (record-gl "glDepthMask" {:value value})))
 
+  (set gl.glViewport
+       (fn [x y width height]
+         (record-gl "glViewport" {:x x :y y :width width :height height})))
+
   (set gl.glBufferData
        (fn [target data usage]
          (record-gl "glBufferData"

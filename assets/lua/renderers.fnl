@@ -13,6 +13,7 @@
 (local BackgroundState (require :background-state))
 
 (local gl (require :gl))
+(local Presentation (require :activity-presentation))
 
 (fn bool-option [options key default-value]
   (if (or (not options) (= (. options key) nil))
@@ -191,15 +192,37 @@
         (when (and sub-app sub-app.render)
           (sub-app:render image-renderer projection view)))))
 
-  (fn draw-hud [self]
-    (when app.hud
-      (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
-      (self:draw-target app.hud)))
+  (fn ensure-presentation [runtime]
+    (when runtime
+      (when (not runtime.presentation)
+        (set runtime.presentation (Presentation.for-runtime runtime)))
+      runtime.presentation))
 
-  (fn draw-canvas [self]
-    (when (and app.canvas app.canvas-visible?)
-      (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
-      (self:draw-target app.canvas)))
+  (fn collect-presentation-targets []
+    (if (and app app.active-world-runtime)
+        (let [provider (ensure-presentation app.active-world-runtime)]
+          (if provider
+              (provider:render-targets)
+              []))
+        []))
+
+  (fn draw-scene-targets-first-pass [self targets]
+    (each [_ target (ipairs targets)]
+      (when (= target.kind :scene)
+        (skybox-renderer:render target)
+        (self:draw-target target {:text false}))))
+
+  (fn draw-scene-targets-second-pass [self targets]
+    (each [_ target (ipairs targets)]
+      (when (= target.kind :scene)
+        (self:draw-target target {:geometry false})
+        (self:draw-sub-apps target))))
+
+  (fn draw-non-scene-targets [self targets]
+    (each [_ target (ipairs targets)]
+      (when (not= target.kind :scene)
+        (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
+        (self:draw-target target))))
 
   (fn use-fxaa? []
     (and (fxaa:ready?)
@@ -220,9 +243,8 @@
     (gl.glClearColor (. clear-color 1) (. clear-color 2) (. clear-color 3) (. clear-color 4))
     (gl.glBindFramebuffer gl.GL_FRAMEBUFFER (if use-fxaa (fxaa:get-fbo) 0))
     (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
-    (when app.scene
-      (skybox-renderer:render app.scene)
-      (self:draw-target app.scene {:text false}))
+    (local targets (collect-presentation-targets))
+    (draw-scene-targets-first-pass self targets)
     (if use-fxaa
         (do
           (gl.glBindFramebuffer gl.GL_FRAMEBUFFER final-fbo)
@@ -231,11 +253,8 @@
           (fxaa:render)
           (gl.glFramebufferRenderbuffer gl.GL_FRAMEBUFFER gl.GL_DEPTH_ATTACHMENT gl.GL_RENDERBUFFER (fxaa:get-depth-rbo))
           (gl.glEnable gl.GL_DEPTH_TEST)
-          (when app.scene
-            (self:draw-target app.scene {:geometry false})
-            (self:draw-sub-apps app.scene))
-          (draw-canvas self)
-          (draw-hud self)
+          (draw-scene-targets-second-pass self targets)
+          (draw-non-scene-targets self targets)
           (gl.glBindFramebuffer gl.GL_READ_FRAMEBUFFER final-fbo)
           (gl.glBindFramebuffer gl.GL_DRAW_FRAMEBUFFER 0)
           (local width (fxaa:get-width))
@@ -244,11 +263,8 @@
             (gl.glBlitFramebuffer 0 0 width height 0 0 width height gl.GL_COLOR_BUFFER_BIT gl.GL_NEAREST))
           (gl.glBindFramebuffer gl.GL_FRAMEBUFFER 0))
         (do
-          (when app.scene
-            (self:draw-target app.scene {:geometry false})
-            (self:draw-sub-apps app.scene))
-          (draw-canvas self)
-          (draw-hud self))))
+          (draw-scene-targets-second-pass self targets)
+          (draw-non-scene-targets self targets))))
 
   (fn on-viewport-changed [_self viewport]
     (fxaa:on-viewport-changed viewport)

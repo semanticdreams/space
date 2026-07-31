@@ -72,30 +72,31 @@
 (fn selection-input-prefers-selection-only-for-primary-button []
     (local state (State {:name :selection-test
                          :routes {:mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
-                                                                   PointerHandlers.ResizableMouseButtonDown
-                                                                   PointerHandlers.ClickableMouseButtonDown
-                                                                   PointerHandlers.MovableMouseButtonDown
-                                                                   PointerHandlers.SelectionMouseButtonDown
-                                                                   PointerHandlers.CameraMouseButtonDown])
+                                                                    PointerHandlers.ResizableMouseButtonDown
+                                                                    PointerHandlers.ClickableMouseButtonDown
+                                                                    PointerHandlers.MovableMouseButtonDown
+                                                                    PointerHandlers.SelectionMouseButtonDown
+                                                                    PointerHandlers.CameraMouseButtonDown])
                                   :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
-                                                                 PointerHandlers.ResizableMouseButtonUp
-                                                                 PointerHandlers.ClickableMouseButtonUp
-                                                                 PointerHandlers.MovableMouseButtonUp
-                                                                 PointerHandlers.SelectionMouseButtonUp
-                                                                 PointerHandlers.CameraMouseButtonUp
-                                                                 HoverHandlers.HoverAfterMouseButtonUp])
+                                                                  PointerHandlers.ResizableMouseButtonUp
+                                                                  PointerHandlers.ClickableMouseButtonUp
+                                                                  PointerHandlers.MovableMouseButtonUp
+                                                                  PointerHandlers.SelectionMouseButtonUp
+                                                                  PointerHandlers.CameraMouseButtonUp
+                                                                  HoverHandlers.HoverAfterMouseButtonUp])
                                   :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
-                                                               PointerHandlers.MovableMouseMotion
-                                                               PointerHandlers.ResizableMouseMotion
-                                                               PointerHandlers.CameraDragMouseMotion
-                                                               PointerHandlers.SelectionMouseMotion
-                                                               PointerHandlers.CameraMouseMotion
-                                                               HoverHandlers.HoverMouseMotion])
+                                                                PointerHandlers.MovableMouseMotion
+                                                                PointerHandlers.ResizableMouseMotion
+                                                                PointerHandlers.CameraDragMouseMotion
+                                                                PointerHandlers.SelectionMouseMotion
+                                                                PointerHandlers.CameraMouseMotion
+                                                                HoverHandlers.HoverMouseMotion])
                                   :updated (Routes.Chain [CameraHandlers.CameraUpdated])}
                          :enter [HoverHandlers.HoverLifecycle]
                          :leave [HoverHandlers.HoverLifecycle]}))
     (local original-selector app.object-selector)
-    (local original-first-person app.first-person-controls)
+    (local original-runtime app.active-world-runtime)
+    (local original-fpc app.first-person-controls)
     (local original-clickables app.clickables)
     (local original-movables app.movables)
     (local created-clickables (Clickables))
@@ -130,43 +131,52 @@
          (fn [_self _delta]
            (set fp-state.updates (+ fp-state.updates 1))))
     (set app.object-selector selector)
-    (set app.first-person-controls fp)
+    (set app.active-world-runtime
+         {:presentation {:input-controls (fn [_self] fp)}})
+    (set app.first-person-controls nil)
     (set app.clickables created-clickables)
     (set app.movables nil)
-    (local down state.on-mouse-button-down)
-    (local move state.on-mouse-motion)
-    (local up state.on-mouse-button-up)
-    (local update state.on-updated)
-    (assert down "State missing mouse-button-down handler")
-    (assert move "State missing mouse-motion handler")
-    (assert up "State missing mouse-button-up handler")
-    (assert update "State missing update handler")
-    (down {:button 1 :state true :x 0 :y 0})
-    (move {:x 10 :y 10})
-    (up {:button 1 :state false :x 10 :y 10})
-    (down {:button 3 :state true :x 20 :y 20})
-    (move {:x 25 :y 25})
-    (up {:button 3 :state false :x 25 :y 25})
-    (update 0.016)
+    (local (ok err)
+      (pcall
+        (fn []
+          (local down state.on-mouse-button-down)
+          (local move state.on-mouse-motion)
+          (local up state.on-mouse-button-up)
+          (local update state.on-updated)
+          (assert down "State missing mouse-button-down handler")
+          (assert move "State missing mouse-motion handler")
+          (assert up "State missing mouse-button-up handler")
+          (assert update "State missing update handler")
+          (down {:button 1 :state true :x 0 :y 0})
+          (move {:x 10 :y 10})
+          (up {:button 1 :state false :x 10 :y 10})
+          (down {:button 3 :state true :x 20 :y 20})
+          (move {:x 25 :y 25})
+          (up {:button 3 :state false :x 25 :y 25})
+          (update 0.016)
+          (assert (= selector-state.buttons 2) "Selection should receive down and up events on the primary button")
+          (assert (>= selector-state.motions 1) "Selection should receive drag motion")
+          (assert (= fp-state.buttons 2) "First-person controls should still receive non-conflicting mouse buttons")
+          (assert (= fp-state.motions 1) "First-person controls should receive drag motion for non-selection buttons")
+          (assert (= fp-state.updates 1) "First-person controls should continue updating while selection is enabled"))))
     (set app.object-selector original-selector)
-    (set app.first-person-controls original-first-person)
+    (set app.active-world-runtime original-runtime)
+    (set app.first-person-controls original-fpc)
     (set app.clickables original-clickables)
     (set app.movables original-movables)
     (created-clickables:drop)
-    (assert (= selector-state.buttons 2) "Selection should receive down and up events on the primary button")
-    (assert (>= selector-state.motions 1) "Selection should receive drag motion")
-    (assert (= fp-state.buttons 2) "First-person controls should still receive non-conflicting mouse buttons")
-    (assert (= fp-state.motions 1) "First-person controls should receive drag motion for non-selection buttons")
-    (assert (= fp-state.updates 1) "First-person controls should continue updating while selection is enabled"))
+    (when (not ok)
+      (error err)))
 
 (fn selection-input-ignores-disabled-pointer-target []
     (local state (State {:name :selection-disabled-target-test
                          :routes {:mouse-button-down (Routes.Chain [PointerHandlers.SelectionMouseButtonDown
-                                                                   PointerHandlers.CameraMouseButtonDown])
+                                                                    PointerHandlers.CameraMouseButtonDown])
                                   :mouse-button-up (Routes.Chain [PointerHandlers.SelectionMouseButtonUp
-                                                                 PointerHandlers.CameraMouseButtonUp])}}))
+                                                                  PointerHandlers.CameraMouseButtonUp])}}))
     (local original-selector app.object-selector)
-    (local original-first-person app.first-person-controls)
+    (local original-runtime app.active-world-runtime)
+    (local original-fpc app.first-person-controls)
     (local original-clickables app.clickables)
     (local original-movables app.movables)
     (local original-resizables app.resizables)
@@ -188,26 +198,34 @@
                :on-mouse-button-up (fn [_self _payload]
                                      (set fp-state.buttons (+ fp-state.buttons 1)))})
     (set app.object-selector selector)
-    (set app.first-person-controls fp)
+    (set app.active-world-runtime
+         {:presentation {:input-controls (fn [_self] fp)}})
+    (set app.first-person-controls nil)
     (set app.clickables {:active? false})
     (set app.movables nil)
     (set app.resizables nil)
     (set app.pointer-target-enabled? (fn [_target] false))
-    (state.on-mouse-button-down {:button 1 :state true :x 0 :y 0})
-    (set selector-state.active true)
-    (state.on-mouse-button-up {:button 1 :state false :x 0 :y 0})
+    (local (ok err)
+      (pcall
+        (fn []
+          (state.on-mouse-button-down {:button 1 :state true :x 0 :y 0})
+          (set selector-state.active true)
+          (state.on-mouse-button-up {:button 1 :state false :x 0 :y 0})
+          (assert (= selector-state.buttons 0)
+                  "Selection should not receive mouse buttons for disabled pointer targets")
+          (assert (= selector-state.cancels 1)
+                  "Selection release should cancel an active disabled pointer target gesture")
+          (assert (= fp-state.buttons 2)
+                  "Disabled selection pointer target should leave mouse buttons for camera controls"))))
     (set app.object-selector original-selector)
-    (set app.first-person-controls original-first-person)
+    (set app.active-world-runtime original-runtime)
+    (set app.first-person-controls original-fpc)
     (set app.clickables original-clickables)
     (set app.movables original-movables)
     (set app.resizables original-resizables)
     (set app.pointer-target-enabled? original-pointer-target-enabled?)
-    (assert (= selector-state.buttons 0)
-            "Selection should not receive mouse buttons for disabled pointer targets")
-    (assert (= selector-state.cancels 1)
-            "Selection release should cancel an active disabled pointer target gesture")
-    (assert (= fp-state.buttons 2)
-            "Disabled selection pointer target should leave mouse buttons for camera controls"))
+    (when (not ok)
+      (error err)))
 
 (fn box-selector-renders-in-hud-space []
     (local hud {:screen-pos-ray (fn [_self point _opts]
@@ -462,24 +480,43 @@
 
 (fn graph-selects-with-default-projection []
     (local original-viewport app.viewport)
+    (local original-runtime app.active-world-runtime)
     (local original-camera app.camera)
     (local original-projection app.projection)
-    (set app.viewport {:x 0 :y 0 :width 1600 :height 900})
-    (set app.camera (Camera {:position (glm.vec3 0 0 30)}))
-    (when (not app.create-default-projection)
-      (set app.create-default-projection AppProjection.create-default-projection))
-    (set app.projection (app.create-default-projection))
-    (local selector (ObjectSelector {:enabled? true}))
-    (local selectable {:position (glm.vec3 -4.528 -9.146 0)})
-    (selector:set-selectables [selectable])
-    (selector.box.changed:emit {:p1 {:x -5000 :y -5000}
-                                :p2 {:x 5000 :y 5000}})
-    (assert (= (length selector.selected) 1)
-            "Selector should select nodes with default projection")
-    (selector:drop)
+    (local original-create-default-projection app.create-default-projection)
+    (var camera nil)
+    (var selector nil)
+    (local (ok err)
+      (pcall
+        (fn []
+          (set app.viewport {:x 0 :y 0 :width 1600 :height 900})
+          (set camera (Camera {:position (glm.vec3 0 0 30)}))
+          (set app.active-world-runtime
+               {:presentation {:camera (fn [_self _opts] camera)}})
+          (set app.camera nil)
+          (when (not app.create-default-projection)
+            (set app.create-default-projection AppProjection.create-default-projection))
+          (set app.projection (app.create-default-projection))
+          (set selector (ObjectSelector {:enabled? true}))
+          (local selectable {:position (glm.vec3 -4.528 -9.146 0)})
+          (selector:set-selectables [selectable])
+          (selector.box.changed:emit {:p1 {:x -5000 :y -5000}
+                                      :p2 {:x 5000 :y 5000}})
+          (assert (= (length selector.selected) 1)
+                  "Selector should select nodes with default projection"))))
+    (when selector
+      (selector:drop)
+      (set selector nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
     (set app.viewport original-viewport)
+    (set app.active-world-runtime original-runtime)
     (set app.camera original-camera)
-    (set app.projection original-projection))
+    (set app.projection original-projection)
+    (set app.create-default-projection original-create-default-projection)
+    (when (not ok)
+      (error err)))
 
 (fn object-selector-normalizes-logical-box-input-to-viewport-space []
     (local original-viewport app.viewport)
@@ -532,9 +569,12 @@
 
 (local main
   (fn []
+    ;; The test module's top-level (require :main) caches main.fnl before the runner's
+    ;; setup-test-env creates a fresh app global. Clear the cache so setup-test-env
+    ;; re-executes main.fnl and installs the production wrapper functions on the new app.
+    (set (. package.loaded :main) nil)
     (local runner (require :tests/runner))
-    (runner.run-tests {:name "selection"
-                       :tests tests})))
+    (runner.run-tests {:name "selection" :tests tests})))
 
 {:name "selection"
  :tests tests

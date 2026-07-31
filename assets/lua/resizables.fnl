@@ -18,7 +18,7 @@
       math.huge))
 
 (fn resolve-plane-normal []
-  (local camera app.camera)
+  (local camera (app.presentation-camera))
   (if (and camera camera.get-forward)
       (camera:get-forward)
       (glm.vec3 0 0 -1)))

@@ -13,6 +13,7 @@
 (local Themes (require :themes))
 (local DarkTheme (require :dark-theme))
 (local LightTheme (require :light-theme))
+(local {: Layout} (require :layout))
 
 (local tests [])
 
@@ -651,6 +652,80 @@
                   "drawing sidebar active tool button should use the light theme primary color")
           (light-sidebar:drop))))))
 
+(fn activity-dock-view-reserves-toolbar-height-for-activity-content []
+  (with-sidebar-env
+    (fn []
+      (local original-builder app.activity-left-dock-builder)
+      (var recorded-inner-size nil)
+      ;; Build a custom activity panel that measures to a non-zero height (40)
+      ;; so the Flex stretch gives it the rail's larger measurement. The panel
+      ;; records its inner child's laid-out size so we can verify that after the
+      ;; dock reserve adjustment, the inner child is re-laid at the reduced height
+      ;; -- not stuck at the full height from the initial Flex pass.
+      (fn build-test-panel [ctx]
+        (local inner-layout
+          (Layout {:name "panel-inner"
+                   :measurer (fn [self] (set self.measure (glm.vec3 1 1 0)))
+                   :layouter (fn [self]
+                               (set recorded-inner-size
+                                    (glm.vec3 (or self.size.x 0)
+                                              (or self.size.y 0)
+                                              0)))}))
+        (local test-entity-layout
+          (Layout {:name "test-activity-panel"
+                   :measurer (fn [self] (set self.measure (glm.vec3 10 40 0)))
+                   :layouter (fn [self]
+                               (set self.size (or self.size self.measure))
+                               (set inner-layout.position self.position)
+                               (set inner-layout.size self.size)
+                               (inner-layout:layouter))
+                   :children [inner-layout]}))
+        {:layout test-entity-layout
+         :update (fn []) :drop (fn [self] (test-entity-layout:drop))})
+      (set app.activity-left-dock-builder build-test-panel)
+      (set-interaction-surface :canvas)
+      ;; Force rebuild to pick up the new left-dock-builder
+      (emit-workspace-shell-changed "activity")
+      (local dock ((ActivityDockView {:top-reserve-height-provider (fn [] 4)}) (make-ctx)))
+      (dock:update)
+      (dock:update)
+      (dock.layout:measurer)
+      (local measured-h dock.layout.measure.y)
+      (assert (> measured-h 0) "dock should have positive measured height")
+      (set dock.layout.position (glm.vec3 0 0 0))
+      (set dock.layout.size (glm.vec3 100 measured-h 0))
+      (set dock.layout.rotation (glm.quat 1 0 0 0))
+      (set dock.layout.clip-region nil)
+      (set dock.layout.depth-offset-index 0)
+      (dock.layout:layouter)
+      (local content-layout (. dock.layout.children 1))
+      (assert content-layout "activity dock should have a content layout")
+      (local rail-layout (. content-layout.children 1))
+      (assert rail-layout "feature rail should be present")
+      (assert (MathUtils.approx rail-layout.size.y measured-h)
+              (.. "feature rail should remain full-height " measured-h
+                  ", got " rail-layout.size.y))
+      (local activity-panel-layout (. content-layout.children 2))
+      (assert activity-panel-layout "activity panel should be present")
+      (local expected-panel-h (math.max 0 (- measured-h 4)))
+      (assert (MathUtils.approx activity-panel-layout.position.y 4)
+              (.. "activity panel y should be offset by reserve 4, got "
+                  activity-panel-layout.position.y))
+      (assert (MathUtils.approx activity-panel-layout.size.y expected-panel-h)
+              (.. "activity panel height should be " expected-panel-h
+                  " (= " measured-h " - 4), got "
+                  activity-panel-layout.size.y))
+      ;; Most important: the inner child must be re-laid out at the reserved
+      ;; (reduced) height, not stuck at the full height from the initial Flex
+      ;; pass. This catches the bug where the dock adjusts position/size after
+      ;; layouter without re-running the child's layouter.
+      (assert recorded-inner-size "inner child should have been laid out")
+      (assert (MathUtils.approx recorded-inner-size.y expected-panel-h)
+              (.. "inner child should be laid out within reserved height "
+                  expected-panel-h ", got " recorded-inner-size.y))
+      (dock:drop)
+      (set app.activity-left-dock-builder original-builder))))
+
 (fn activity-dock-view-rebuilds-without-stale-layout-children []
   (with-sidebar-env
     (fn []
@@ -726,6 +801,64 @@
       (set app.activity-registry original-registry)
       (set app.activities-changed original-signal))))
 
+(fn activity-dock-always-shows-feature-rail-in-scene-mode []
+  (with-sidebar-env
+    (fn []
+      (with-controller
+        (fn [controller]
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+
+          ;; Activate drawing activity to ensure left-dock-builder is available
+          (set-activity-id "drawing")
+
+          ;; Switch to scene mode before creating dock
+          (set app.active-interaction-surface :scene)
+          (set app.canvas-visible? false)
+
+          ;; Create dock - should still show feature rail
+          (local dock ((ActivityDockView {}) (make-ctx)))
+          (dock.layout:measurer)
+
+          ;; Feature rail should still be visible (> 0 measurement)
+          (local scene-width (. dock.layout.measure 1))
+          (assert (> scene-width 0)
+                  "activity dock should show feature rail even in scene mode")
+
+          ;; Content should exist (not nil)
+          (local content-layout (. dock.layout.children 1))
+          (assert content-layout "activity dock should have content layout even in scene mode")
+
+          ;; Feature rail (FlexChild) should be present as first child
+          (local rail-flex-child (. content-layout.children 1))
+          (assert rail-flex-child "feature rail FlexChild should be present in scene mode")
+
+          ;; Activity-specific panel should NOT be present
+          (local activity-panel-child (. content-layout.children 2))
+          (assert (not activity-panel-child)
+                  "activity-specific panel should not be present in scene mode")
+
+          ;; Switch back to canvas mode
+          (set-interaction-surface :canvas)
+          (dock:update)
+          (dock.layout:measurer)
+
+          ;; Width should increase (activity panel added)
+          (local canvas-width (. dock.layout.measure 1))
+          (assert (> canvas-width scene-width)
+                  "activity dock should widen when switching to canvas")
+
+          ;; Activity panel should now be present
+          (local updated-content (. dock.layout.children 1))
+          (local updated-activity-panel (. updated-content.children 2))
+          (assert updated-activity-panel
+                  "activity-specific panel should be present after switching to canvas")
+
+          (dock:drop)
+          (set app.drawing-controller original-controller))))))
+
+(table.insert tests {:name "Activity dock always shows feature rail in scene mode"
+                     :fn activity-dock-always-shows-feature-rail-in-scene-mode})
 (table.insert tests {:name "Drawing sidebar expands in drawing activity"
                      :fn sidebar-width-reflects-active-activity-id})
 (table.insert tests {:name "Drawing sidebar width follows panel measure"
@@ -760,8 +893,10 @@
                      :fn sidebar-adopts-light-theme-colors})
 (table.insert tests {:name "Activity dock view rebuilds without stale layout children"
                      :fn activity-dock-view-rebuilds-without-stale-layout-children})
+(table.insert tests {:name "Activity dock view reserves toolbar height for activity content"
+                      :fn activity-dock-view-reserves-toolbar-height-for-activity-content})
 (table.insert tests {:name "Activity dock view rebuilds when activities register at runtime"
-                     :fn activity-dock-view-rebuilds-when-activities-register-at-runtime})
+                      :fn activity-dock-view-rebuilds-when-activities-register-at-runtime})
 
 (local main
   (fn []

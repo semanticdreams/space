@@ -132,19 +132,21 @@
     (set (. out idx) (. bytes idx)))
   out)
 
-(fn raster-visible-bounds [canvas]
+(fn raster-visible-bounds [canvas camera]
+  "Compute visible bounds using the provided camera. Falls back to canvas.camera."
+  (local active-camera (or camera (and canvas canvas.camera)))
   (if (not canvas)
       nil
       (do
-        (local camera (assert canvas.camera "DrawingRender raster culling requires canvas.camera"))
         (local half-width (assert canvas.half-width "DrawingRender raster culling requires canvas.half-width"))
         (local half-height (assert canvas.half-height "DrawingRender raster culling requires canvas.half-height"))
-        {:left (math.floor (- camera.position.x half-width))
-         :right (math.ceil (+ camera.position.x half-width))
-         :bottom (math.floor (- camera.position.y half-height))
-         :top (math.ceil (+ camera.position.y half-height))
-         :width (+ (math.ceil (* half-width 2)) 1)
-         :height (+ (math.ceil (* half-height 2)) 1)})))
+        (when active-camera
+          {:left (math.floor (- active-camera.position.x half-width))
+           :right (math.ceil (+ active-camera.position.x half-width))
+           :bottom (math.floor (- active-camera.position.y half-height))
+           :top (math.ceil (+ active-camera.position.y half-height))
+           :width (+ (math.ceil (* half-width 2)) 1)
+           :height (+ (math.ceil (* half-height 2)) 1)}))))
 
 (fn visible-bounds-changed? [left right]
   (if (or (= left nil) (= right nil))
@@ -316,6 +318,8 @@
   (local drop-texture (assert (. textures "drop-texture")
                               "DrawingRender requires textures.drop-texture"))
   (local canvas options.canvas)
+  ;; Prefer an explicit camera (e.g. from the canvas activity slot) over canvas.camera.
+  (local camera (or options.camera (and canvas canvas.camera)))
   (local buffer (DynamicTriangleBuffer ctx))
   (var tile-image-handles {})
   (var tile-texture-cache {})
@@ -700,7 +704,7 @@
                nil))))
 
   (fn update [_self]
-    (local visible-bounds (raster-visible-bounds canvas))
+    (local visible-bounds (raster-visible-bounds canvas camera))
     (when (visible-bounds-changed? last-visible-bounds visible-bounds)
       (mark-tile-images-dirty))
     (local overlay

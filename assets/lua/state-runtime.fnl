@@ -22,13 +22,24 @@
 (fn alt-held? [payload]
   (Modifiers.alt-held? (and payload payload.mod)))
 
+(fn activity-object-move-enabled? [_payload]
+  (and app.activity-object-move-predicate
+       (= (app.activity-object-move-predicate) true)))
+
+(fn drag-attachment-mode []
+  (if (and app.activity-drag-attachment-provider
+           (= (app.activity-drag-attachment-provider) :anchor))
+      :anchor
+      :center))
+
 (fn clickables-active? []
   (assert app.clickables "state runtime requires app.clickables")
   app.clickables.active?)
 
 (fn active-controls []
-  (or app.active-pointer-controls
-      app.first-person-controls))
+  (or (and app.presentation-input-controls
+           (app.presentation-input-controls))
+      app.active-pointer-controls))
 
 (fn movables-active? []
   (and app.movables
@@ -135,7 +146,7 @@
                   (assert focus-manager.focus-direction
                           "state runtime focus direction handling requires focus-manager:focus-direction")
                   (focus-manager:focus-direction {:direction direction
-                                                  :camera app.camera})
+                                                   :camera (app.presentation-camera)})
                   true))
             false))
       false))
@@ -165,6 +176,8 @@
 {:shift-held? shift-held?
  :ctrl-held? ctrl-held?
  :alt-held? alt-held?
+ :activity-object-move-enabled? activity-object-move-enabled?
+ :drag-attachment-mode drag-attachment-mode
  :active-controls active-controls
  :clickables-active? clickables-active?
  :movables-active? movables-active?

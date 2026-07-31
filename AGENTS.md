@@ -8,6 +8,11 @@ Clean design is important, refactor when reasonable.
 
 The default base branch for pull requests and merges is `main`.
 
+For final validation and PR diff/base checks, use `origin/main` as the base
+branch reference — not local `main`. Local `main` may be stale or contain
+unrelated local commits. Use local `main` only when explicitly performing a
+local merge or integration operation that requires it.
+
 After implementation is complete — reviewed, committed, tests passing, tree
 clean — the default integration action is to push the current branch and create a
 pull request targeting `main`. Do this automatically; do not present an
@@ -16,7 +21,14 @@ explicitly requests a different integration action or when the branch state is
 unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 `main`).
 
+If required validation fails after implementation, review, or commit, do not
+finish, push, create a pull request, merge, or clean up the branch. Invoke the
+`systematic-debugging` skill, identify the root cause, route any fix through
+`implementer` → `reviewer` → pass, rerun validation, and only proceed with the
+default integration action when the required suite is green.
+
 ## Project Structure & Modules
+
 - `src/` holds the C++17 engine modules (rendering, physics, audio, bindings). Add new systems as matching `.cpp`/`.h` pairs. Engine Lua bindings live in `src/lua_engine.cpp`.
 - `apps/space/main.cpp` is the executable entry point; bootstrap other front ends here.
 - `assets/` includes Lua, Fennel, Python, textures, and audio. Runtime and tests rely on `SPACE_ASSETS_PATH` pointing here.
@@ -26,46 +38,23 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 - `archive/` contains some old python bindings that are no longer used but may be used for reference when building new features.
 
 ## OpenAI API Docs
+
 - OpenAI API reference lives in `docs/dev/openai/`; start at `docs/dev/openai/index.md` for a map to chat/responses, assistants/threads/runs, uploads/vector stores, realtime events, and project/admin endpoints.
 - Endpoint files follow the action name inside each folder (`create.md`, `list.md`, `object.md`, etc.). Use `rg "POST /responses"` (or similar) from the repo root to jump to the exact endpoint when wiring code to the API.
 
-## Fennel Architecture & Widgets
-- `assets/lua/` is organized by widget responsibility: low-level render backs (`raw-rectangle.fnl`, `renderers.fnl`), layout primitives (`layout.fnl`, `flex.fnl`, `stack.fnl`, `padding.fnl`, `sized.fnl`), and leaf widgets (`rectangle.fnl`, `text-span.fnl`, `button.fnl`, etc.). `assets/lua/main.fnl` wires these pieces together, seeds the layout tree, and exposes `app.init/update/drop` consumed by the Fennel-side lifecycle.
-- Each widget module exports a constructor that captures options and returns a `build` closure. The closure receives the renderer context from `app.init` (triangle buffers, text vectors, helpers), instantiates child widgets by calling their constructors with the same context, and produces an entity table containing at least `layout` and `drop` (see `assets/lua/rectangle.fnl`, `assets/lua/text-span.fnl`).
-- Layouts are explicit objects from `layout.fnl`. Widgets create a `Layout` with custom `measurer` and `layouter` closures, add child layouts via `:children`, and mark themselves dirty so the `LayoutRoot` in `app.init` can call `:update`. Always set a layout’s root, propagate size/position/rotation to children, and clean up registrations inside `drop`.
-- When propagating transforms inside a `layouter`, assign `child.layout.position/rotation/size` directly; do not call `set-position`/`set-rotation` there or you will re-dirty the tree mid-pass.
-- Dirt rules: marking `mark-measure-dirty` on a node implies its layout is also dirty and every descendant will be visited; use the shallowest possible node to avoid extra work. `mark-layout-dirty` only queues layout work for that node/subtree. Avoid calling dirt methods during a layout pass (`assert-not-in-pass` will throw). In layouters, mutate child layout fields directly rather than via setters to avoid re-dirtying mid-pass.
-- Depth offsets: respect `layout.depth-offset-index` for ordering; backgrounds usually inherit the parent index, while foreground/content elements (e.g., chart series) should be bumped to `parent + 1` (or higher) to avoid z-fighting. When passing render frames, carry the depth offset forward so leaf widgets write it into their layouts/buffers.
-- Composition happens by nesting widgets’ layouts: builders like `Stack` and `Flex` collect their children’s layouts and control measurement (e.g., stacking max axes, distributing flex space) before writing child positions; utility wrappers like `Padding` and `Sized` adjust the child’s layout contract; higher-level widgets (e.g., `Button`) are just compositions of primitives. Follow this pattern when introducing new widgets so measurement/layout passes and `drop` cascades remain consistent.
-- For form layouts that use `Grid`, order children so labels occupy the first column (non-stretch) and inputs/controls occupy the second column (stretch). This means listing all label widgets first, then the input widgets, since `Grid` fills by column.
-- Layouters that own children must call their children’s layouters; a layout node being marked dirty implies the subtree beneath it will be handled within that pass (no separate dirt propagation needed to descendants).
-- Interactive widgets that depend on input routing (buttons, inputs, scroll views, terminal widgets) require `clickables`/`hoverables` in the build context; assert if missing rather than guarding with `when`.
-- Graph nodes must stay decoupled from views: set `:view` to the view constructor (no per-instance builders), keep business logic/state on the node, emit updates via signals (`items-changed`, `rows-changed`, etc.), and let `graph/views` own view lifecycles so multiple views can attach later.
-- `app.engine.events.updated` is for updates that need to run every frame, for other updates try to connect directly to the update source possibly through signals.
+## Project-Specific OpenCode Skills
 
-## Lua/Fennel Bindings
-- C++ bindings register modules via `package.preload`; Lua/Fennel must `require` them (e.g. `(local glm (require :glm))`) rather than relying on globals.
-- Keep module names stable and direct (no root namespace); wrapper modules use descriptive suffixes such as `*-widget`, `*-manager`, or `*-router` when needed.
-- Use module factory functions (`terminal.Terminal(...)`, `VectorBuffer(...)`, `ForceLayout(...)`, `bt.Vector3(...)`) instead of `.new`; usertypes remain `sol::no_constructor` while still exposing type methods.
-- Engine bindings are accessed via `(require :engine)` to get the factory; create instances with `(EngineModule.Engine {:headless true})` and store them on `app.engine` so scripts use instance methods/fields (`events`, `get-asset-path`, `input`, `physics`, etc.).
+OpenCode users: restart after `.opencode/**` changes.
 
-## Data Persistence
-- Use `assets/lua/json-utils.fnl` (`JsonUtils.write-json!`) for JSON writes so updates are atomic and do not leave corrupt files behind.
-
-## Graph Architecture Doctrine
-- The graph is an exposure/adaptor layer — it does not own the objects it exposes. Domain objects live in their owning systems (entity stores, LLM store, world scene state, filesystem, kernels). Graph core persists only topology (node keys and edge connections).
-- Graph nodes are lightweight adapters: key, label, color, view ref, graph ref. They project domain objects into a uniform navigable topology. Key loaders adapt owning stores into graph nodes on demand.
-- Canonical terminology: "graph-exposed object" or "graph-visible object" (not "graph-backed" or "graph object"). "Graph topology state" for node-key/edge-key persistence (not "full graph state" or "graph node data"). "Graph as universal interface / exposure layer" (not "universal model"). See [Graph Architecture Doctrine](docs/dev/notes/graph.md) for the full list.
-- Do not say "everything lives in the graph", "stored in the graph", "graph-backed", "first-class graph object", "graph-native", or "graph node data" unless the backing is literally graph-owned (which is almost never true). Objects are *exposed through* the graph.
-- When adding new graph node types, the key loader must adapt an owning store/system. Never store domain data on graph nodes directly. Graph nodes may cache references to the owning store and resolve domain data from it.
+- Use `space-fennel-ui` for Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests. See `docs/dev/fennel/style.md`.
+- Use `space-graph-doctrine` for graph nodes, graph maps, graph views, graph persistence/topology, key loaders, or graph terminology. See `docs/dev/notes/graph.md`.
+- Use `space-testing-runtime` for tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses. See `docs/dev/features/development-tooling.md`.
 
 ## Build, Run & Test
+
 - `make cmake` primes the `build/` directory; rerun after editing CMake files.
 - `make build` compiles a Release build in `build/`.
-- **Build timeouts:** The bash tool defaults to a 2-minute timeout, but a cold `make build`
-  can take several hours on this project. Always pass an explicit `timeout` parameter
-  when running build commands (a generous timeout on an already-built tree is harmless —
-  the tool returns as soon as `make` exits):
+- **Build timeouts:** A cold `make build` can take hours. Always pass an explicit `timeout` parameter:
   - `make build`: `timeout: 14400000` (4 hours).
   - `make cmake`: `timeout: 600000` (10 minutes).
   - A killed build may leave partial artifacts; err on the high side rather than
@@ -90,55 +79,25 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 - Use `scripts/remote-control-debug.sh` for repeatable live-debug or live-inspect queries; update it as needed instead of ad-hoc client invocations, and run it outside the sandbox so IPC access works.
 - `scripts/remote-control-debug.sh` should always contain only the latest debug query; replace its contents for new questions instead of adding flags or multiple modes.
 - Use `app.next-frame` when remote-control scripts need to wait for a frame to render before reading state or running render-capture.
+- E2E tests: `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test-e2e` (must run outside sandbox).
+- Add C++ tests under `tests/` with `CMakeLists.txt` registration; mirror runtime asset setup from `apps/space/main.cpp`.
+- Profilers: `make prof target=<name>`; the `space-testing-runtime` skill covers profiling workflows.
 
-## E2E Snapshot Testing
-- E2E snapshot tests live under `assets/lua/tests/e2e/` and are composed by `assets/lua/tests/e2e.fnl`; run the suite with `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test-e2e`.
-- Always run `make test-e2e` outside the sandbox (escalated/unrestricted): Xvfb needs to bind Unix sockets and the sandbox blocks `AF_UNIX` binds, causing false failures.
-- Update goldens with `SPACE_SNAPSHOT_UPDATE=name1,name2` and `make test-e2e`. Goldens live in `assets/lua/tests/data/snapshots/`.
-- Individual tests are runnable via `./build/space -m tests.e2e.<module>:main` (e.g. `tests.e2e.test-image:main`).
-- Shared test utilities belong in `assets/lua/tests/e2e/harness.fnl`; prefer reusing it over adding overrides in app code.
-- HUD snapshots must use test-owned control/status content (via `HudLayout` + `hud-control-panel-layout`/`hud-status-panel-layout`) to avoid unstable main app labels/buttons.
-- When creating or debugging snapshots, always inspect the PNGs directly (e.g. open the file or use the image viewer tools) to confirm visual intent. Do not analyze the image data, always view the images.
-- Snapshot images don't need to be deleted, just let them be overwritten.
-- E2E test failures will create `*.actual.png` files that you can inspect for debugging.
+## Coding Style & High-Risk Rules
 
-## Profiling & Flamegraphs
-- All flamegraph profilers live under `assets/lua/prof-*.fnl`. Run them via `make prof target=<name>` (e.g. `target=scene`). This invokes `scripts/prof.py` which executes `./build/space -m prof-<name>` with `SPACE_FENNEL_FLAMEGRAPH` pointing to `prof/<name>.folded`.
-- The helper automatically writes `prof/<name>.folded`, `prof/<name>.svg`, and `prof/<name>.png`, and prints a textual summary of the hottest stacks/leaf frames. Pass `args="--skip-images"` to `make prof` (or `--no-summary`/`--top N`/`--skip-images` directly to `scripts/prof.py`) when assets such as SVGs aren’t useful in this environment.
-- When diagnosing a performance issue, prefer an existing profiler whose name matches the subsystem (`prof-scene`, `prof-update`, etc.). If none fit, create a new `assets/lua/prof-<feature>.fnl` using `FlamegraphProfiler` with the standard default output path (`prof/<feature>.folded`). Ensure it wires up the relevant workload (e.g. repeatedly calling a widget update) and exits cleanly so the helper script can run it.
-- Keep profiler scripts deterministic, respect the `SPACE_FENNEL_FLAMEGRAPH` env var, and avoid graphics dependencies beyond what `FlamegraphProfiler` already fakes in `prof-scene`. Register additional profilers in docs/readme so `make prof target=<name>` is discoverable.
-
-## Coding Style & Naming
-- Use four-space indentation, brace-on-new-line for functions, and group includes as system `<...>` first, then project `"..."`.
-- Classes stay UpperCamelCase (`Engine`); free/static functions use snake_case (`lua_bind_tree_sitter`); filenames remain lowercase.
-- Favor `std::unique_ptr`/`std::shared_ptr` over raw ownership and keep headers minimal to limit rebuild time.
-- Match the existing layout (roughly 120-character limit). Run `clang-format` if available or format manually.
-- In Fennel code, don't use guards and fallbacks unless necessary or asked for.
-- Keep option keys canonical (one name). Don’t add “legacy” aliases (e.g. `:foo` vs `:foo?`) or compatibility shims; migrate existing call sites instead. Only add an alias if the user explicitly asks for it.
-- Do not paper over missing required bindings or data with fallbacks. If a binding like `glm.project` or a required projection/view/viewport is absent, fail loudly instead of silently substituting defaults.
-- Do not fail silently. If required data, startup work, or runtime operations fail, throw or surface an explicit error immediately; never convert real failures into clean exits, ignored return values, or quiet no-ops.
-- Build Fennel classes by constructing the `self` table at the end in a single literal (methods included) instead of creating it early and mutating it with `set`.
-- Avoid using `let` in Fennel, use `local` instead.
-- Note that `if` in Fennel is like `cond` in other lisps, so you can pass it pairs of conditions and expressions. if you pass an uneven number of forms, the last one is the default expression executed when none other matched.
-- Fennel does not provide `cond`; prefer multi-branch `if` forms instead of nesting, letting the final expression act as the default branch.
-- Do not add silent fallbacks; only introduce a fallback path when an existing caller explicitly requires it, and make that intent obvious in the code.
-- When destructuring multiple return values (e.g., from `pcall`), bind them directly with multiple locals `(ok err) = (pcall ...)`; do not index a table or assume `pcall` returns a list object.
-- Factor out reusable logic into separate modules (or find a suitable module for them).
-- In Fennel (or sol2 bindings) use factory functions instead of constructors (`new`).
-
-## Testing Expectations
-- Add new C++ test binaries under `tests/` and register them in `CMakeLists.txt` with `add_executable` and `add_test`.
-- Mirror runtime asset setup; see `apps/space/main.cpp` for configuring package paths before executing scripts.
-- Keep integration tests deterministic, documenting required seeds or fixtures inside `scripts/`.
-
-### Lua/Fennel Test Harness
-- `apps/space/main.cpp` triggered by ctest boots `assets/lua/tests/fast.fnl` via `tests.fast:main`; extend coverage by adding new `assets/lua/tests/test-*.fnl` modules and listing them in `assets/lua/tests/fast.fnl` so `make test` picks them up automatically.
-- You can unit-test widgets by instantiating them with a dummy context table `{}`; the builders only touch `ctx` when they need renderer handles.
-- To assert layout contracts (as done in `assets/lua/tests/test-sized.fnl`), create instrumented child widgets that expose their `Layout` via a builder, override `:measurer`/`:layouter` to capture incoming size/transform, and drop them to ensure ownership is released.
-- Run Fennel scripts (including quick experiments) via `build/space`; pass the module name (e.g. `./build/space -m tests.fast:main`) instead of using the system `fennel` binary; to avoid issues with your sandbox, disable audio by passing `SPACE_DISABLE_AUDIO=1`.
--  Fennel tests may use the mock opengl feature but everything else should not be mocked, real objects created by real app code should be used instead. No synthetic objects or stubs.
+- **No silent failures:** If required data, bindings, or operations fail, surface an explicit error immediately — never convert failures into quiet no-ops or clean exits.
+- **Fennel classes:** Construct `self` in a final literal with all methods included; do not create early and mutate with `set`.
+- Use `local` instead of `let` in Fennel.
+- Use factory functions instead of constructors (`.new`).
+- **Canonical option keys only:** Do not add legacy aliases or compatibility shims; migrate existing call sites instead.
+- Use `assets/lua/json-utils.fnl` for atomic JSON writes.
+- For C/C++: four-space indent, brace-on-new-line for functions, `std::unique_ptr`/`std::shared_ptr` over raw ownership, minimal headers.
+- Fennel: multi-branch `if` forms instead of nesting; bind multiple return values directly with `local`.
+- Graph nodes stay decoupled from views; use signals to emit updates.
+- Fennel parse errors: the reported location is often misleading — isolate bad forms by temporarily removing chunks of logic.
 
 ## Commit Conventions
+
 - Use the `type(scope)` format as described by the `git-commit` skill.
 - Scopes (when useful): `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
 - For Fennel-facing feature or bugfix handoffs, include a lightweight constraint-impact line when relevant: helped, obstructed/noisy, changed, or not applicable.
@@ -146,5 +105,6 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
   `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
 
 ## Assets & Configuration Tips
+
 - When adding assets, ensure `AssetManager::getAssetPath` can locate them and verify packaging copies from `assets/`.
-- For icon names used by UI buttons/widgets, validate availability against `assets/material-design-icons/icons.txt` before committing. Use `rg` on that file (e.g. `rg -n "^delete\\b|^expand_more\\b" assets/material-design-icons/icons.txt`) and prefer exact icon-name matches from the start of each line.
+- For icon names used by UI buttons/widgets, validate availability against `assets/material-design-icons/icons.txt` before committing. Use `rg` on that file and prefer exact icon-name matches from the start of each line.

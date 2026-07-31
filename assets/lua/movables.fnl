@@ -41,7 +41,7 @@
     (error (.. "Movables received non-finite " label))))
 
 (fn resolve-plane-normal [mode]
-  (local camera app.camera)
+  (local camera (app.presentation-camera))
   (if (= mode :up)
       (normalize-or
         (and camera camera.get-up (camera:get-up))
@@ -92,16 +92,17 @@
     (when self.drag
       (local entry self.drag.entry)
       (local started? (and self.drag self.drag.started?))
-      (set self.drag nil)
+      (local drag self.drag)
       (when (and started? entry entry.on-drag-end)
-        (entry.on-drag-end entry))))
+        (entry.on-drag-end entry drag))
+      (set self.drag nil)))
 
   (fn start-drag [_self drag payload]
     (when (and drag (not drag.started?))
       (set drag.started? true)
       (local entry drag.entry)
       (when (and entry entry.on-drag-start)
-        (entry.on-drag-start entry))
+        (entry.on-drag-start entry drag payload))
       (local target (and entry entry.target))
       (local hit-point drag.hit-point)
       (when (and target hit-point)
@@ -196,6 +197,7 @@
                     :pointer-target pointer-target
                     :key (or (and options options.key) widget)
                     :on-drag-start (and options options.on-drag-start)
+                    :on-drag-update (and options options.on-drag-update)
                     :on-drag-end (and options options.on-drag-end)})
       (when entry.key
         (remove-entry self (find-entry self entry.key)))
@@ -251,7 +253,16 @@
               (when hit
                 (local new-position (+ hit drag.offset))
                 (assert-finite-vec3 new-position "drag position")
-                (drag.entry.target:set-position new-position)))))))
+                (if (and drag.entry drag.entry.on-drag-update)
+                    (let [update {:payload payload
+                                  :pointer pointer
+                                  :ray ray
+                                  :hit hit
+                                  :new-position new-position
+                                  :plane drag.plane}]
+                      (when (not (drag.entry.on-drag-update drag.entry drag update))
+                        (drag.entry.target:set-position new-position)))
+                    (drag.entry.target:set-position new-position))))))))
 
   (fn on-mouse-button-down [self payload]
     (when (and payload (= payload.button SDL_BUTTON_LEFT))

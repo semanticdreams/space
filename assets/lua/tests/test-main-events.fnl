@@ -181,6 +181,16 @@
       (set app.canvas {:build-context {}})
       (set app.first-person-controls first-person-controls)
       (set app.canvas-controls canvas-controls)
+      ;; Stub app.presentation-input-controls so sync-interaction-surface-state
+      ;; resolves through the presentation API during the test. The real function
+      ;; requires a full runtime with a presentation provider; this test creates
+      ;; a minimal stub that routes to the expected controls.
+      (local saved-app-pic app.presentation-input-controls)
+      (set app.presentation-input-controls
+           (fn []
+             (if app.canvas-interactive?
+                 canvas-controls
+                 first-person-controls)))
       (set app.preferred-interaction-surface :scene)
       (set app.active-interaction-surface :scene)
       (set app.scene-interactive? true)
@@ -204,13 +214,14 @@
                     "Activity policy should preserve the preferred canvas surface")
             (assert (= app.active-interaction-surface :scene)
                     "Noninteractive canvas policy should keep input on the scene")
-            (assert (= app.canvas-interactive? false)
-                    "Noninteractive canvas policy should disable canvas input")
-            (assert (= app.active-pointer-controls first-person-controls)
-                    "Noninteractive canvas policy should keep scene pointer controls active")
-            true)))
-      (pcall (fn [] (Activities.unregister-activity "surface-policy-test")))
-      (if ok result (error result)))))
+             (assert (= app.canvas-interactive? false)
+                     "Noninteractive canvas policy should disable canvas input")
+             (assert (= app.active-pointer-controls first-person-controls)
+                     "Noninteractive canvas policy should keep scene pointer controls active")
+             true)))
+       (pcall (fn [] (Activities.unregister-activity "surface-policy-test")))
+       (set app.presentation-input-controls saved-app-pic)
+       (if ok result (error result)))))
 
 (fn window-resize-updates-viewport-and-layout-root []
   (reset-state)

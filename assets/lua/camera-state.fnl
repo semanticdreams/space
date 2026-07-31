@@ -18,11 +18,12 @@
    :zero (string.byte "0")})
 
 (fn reset-camera! []
-  (assert app.camera "camera-state expects app.camera")
-  (assert app.camera.set-position "camera-state expects app.camera:set-position")
-  (assert app.camera.set-rotation "camera-state expects app.camera:set-rotation")
-  (app.camera:set-position (glm.vec3 0 0 0))
-  (app.camera:set-rotation (glm.quat 1 0 0 0)))
+  (local cam (and app.presentation-camera
+                  (app.presentation-camera {:required? true})))
+  (assert cam.set-position "camera-state expects camera:set-position")
+  (assert cam.set-rotation "camera-state expects camera:set-rotation")
+  (cam:set-position (glm.vec3 0 0 0))
+  (cam:set-rotation (glm.quat 1 0 0 0)))
 
 (fn CameraState []
   (local PenHandlers (PenPointer.PenPointerHandlers {}))

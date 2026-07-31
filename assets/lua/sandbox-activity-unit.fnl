@@ -1,10 +1,15 @@
 (global app (or app {}))
 
+(local glm (require :glm))
 (local fs (require :fs))
+(local Camera (require :camera))
+(local {: FirstPersonControls} (require :first-person-controls))
+(local {: SandboxCameraControls} (require :sandbox-camera-controls))
 (local Activities (require :activities))
-(local ActivitySceneState (require :activity-scene-state))
 (local SandboxActivityActions (require :sandbox-activity-actions))
-(local SkyboxState (require :skybox-state))
+(local ActivityCameraState (require :activity-camera-state))
+(local SandboxToolbarState (require :sandbox-toolbar-state))
+(local SandboxToolbarView (require :sandbox-toolbar-view))
 
 (fn sandbox-activity-owned-paths []
   (local runtime (require :runtime))
@@ -91,13 +96,61 @@
 
 (fn activate-sandbox-activity! [ctx]
   (local world-runtime (assert app.active-world-runtime
-                                "Sandbox activity requires app.active-world-runtime"))
+                                 "Sandbox activity requires app.active-world-runtime"))
   (local scene (assert world-runtime.scene
-                        "Sandbox activity requires runtime.scene"))
+                         "Sandbox activity requires runtime.scene"))
   ;; Ensure the slot exists but do NOT overwrite its retained scene-state.
   ;; Pending session state (restored by Activities after activation) or the
   ;; existing retained state provides the canonical scene data.
   (scene:ensure-activity-slot "sandbox")
+
+  ;; Toolbar state: create or reuse (must be before controls — they need it)
+  (local toolbar-state (or world-runtime.sandbox-toolbar-state
+                            (SandboxToolbarState {})))
+  (set world-runtime.sandbox-toolbar-state toolbar-state)
+  (set app.sandbox-toolbar-state toolbar-state)
+
+  ;; Create or reuse a sandbox scene camera from the activity session.
+  ;; Each activity owns its camera; the sandbox camera is stored in
+  ;; runtime.activity-cameras.scene.sandbox.
+  (var sandbox-camera nil)
+  (var sandbox-controls nil)
+  (when world-runtime.activity-cameras
+    (set sandbox-camera (or (. world-runtime.activity-cameras.scene "sandbox")
+                            (let [cam (Camera {:position (glm.vec3 0 0 30)})]
+                              (set (. world-runtime.activity-cameras.scene "sandbox") cam)
+                              cam))))
+  (when world-runtime.activity-controls
+    ;; Check for a previous raw FirstPersonControls at the sandbox key
+    ;; (i.e. before the wrapper existed). If present, reuse it as the inner
+    ;; flight-controls so any accumulated state (key tracking, etc.) is preserved.
+    (local previous-raw (and world-runtime.activity-controls.scene
+                             (. world-runtime.activity-controls.scene "sandbox")))
+    ;; Create or reuse inner flight controls (raw FirstPersonControls)
+    (local flight-controls (or (. world-runtime.activity-controls.scene "sandbox-flight")
+                                (and previous-raw
+                                     (not previous-raw.flight-controls)
+                                     previous-raw)
+                                (let [ctrl (FirstPersonControls {:camera sandbox-camera})]
+                                  (set (. world-runtime.activity-controls.scene "sandbox-flight") ctrl)
+                                  ctrl)))
+    ;; Ensure the raw controls reference is stored at sandbox-flight for cleanup
+    (when (not (. world-runtime.activity-controls.scene "sandbox-flight"))
+      (set (. world-runtime.activity-controls.scene "sandbox-flight") flight-controls))
+    ;; Wrap in SandboxCameraControls (handles flight/grounded camera mode)
+    (set sandbox-controls (SandboxCameraControls {:camera sandbox-camera
+                                                    :toolbar-state toolbar-state
+                                                    :flight-controls flight-controls
+                                                    :terrain-sampler scene}))
+    (set (. world-runtime.activity-controls.scene "sandbox") sandbox-controls))
+  ;; Install camera and controls on the scene slot
+  (local slot (scene:activity-slot "sandbox"))
+  (when sandbox-camera
+    (slot:set-camera sandbox-camera)
+    (slot:expose-render-target! {:layers [:geometry :text]}))
+  (when sandbox-controls
+    (slot:set-controls sandbox-controls))
+
   ;; Activate the sandbox slot (populates services and builds terrain from retained state).
   (scene:activate-activity-slot "sandbox")
   ;; Sandbox is the primary 3D workspace; canvas is not visible by default
@@ -109,6 +162,10 @@
   (ctx:set-target-enabled! sandbox-target-enabled?)
   ;; Incremental hydration: restore queued panels one per frame
   (ctx:set-update! sandbox-activity-update)
+  ;; Install toolbar hooks
+  (ctx:set-top-toolbar-builder! (SandboxToolbarView toolbar-state))
+  (ctx:set-object-move-predicate! (fn [] (= toolbar-state.object-move-enabled? true)))
+  (ctx:set-drag-attachment-provider! (fn [] toolbar-state.drag-attachment))
   {:activity-id "sandbox"})
 
 (fn slice-array-from [entries start-index]
@@ -129,26 +186,18 @@
   panels)
 
 (fn deactivate-sandbox-activity! [_ctx _session]
+  "Deactivate the sandbox Scene slot.  Scene slot activation/deactivation
+  owns service cleanup — the Scene handles resetting lights, skybox,
+  background, and containment to empty when the slot is deactivated."
   (when (and app.active-world-runtime app.active-world-runtime.scene)
     (local scene app.active-world-runtime.scene)
-    (scene:deactivate-activity-slot "sandbox")
-    ;; R1-2: After deactivating the Scene slot, if no successor Scene slot
-    ;; is active, reset shared lights/skybox/background/containment to empty
-    ;; so they don't leak sandbox state into other activities.
-    (when (not (= (type scene.active-activity-slot-id) :string))
-      (local empty (ActivitySceneState.empty-state))
-      (when (and app app.lights app.lights.set-state)
-        (app.lights:set-state empty.lights))
-      (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-        ;; R2-2: Resolve complete skybox to renderer format.
-        (app.renderers.skybox:set-state
-          (SkyboxState.resolve-for-theme empty.skybox nil)))
-      (when (and app app.renderers app.renderers.set-background-state)
-        (app.renderers:set-background-state empty.background))
-      ;; Clear containment through the real PhysicsContainment API.
-      ;; ensure-installed with enabled? false calls clear() internally.
-      (local PhysicsContainment (require :physics-containment))
-      (PhysicsContainment.ensure-installed {:config {:enabled? false} :scene scene})))
+    (scene:deactivate-activity-slot "sandbox"))
+  (set app.sandbox-toolbar-state nil)
+  (when (and app.active-world-runtime app.active-world-runtime.activity-controls)
+    ;; Clean up the flight controls wrapper reference; the scene slot
+    ;; handles the rest.
+    (set (. app.active-world-runtime.activity-controls.scene "sandbox-flight") nil)
+    (set (. app.active-world-runtime.activity-controls.scene "sandbox") nil))
   true)
 
 (fn snapshot-sandbox-activity! []
@@ -157,6 +206,10 @@
   (if (and app.active-world-runtime app.active-world-runtime.scene)
       (let [captured (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")
             runtime app.active-world-runtime
+            camera (and runtime.activity-cameras
+                        (. runtime.activity-cameras.scene "sandbox"))
+            controls (and runtime.activity-controls
+                          (. runtime.activity-controls.scene "sandbox"))
             hydration (and runtime runtime.hydration)]
         ;; R1-1: Merge remaining hydration queue panels into captured state.
         ;; Without this, switching/suspending mid-hydration discards unhydrated panels.
@@ -166,6 +219,13 @@
                    (not hydration.completed?))
           (local remaining (slice-array-from hydration.scene-panels hydration.scene-panel-index))
           (set captured.panels (merge-panel-arrays captured.panels remaining)))
+        ;; Persist camera state in the session so camera position is preserved
+        ;; across save/reload cycles.
+        (when camera
+          (set captured.camera (ActivityCameraState.capture-camera camera)))
+        ;; Persist toolbar state
+        (when runtime.sandbox-toolbar-state
+          (set captured.toolbar (runtime.sandbox-toolbar-state:capture-state)))
         {:scene captured})
       nil))
 
@@ -176,6 +236,16 @@
   (local scene-state (and (= (type state) :table) state.scene))
   (when (and app.active-world-runtime app.active-world-runtime.scene scene-state)
     (app.active-world-runtime.scene:restore-activity-slot-state "sandbox" scene-state))
+  ;; Restore camera position from the persisted session state
+  (when (and scene-state scene-state.camera
+              app.active-world-runtime app.active-world-runtime.activity-cameras)
+    (local camera (. app.active-world-runtime.activity-cameras.scene "sandbox"))
+    (when camera
+      (ActivityCameraState.restore-camera! camera scene-state.camera)))
+  ;; Restore toolbar state
+  (when (and scene-state scene-state.toolbar
+              app.active-world-runtime app.active-world-runtime.sandbox-toolbar-state)
+    (app.active-world-runtime.sandbox-toolbar-state:restore-state scene-state.toolbar))
   true)
 
 (fn load-sandbox-activity! []

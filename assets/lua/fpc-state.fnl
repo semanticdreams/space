@@ -7,9 +7,11 @@
 (local KEY_ESCAPE 27)
 
 (fn require-controls [action]
-  (assert app.first-person-controls
-          (.. "FpcState requires app.first-person-controls for " action))
-  app.first-person-controls)
+  (let [controls (and app.presentation-input-controls
+                      (app.presentation-input-controls))]
+    (assert controls
+            (.. "FpcState requires presentation input controls for " action))
+    controls))
 
 (fn dispatch-control [action method payload]
   (local controls (require-controls action))

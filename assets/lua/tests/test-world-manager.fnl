@@ -517,8 +517,17 @@
       (set app.physics-containment-config {:mode "manual-bounds"
                                             :bounds {:min [-500 -777 -500]
                                                      :max [500 500 500]}})
-      ;; After R1-3, world activation no longer calls set-runtime-containment-config!; containment is supplied by Scene slot activation (sandbox activity). Runtime config is not written back to sandbox session or app.
-      (local (ok? err) (pcall activate-and-assert-containment world -777))
+      (local (ok? err)
+        (pcall
+          (fn []
+            (world:activate {})
+            ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
+            ;; containment is supplied by Scene slot activation (sandbox activity).
+            ;; The runtime config is preserved and not leaked to app globals.
+            (assert (= (. (. app.physics-containment-config.bounds.min) 2) -777)
+                    "World activation should not overwrite app containment from world state")
+            (assert (= (. (. world.runtime.physics-containment-config.bounds.min) 2) -1450)
+                    "World activation should preserve runtime containment state"))))
       (set app.physics-containment-config original-config)
       (if (not ok?) (error err))
       true)))
@@ -532,10 +541,22 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.runtime {:physics-containment-config {:mode "manual-bounds"
-                                                       :bounds {:min [-500 -1666 -500]
-                                                                :max [500 500 500]}}
-                          :unload-canvas-runtime (fn [_self] true)})
+      ;; Write containment directly into the canonical sandbox session state
+      ;; so resolve-runtime-containment-config picks it up during capture.
+      (local ActivitySceneState (require :activity-scene-state))
+      (when (not world.state.activity)
+        (set world.state.activity {}))
+      (when (not world.state.activity.sessions)
+        (set world.state.activity.sessions {}))
+      (when (not world.state.activity.sessions.sandbox)
+        (set world.state.activity.sessions.sandbox {}))
+      (set world.state.activity.sessions.sandbox.scene
+           (ActivitySceneState.empty-state))
+      (set world.state.activity.sessions.sandbox.scene.containment
+           {:mode "manual-bounds"
+            :bounds {:min [-500 -1666 -500]
+                     :max [500 500 500]}})
+      (set world.runtime {:unload-canvas-runtime (fn [_self] true)})
       (world:drop {} "test")
       (local sandbox-scene (sandbox-scene-state world))
       (local containment (and sandbox-scene sandbox-scene.containment))

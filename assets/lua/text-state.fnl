@@ -477,6 +477,8 @@
 (fn on-key-down [ctx state payload]
   (local mark-command (fn []
                         ((. ctx :mark-command-executed!))))
+  (local controls (and app.presentation-input-controls
+                        (app.presentation-input-controls)))
   (if (handle-submit ctx payload)
       true
       (InputState.dispatch-input :on-key-down payload)
@@ -492,9 +494,9 @@
       (and (active-input)
            (not (= (and payload payload.key) KEY_F1)))
       true
-      app.first-person-controls
+      controls
       (do
-        (local handled (app.first-person-controls:on-key-down payload))
+        (local handled (controls:on-key-down payload))
         (when handled
           (mark-command))
         handled)

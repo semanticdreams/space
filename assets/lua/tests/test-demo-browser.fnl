@@ -27,6 +27,7 @@
 (local fixtures (require :tests/http-fixtures))
 (local TestSupport (require :tests/test-support))
 (local StateSystemBindings (require :state-system-bindings))
+(local logging (require :logging))
 
 (local tests [])
 
@@ -280,14 +281,17 @@
    :bounds {:min [-500 min-y -500]
             :max [500 500 500]}})
 
+(var test-containment-manager nil)
+
 (fn configure-test-physics-world [opts]
   (local options (or opts {}))
   (when (and app.engine app.engine.physics)
     (app.engine.physics:setGravity 0 -25 0)
-    (PhysicsContainment.ensure-installed
-      {:config (or options.config
-                   app.physics-containment-config
-                   (PhysicsContainment.default-config))})))
+    (when (not test-containment-manager)
+      (set test-containment-manager
+           (PhysicsContainment.create-manager {:owner {} :physics app.engine.physics})))
+    (test-containment-manager:ensure-installed
+      {:config (or options.config (PhysicsContainment.default-config))})))
 
 (fn setup-scene [opts]
   (local options (or opts {}))
@@ -307,6 +311,24 @@
   (var camera nil)
   (var owns-camera? false)
   (local icons (make-icons-stub))
+
+  (fn cleanup []
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when (and owns-camera? camera)
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.camera original-camera)
+    (set app.hud original-hud)
+    (set app.create-default-projection original-create-default-projection)
+    (PhysicsContainment.clear)
+    (set app.physics-containment-config original-containment-config)
+    (when (and app.lights app.lights.set-state original-light-state)
+      (app.lights:set-state original-light-state)))
 
   (let [(ok payload)
         (pcall (fn []
@@ -331,34 +353,17 @@
                  (set app.layout-root scene.layout-root)
                  (set app.movables movables)
                  (set app.camera camera)
-                 (set app.create-default-projection AppProjection.create-default-projection)
-                 (when options.containment-config
-                   (set app.physics-containment-config options.containment-config))
+                  (set app.create-default-projection AppProjection.create-default-projection)
+                  (when options.containment-config
+                    (set app.physics-containment-config options.containment-config))
                   (configure-test-physics-world {:config options.containment-config})
-                  (scene:ensure-activity-slot "sandbox")
+                  (scene:ensure-activity-slot "sandbox" {:camera camera})
                   (local sandbox-slot (scene:activate-activity-slot "sandbox"))
                  (assert sandbox-slot "setup-scene requires a valid sandbox slot after activation")
                  (scene:build-default)
                  (assert (= scene.active-activity-slot-id "sandbox")
                          "setup-scene must leave the sandbox slot active for content construction")
                  {:scene scene :movables movables :icons icons :hud hud}))]
-    (fn cleanup []
-      (when scene
-        (scene:drop)
-        (set scene nil))
-      (when (and owns-camera? camera)
-        (camera:drop)
-        (set camera nil))
-      (set app.scene original-scene)
-      (set app.layout-root original-layout-root)
-      (set app.movables original-movables)
-      (set app.camera original-camera)
-      (set app.hud original-hud)
-      (set app.create-default-projection original-create-default-projection)
-      (PhysicsContainment.clear)
-      (set app.physics-containment-config original-containment-config)
-      (when (and app.lights app.lights.set-state original-light-state)
-        (app.lights:set-state original-light-state)))
     (if ok
         {:cleanup cleanup :scene-result payload}
         (do
@@ -672,8 +677,6 @@
 (fn scene-recover-terrain-bound-physics-cuboid-repositions-body []
   (assert bt "Terrain-bound cuboid recovery test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -704,7 +707,7 @@
                   "Expected cuboid body center above terrain after recovery (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
@@ -1372,6 +1375,10 @@
                              :camera camera}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
+  ;; Prove no forbidden app.camera fallback in the default-ray-opts path.
+  ;; setup-scene installs app.camera; explicitly nil it so the exercised
+  ;; code path cannot accidentally depend on the app-global camera reference.
+  (set app.camera nil)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
   (local (ok err)
@@ -1416,10 +1423,10 @@
         (assert expected
                 "default-ray-opts fixture should derive an expected terrain target from the screen rect seam")
         (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z1 expected.target.z1))
-        (capture:drop))))
+         (assert (= resolved-target.z0 expected.target.z0))
+         (assert (= resolved-target.x1 expected.target.x1))
+         (assert (= resolved-target.z1 expected.target.z1))
+         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
   (cleanup)
@@ -1436,6 +1443,8 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+
   (local original-states app.states)
   (var suspended-state nil)
   (local (ok err)
@@ -1488,12 +1497,15 @@
                              :on-mouse-button-up (fn [_self _payload] nil)
                              :on-mouse-motion (fn [_self _payload] nil)
                              :drag-active? (fn [_self] false)})
-        (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
-                                        :on-mouse-button-up (fn [_self _payload] nil)
-                                        :on-mouse-motion (fn [_self _payload] nil)
-                                        :on-mouse-wheel (fn [_self _payload] nil)
-                                        :update (fn [_self _delta] nil)
-                                        :drag-active? (fn [_self] false)})
+        (local fpc-stub {:on-mouse-button-down (fn [_self _payload] nil)
+                         :on-mouse-button-up (fn [_self _payload] nil)
+                         :on-mouse-motion (fn [_self _payload] nil)
+                         :on-mouse-wheel (fn [_self _payload] nil)
+                         :update (fn [_self _delta] nil)
+                         :drag-active? (fn [_self] false)})
+        (set app.active-world-runtime
+             {:presentation {:input-controls (fn [_self] fpc-stub)}})
+        (set app.first-person-controls nil)
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
@@ -1520,6 +1532,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
+  (set app.active-world-runtime original-runtime)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
@@ -1536,6 +1549,8 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+
   (local original-states app.states)
   (var suspended-state nil)
   (local original-screen-pos-terrain-domain-hit scene.screen-pos-terrain-domain-hit)
@@ -1591,13 +1606,16 @@
                              :on-mouse-button-up (fn [_self _payload] nil)
                              :on-mouse-motion (fn [_self _payload] nil)
                              :drag-active? (fn [_self] false)})
-        (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
-                                        :on-mouse-button-up (fn [_self _payload] nil)
-                                        :on-mouse-motion (fn [_self _payload] nil)
-                                        :on-mouse-wheel (fn [_self _payload]
-                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
-                                        :update (fn [_self _delta] nil)
-                                        :drag-active? (fn [_self] false)})
+        (local fpc-stub {:on-mouse-button-down (fn [_self _payload] nil)
+                         :on-mouse-button-up (fn [_self _payload] nil)
+                         :on-mouse-motion (fn [_self _payload] nil)
+                         :on-mouse-wheel (fn [_self _payload]
+                                           (error "terrain rectangle pick state should swallow mouse wheel input"))
+                         :update (fn [_self _delta] nil)
+                         :drag-active? (fn [_self] false)})
+        (set app.active-world-runtime
+             {:presentation {:input-controls (fn [_self] fpc-stub)}})
+        (set app.first-person-controls nil)
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
         (assert (= hit-count 0)
@@ -1613,6 +1631,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
+  (set app.active-world-runtime original-runtime)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
@@ -1630,6 +1649,8 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+
   (local original-states app.states)
   (var suspended-state nil)
   (var forwarded-wheel nil)
@@ -1668,13 +1689,16 @@
                              :on-mouse-button-up (fn [_self _payload] nil)
                              :on-mouse-motion (fn [_self _payload] nil)
                              :drag-active? (fn [_self] false)})
-        (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
-                                        :on-mouse-button-up (fn [_self _payload] nil)
-                                        :on-mouse-motion (fn [_self _payload] nil)
-                                        :on-mouse-wheel (fn [_self payload]
-                                                          (set forwarded-wheel payload.y))
-                                        :update (fn [_self _delta] nil)
-                                        :drag-active? (fn [_self] false)})
+        (local fpc-stub {:on-mouse-button-down (fn [_self _payload] nil)
+                         :on-mouse-button-up (fn [_self _payload] nil)
+                         :on-mouse-motion (fn [_self _payload] nil)
+                         :on-mouse-wheel (fn [_self payload]
+                                           (set forwarded-wheel payload.y))
+                         :update (fn [_self _delta] nil)
+                         :drag-active? (fn [_self] false)})
+        (set app.active-world-runtime
+             {:presentation {:input-controls (fn [_self] fpc-stub)}})
+        (set app.first-person-controls nil)
         (local states (States))
         (states:add-state :normal {})
         (states:add-state :terrain-rect-pick (TerrainRectPickState))
@@ -1714,6 +1738,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
+  (set app.active-world-runtime original-runtime)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
@@ -2433,8 +2458,6 @@
 (fn scene-ball-settles-on-configured-containment-floor []
   (assert bt "Scene ball configured containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -100))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2460,7 +2483,7 @@
                   "Ball should settle near configured containment floor, not remain high (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
@@ -2494,8 +2517,6 @@
 (fn scene-heightfield-physics-respects-scene-root-transform []
   (assert bt "Scene heightfield root-transform physics test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2545,15 +2566,13 @@
                   surface.world-surface-y
                   center.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-updates-physics []
   (assert bt "Terrain replacement physics test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2606,15 +2625,13 @@
                   "Physics body should settle on replaced raised terrain, not the old base (actual_y=%.3f)"
                   y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-updates-lifted-ball-collision []
   (assert bt "Terrain replacement lifted-ball test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2674,15 +2691,13 @@
                   "Lifted ball should rest on replaced raised terrain, not the old base (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-allows-direct-drag-placement-on-raised-area []
   (assert bt "Terrain replacement direct-place ball test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2754,15 +2769,13 @@
                   placed-center.y
                   center.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-live-heightfield-ball-above-raised-area-stays-near-supported-surface []
   (assert bt "Live heightfield ball regression test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2812,15 +2825,13 @@
                   surface.world-surface-y
                   origin.y)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-live-heightfield-supports-balls-across-3x3-chunks []
   (assert bt "Live 3x3 heightfield support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2906,15 +2917,13 @@
         (each [_ local-point (ipairs local-probe-points)]
           (assert-supported-at-local-point local-point)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-first-home-world-supports-balls-on-elevated-samples []
   (assert bt "First home world elevated ball support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2982,15 +2991,13 @@
         (each [_ probe (ipairs local-probe-points)]
           (assert-supported-at-local-point probe)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
 (fn scene-first-home-world-supports-ball-on-central-plateau []
   (assert bt "First home world plateau ball support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-containment-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -3042,7 +3049,7 @@
                   origin.y
                   origin.z)))))
   (cleanup)
-  (set app.physics-containment-config original-containment-config)
+
   (when (not ok)
     (error err)))
 
@@ -3336,28 +3343,40 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected sanitization warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
-        (local warnings
-          (restore-state-capturing-warnings
-            scene
-            {:panels [{:kind "graph-node-cube"
-                       :node-key "poisoned-node"
-                       :label "poisoned restore target"
-                       :size [4 4 4]
-                       :position [950000 0 0]
-                       :rotation [1 0 0 0]}]
-             :lights (LightSystemModule.default-state)}))
-        (assert-warning-contains warnings "dropping invalid restored panel position"))))
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "poisoned-node"
+                                        :label "poisoned restore target"
+                                        :size [4 4 4]
+                                        :position [950000 0 0]
+                                        :rotation [1 0 0 0]}]
+                              :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one position-sanitization warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "dropping invalid restored panel position")
+                         "Expected 'dropping invalid restored panel position' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to sanitize poisoned positions, got: "
               (tostring err)))
@@ -3383,28 +3402,40 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected sanitization warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
-        (local warnings
-          (restore-state-capturing-warnings
-            scene
-            {:panels [{:kind "graph-node-cube"
-                       :node-key "poisoned-size-node"
-                       :label "poisoned size restore target"
-                       :size [950000 4 4]
-                       :position [0 0 0]
-                       :rotation [1 0 0 0]}]
-             :lights (LightSystemModule.default-state)}))
-        (assert-warning-contains warnings "replacing invalid restored panel size"))))
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "poisoned-size-node"
+                                        :label "poisoned size restore target"
+                                        :size [950000 4 4]
+                                        :position [0 0 0]
+                                        :rotation [1 0 0 0]}]
+                              :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one size-sanitization warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "replacing invalid restored panel size")
+                         "Expected 'replacing invalid restored panel size' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to sanitize poisoned sizes, got: "
               (tostring err)))
@@ -3430,30 +3461,42 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected skip warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
-        (local warnings
-          (restore-state-capturing-warnings
-            scene
-            {:panels [{:kind "legacy-panel-without-restorer"
-                       :position [1 2 3]
-                       :rotation [1 0 0 0]
-                       :size [4 4 4]}
-                      {:kind "graph-node-cube"
-                       :node-key "legacy-skip-node"
-                       :label "legacy skip target"
-                       :position [4 5 6]
-                       :rotation [1 0 0 0]
-                       :size [4 4 4]}]
-             :lights (LightSystemModule.default-state)}))
-        (assert-warning-contains warnings "skipping restored panel at index 1"))))
+        (scene:restore-state {:panels [{:kind "legacy-panel-without-restorer"
+                                        :position [1 2 3]
+                                        :rotation [1 0 0 0]
+                                        :size [4 4 4]}
+                                       {:kind "graph-node-cube"
+                                        :node-key "legacy-skip-node"
+                                        :label "legacy skip target"
+                                        :position [4 5 6]
+                                        :rotation [1 0 0 0]
+                                        :size [4 4 4]}]
+                              :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one legacy-panel skip warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "skipping restored panel")
+                         "Expected 'skipping restored panel' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to skip legacy panels without failing, got: "
               (tostring err)))
