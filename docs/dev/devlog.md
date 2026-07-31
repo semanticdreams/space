@@ -1,5 +1,8 @@
 # Devlog
 
+## 2026-07-31
+Runtime portability tightened with asset discovery that resolves from the executable through a deduplicated search order while preserving explicit overrides, and native logging now settles in a deliberate user log directory after dotenv has a chance to provide `SPACE_LOG_DIR`, keeping CLI, REPL, module, developer, installed, and portable runs predictable instead of scattering assets or `gl.log` around arbitrary launch directories.
+
 ## 2026-07-30
 Late July added grounded camera controls and physics anchor dragging through a new sandbox interaction toolbar, migrated the presentation layer from app-global assumptions to activity-owned delegates, shipped external-unit MCP tooling for loader-neutral user code, and matured the daily devlog automation with a retrospective journal backfill — giving the project a durable narrative record as it builds toward the next graph and world-editing milestones.
 
