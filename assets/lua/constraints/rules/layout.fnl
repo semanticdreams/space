@@ -314,12 +314,32 @@
 (fn table-insert-mutates-path? [call path]
   "Detect supported collection mutation call evidence for table.insert.
   Facts do not expose call arguments structurally, so this stays conservative:
-  require a table.insert call whose source form contains the exact dotted path."
-  (and call
-       (= call.callee "table.insert")
-       call.form
-       path
-       (string.find call.form (path->dotted path) 1 true)))
+  require the exact dotted path as the table.insert target argument."
+  (if (not call)
+      false
+      (not= call.callee "table.insert")
+      false
+      (= call.form nil)
+      false
+      (= path nil)
+      false
+      (do
+        (local dotted (path->dotted path))
+        (local prefix "(table.insert ")
+        (local start (string.find call.form prefix 1 true))
+        (if (not start)
+            false
+            (do
+              (local target-start (+ start (length prefix)))
+              (local target-end (- (+ target-start (length dotted)) 1))
+              (local target (call.form:sub target-start target-end))
+              (local delimiter (call.form:sub (+ target-end 1) (+ target-end 1)))
+              (and (= target dotted)
+                   (if (= delimiter " ") true
+                       (= delimiter "\n") true
+                       (= delimiter "\t") true
+                       (= delimiter ")") true
+                       false)))))))
 
 (fn has-child-collection-mutation? [ff path]
   "Return true when set/tset facts or supported call facts mutate path."

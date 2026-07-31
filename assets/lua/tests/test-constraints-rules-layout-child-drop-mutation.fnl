@@ -77,6 +77,47 @@
   (assert result "mutated scene.scene-children without drop should flag")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
+(fn child-drop-allows-table-insert-read-only-child-source []
+  "table.insert into another table using entity.children as the value is read-only."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/snapshot-query.fnl"
+                              :module "snapshot-query"
+                              :accesses [{:path ["entity" "children"]
+                                          :text "entity.children"
+                                          :line 9 :column 27
+                                          :form "entity.children"}]
+                              :calls [{:callee "table.insert"
+                                       :receiver "table" :method "insert"
+                                       :line 9 :column 3
+                                       :form "(table.insert snapshots entity.children)"
+                                       :enclosing-fn nil}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "table.insert snapshots entity.children should remain read-only"))
+
+(fn child-drop-flags-table-insert-into-children-without-drop []
+  "table.insert targeting entity.children is mutation evidence and should flag."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/table-insert-child.fnl"
+                              :module "table-insert-child"
+                              :accesses [{:path ["entity" "children"]
+                                          :text "entity.children"
+                                          :line 11 :column 17
+                                          :form "entity.children"}]
+                              :calls [{:callee "table.insert"
+                                       :receiver "table" :method "insert"
+                                       :line 11 :column 3
+                                       :form "(table.insert entity.children child)"
+                                       :enclosing-fn nil}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "table.insert entity.children child should flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
 (fn child-drop-still-flags-layout-and-layoutroot-constructors []
   "Layout and LayoutRoot constructor evidence must remain independent of access-path mutation."
   (local Layout (require :constraints.rules.layout))
@@ -215,6 +256,10 @@
                      :fn child-drop-flags-mutated-children-without-drop})
 (table.insert tests {:name "child-drop flags mutated scene children without drop"
                      :fn child-drop-flags-mutated-scene-children-without-drop})
+(table.insert tests {:name "child-drop allows table.insert read-only child source"
+                     :fn child-drop-allows-table-insert-read-only-child-source})
+(table.insert tests {:name "child-drop flags table.insert into children without drop"
+                     :fn child-drop-flags-table-insert-into-children-without-drop})
 (table.insert tests {:name "child-drop still flags Layout and LayoutRoot constructors"
                      :fn child-drop-still-flags-layout-and-layoutroot-constructors})
 (table.insert tests {:name "child-drop allows method clear-children cleanup"
