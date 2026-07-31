@@ -75,8 +75,8 @@ public:
     void reset();
 
 private:
-    ALCdevice* device;
-    ALCcontext* context;
+    ALCdevice* device { nullptr };
+    ALCcontext* context { nullptr };
 
     std::unordered_map<std::string, ALuint> buffers;
     std::vector<ALuint> activeSources;
