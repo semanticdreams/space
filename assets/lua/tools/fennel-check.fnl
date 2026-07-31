@@ -30,6 +30,25 @@
       result-or-error
       (failure-result result-or-error)))
 
+(fn normalized-global-argv []
+  (local source (if _G.arg _G.arg []))
+  (local start (if (= (. source 1) "--") 2 1))
+  (local result [])
+  (var index start)
+  (while (<= index (# source))
+    (table.insert result (. source index))
+    (set index (+ index 1)))
+  result)
+
+(fn io-options? [arg]
+  (and (= (type arg) :table)
+       (not arg.argv)
+       (if arg.print
+           true
+           arg.exit
+           true
+           false)))
+
 (fn main-options [opts-or-argv]
   (local arg (if opts-or-argv opts-or-argv {}))
   (if (and (= (type arg) :table) arg.argv)
@@ -37,6 +56,16 @@
        :opts arg
        :print arg.print
        :exit arg.exit}
+      (io-options? arg)
+      {:argv (normalized-global-argv)
+       :opts arg
+       :print arg.print
+       :exit arg.exit}
+      (not opts-or-argv)
+      {:argv (normalized-global-argv)
+       :opts {}
+       :print nil
+       :exit nil}
       {:argv (if (= (type arg) :table) arg [])
        :opts {}
        :print nil

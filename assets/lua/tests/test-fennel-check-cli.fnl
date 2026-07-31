@@ -25,6 +25,18 @@
                      :exit (fn [code] (set exit-code code))})
   {:printed printed :exit-code exit-code})
 
+(fn run-main-capturing-global-argv [argv]
+  (local previous _G.arg)
+  (var printed nil)
+  (var exit-code nil)
+  (local print-fn (fn [msg] (set printed msg)))
+  (local exit-fn (fn [code] (set exit-code code)))
+  (set _G.arg argv)
+  (FennelCheck.main {:print print-fn
+                     :exit exit-fn})
+  (set _G.arg previous)
+  {:printed printed :exit-code exit-code})
+
 (fn parse-result [captured]
   (assert captured.printed "fennel-check should print a JSON result")
   (json.loads captured.printed))
@@ -94,6 +106,22 @@
       (assert (= diagnostic.file (fs.absolute path)))
       (assert (string.find diagnostic.message ".fnl" 1 true)))))
 
+(fn real-entrypoint-global-argv-checks-explicit-file []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "broken.fnl" "(fn broken [x]\n"))
+      (local captured (run-main-capturing-global-argv ["--" "--target" "files" "--file" path]))
+      (local result (parse-result captured))
+      (assert (= captured.exit-code 1))
+      (assert (not result.ok))
+      (assert (= result.status "fail"))
+      (assert (= result.summary.checked 1))
+      (assert (= (. result.checked 1) (fs.absolute path)))
+      (local diagnostic (. result.diagnostics 1))
+      (assert diagnostic)
+      (assert (= diagnostic.kind "compile"))
+      (assert (= diagnostic.file (fs.absolute path))))))
+
 (table.insert tests {:name "valid explicit file exits 0"
                      :fn valid-explicit-file-exits-zero})
 (table.insert tests {:name "broken explicit file exits 1"
@@ -102,6 +130,8 @@
                      :fn valid-explicit-file-ignores-broken-sibling})
 (table.insert tests {:name "non-Fennel file exits 1"
                      :fn non-fennel-file-exits-one})
+(table.insert tests {:name "real entrypoint global argv checks explicit file"
+                     :fn real-entrypoint-global-argv-checks-explicit-file})
 
 (local main
   (fn []
