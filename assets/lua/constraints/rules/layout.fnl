@@ -287,6 +287,73 @@
   {"clear-children" true
    "drop-children" true})
 
+(fn child-collection-path? [path]
+  "Return true when path denotes one of the retained child collections."
+  (let [p (or path [])
+        plen (length p)]
+    (and (>= plen 2) (. child-creation-access-keys (. p plen)))))
+
+(fn same-path? [a b]
+  "Exact path equality for child collection correlation."
+  (let [pa (or a [])
+        pb (or b [])]
+    (if (not= (length pa) (length pb))
+        false
+        (do
+          (var equal true)
+          (for [i 1 (length pa)]
+            (when (not= (. pa i) (. pb i))
+              (set equal false)))
+          equal))))
+
+(fn path->dotted [path]
+  "Render a fact path as dotted text for safe call-form correlation."
+  (table.concat (or path []) "."))
+
+(fn table-insert-mutates-path? [call path]
+  "Detect supported collection mutation call evidence for table.insert.
+  Facts do not expose call arguments structurally, so this stays conservative:
+  require a table.insert call whose source form contains the exact dotted path."
+  (and call
+       (= call.callee "table.insert")
+       call.form
+       path
+       (string.find call.form (path->dotted path) 1 true)))
+
+(fn has-child-collection-mutation? [ff path]
+  "Return true when set/tset facts or supported call facts mutate path."
+  (var found false)
+  (each [_ mut (ipairs (or ff.mutations []))]
+    (when (and (not found)
+               (if (= mut.op :set) true (= mut.op :tset) true false)
+               (same-path? mut.path path))
+      (set found true)))
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (and (not found) (table-insert-mutates-path? call path))
+      (set found true)))
+  found)
+
+(fn access-has-correlated-child-mutation? [ff access]
+  "Read-only child collection access is not creation evidence; require a
+  correlated write/mutation to the same collection path."
+  (and (child-collection-path? access.path)
+       (has-child-collection-mutation? ff access.path)))
+
+(fn has-direct-child-collection-mutation? [ff]
+  "Direct writes/mutations to child collections are retained child evidence."
+  (var found false)
+  (each [_ mut (ipairs (or ff.mutations []))]
+    (when (and (not found)
+               (if (= mut.op :set) true (= mut.op :tset) true false)
+               (child-collection-path? mut.path))
+      (set found true)))
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (and (not found) (= call.callee "table.insert"))
+      (each [_ access (ipairs (or ff.accesses []))]
+        (when (and (not found) (access-has-correlated-child-mutation? ff access))
+          (set found true)))))
+  found)
+
 (fn callee-is-drop-method? [callee]
   "Check if a callee is a :drop method call."
   (and callee (callee-ends-with? callee ":drop")))
@@ -299,18 +366,10 @@
       (set found true)))
   (each [_ access (ipairs (or ff.accesses []))]
     (when (not found)
-      (let [p (or access.path [])
-            plen (length p)]
-        (when (and (>= plen 2) (. child-creation-access-keys (. p plen)))
-          (set found true)))))
-  (each [_ access (ipairs (or ff.accesses []))]
-    (when (not found)
-      (let [p (or access.path [])
-            plen (length p)]
-        (when (and (>= plen 2)
-                   (= (. p 1) "renderer")
-                   (. child-creation-access-keys (. p plen)))
-          (set found true)))))
+      (when (access-has-correlated-child-mutation? ff access)
+        (set found true))))
+  (when (and (not found) (has-direct-child-collection-mutation? ff))
+    (set found true))
   found)
 
 (fn def-contains-child-creation-call? [ff def]
@@ -400,16 +459,28 @@
           (when all-covered
             (each [_ access (ipairs (or ff.accesses []))]
               (when all-covered
-                (local p (if (= access.path nil) [] access.path))
-                (local plen (length p))
-                (local last-key (and (>= plen 2) (. p plen)))
-                (local retained-access? (and last-key (. child-creation-access-keys last-key)))
+                (local retained-access? (access-has-correlated-child-mutation? ff access))
                 (when retained-access?
                   (var covered false)
                   (each [_ def (ipairs all-defs)]
                     (when (and (not covered) (def-covers-access? ff def access))
                       (set covered true)))
                   (when (not covered)
+                    (set all-covered false))))))
+          (when all-covered
+            (each [_ mut (ipairs (or ff.mutations []))]
+              (when (and all-covered (child-collection-path? mut.path))
+                (var covered false)
+                (each [_ def (ipairs all-defs)]
+                  (when (and (not covered) (def-covers-access? ff def mut))
+                    (set covered true)))
+                (when (not covered)
+                  (set all-covered false)))))
+          (when all-covered
+            (each [_ call (ipairs (or ff.calls []))]
+              (when (and all-covered (= call.callee "table.insert"))
+                (each [_ access (ipairs (or ff.accesses []))]
+                  (when (and all-covered (table-insert-mutates-path? call access.path))
                     (set all-covered false)))))))
         (when (not all-covered)
           (table.insert diagnostics

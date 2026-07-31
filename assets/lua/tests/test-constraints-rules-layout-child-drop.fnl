@@ -22,6 +22,100 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "file without retained children should pass"))
 
+(fn child-drop-allows-read-only-entity-children []
+  "Read-only entity.children access should not count as retained child creation."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/query.fnl"
+                              :module "query"
+                              :accesses [{:path ["entity" "children"]
+                                          :text "entity.children"
+                                          :line 10 :column 3
+                                          :form "entity.children"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "read-only entity.children access should pass"))
+
+(fn child-drop-allows-read-only-scene-children []
+  "Read-only scene.scene-children access should not count as retained child creation."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/scene-query.fnl"
+                              :module "scene-query"
+                              :accesses [{:path ["scene" "scene-children"]
+                                          :text "scene.scene-children"
+                                          :line 12 :column 5
+                                          :form "scene.scene-children"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "read-only scene.scene-children access should pass"))
+
+(fn child-drop-flags-mutated-children-without-drop []
+  "A write to entity.children without drop/cleanup still indicates retained children."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-children.fnl"
+                              :module "bad-children"
+                              :accesses [{:path ["entity" "children"]
+                                          :text "entity.children"
+                                          :line 8 :column 3
+                                          :form "entity.children"}]
+                              :mutations [{:op :set
+                                           :path ["entity" "children"]
+                                           :line 8 :column 3
+                                           :form "(set entity.children [])"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "mutated entity.children without drop should flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn child-drop-flags-mutated-scene-children-without-drop []
+  "A write to scene.scene-children without drop/cleanup still indicates retained children."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-scene-children.fnl"
+                              :module "bad-scene-children"
+                              :accesses [{:path ["scene" "scene-children"]
+                                          :text "scene.scene-children"
+                                          :line 9 :column 3
+                                          :form "scene.scene-children"}]
+                              :mutations [{:op :tset
+                                           :path ["scene" "scene-children"]
+                                           :line 9 :column 3
+                                           :form "(tset scene :scene-children [])"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "mutated scene.scene-children without drop should flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn child-drop-still-flags-layout-and-layoutroot-constructors []
+  "Layout and LayoutRoot constructor evidence must remain independent of access-path mutation."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule layout.owned-child-drop should be in rules list")
+  (local layout-ff (make-file-fact {:path "/src/bad-layout.fnl"
+                                    :module "bad-layout"
+                                    :calls [{:callee "Layout"
+                                             :receiver nil :method nil
+                                             :line 10 :column 1
+                                             :form "(Layout {:child child})"
+                                             :enclosing-fn nil}]}))
+  (local layout-root-ff (make-file-fact {:path "/src/bad-layout-root.fnl"
+                                         :module "bad-layout-root"
+                                         :calls [{:callee "LayoutRoot"
+                                                  :receiver nil :method nil
+                                                  :line 20 :column 1
+                                                  :form "(LayoutRoot {:child child})"
+                                                  :enclosing-fn nil}]}))
+  (local result (rule.run (make-ctx [layout-ff layout-root-ff])))
+  (assert result "Layout/LayoutRoot constructors without drop should still flag")
+  (assert (>= (length result) 2) "both constructor-based creators should flag"))
+
 (fn child-drop-allows-layout-with-drop-fn []
   "A file creating Layout with a drop function and :drop cleanup should pass."
   (local Layout (require :constraints.rules.layout))
@@ -146,11 +240,15 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/src/bad-widget.fnl"
                               :module "bad-widget"
-                              :accesses [{:path ["self" "scene-children"]
-                                          :text "self.scene-children"
-                                          :line 10 :column 1
-                                          :form "self.scene-children"}]
-                              :calls [{:callee "clear-children"
+                               :accesses [{:path ["self" "scene-children"]
+                                           :text "self.scene-children"
+                                           :line 10 :column 1
+                                           :form "self.scene-children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "scene-children"]
+                                            :line 10 :column 1
+                                            :form "(set self.scene-children [])"}]
+                               :calls [{:callee "clear-children"
                                        :receiver nil :method nil
                                        :line 15 :column 1
                                        :form "(clear-children)"
@@ -178,11 +276,15 @@
                                              :line 20 :column 1
                                              :length 80
                                              :form "(fn drop [self] (clear-children))"}]
-                              :accesses [{:path ["self" "scene-children"]
-                                          :text "self.scene-children"
-                                          :line 10 :column 1
-                                          :form "self.scene-children"}]
-                              :calls [{:callee "clear-children"
+                               :accesses [{:path ["self" "scene-children"]
+                                           :text "self.scene-children"
+                                           :line 10 :column 1
+                                           :form "self.scene-children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "scene-children"]
+                                            :line 10 :column 1
+                                            :form "(set self.scene-children [])"}]
+                               :calls [{:callee "clear-children"
                                        :receiver nil :method nil
                                        :line 15 :column 1
                                        :form "(clear-children)"
@@ -207,11 +309,15 @@
                                              :line 20 :column 1
                                              :length 80
                                              :form "(fn drop [self] (drop-children))"}]
-                              :accesses [{:path ["self" "scene-objects"]
-                                          :text "self.scene-objects"
-                                          :line 10 :column 1
-                                          :form "self.scene-objects"}]
-                              :calls [{:callee "drop-children"
+                               :accesses [{:path ["self" "scene-objects"]
+                                           :text "self.scene-objects"
+                                           :line 10 :column 1
+                                           :form "self.scene-objects"}]
+                               :mutations [{:op :set
+                                            :path ["self" "scene-objects"]
+                                            :line 10 :column 1
+                                            :form "(set self.scene-objects [])"}]
+                               :calls [{:callee "drop-children"
                                        :receiver nil :method nil
                                        :line 15 :column 1
                                        :form "(drop-children)"
@@ -271,10 +377,14 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/src/bad-widget.fnl"
                               :module "bad-widget"
-                              :accesses [{:path ["self" "scene-children"]
-                                          :text "self.scene-children"
-                                          :line 10 :column 1
-                                          :form "self.scene-children"}]}))
+                               :accesses [{:path ["self" "scene-children"]
+                                           :text "self.scene-children"
+                                           :line 10 :column 1
+                                           :form "self.scene-children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "scene-children"]
+                                            :line 10 :column 1
+                                            :form "(set self.scene-children [])"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "should produce diagnostics for scene-children without drop")
   (assert (> (length result) 0) "should have at least one diagnostic")
@@ -290,10 +400,14 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/src/bad-widget.fnl"
                               :module "bad-widget"
-                              :accesses [{:path ["self" "scene-terrains"]
-                                          :text "self.scene-terrains"
-                                          :line 10 :column 1
-                                          :form "self.scene-terrains"}]}))
+                               :accesses [{:path ["self" "scene-terrains"]
+                                           :text "self.scene-terrains"
+                                           :line 10 :column 1
+                                           :form "self.scene-terrains"}]
+                               :mutations [{:op :set
+                                            :path ["self" "scene-terrains"]
+                                            :line 10 :column 1
+                                            :form "(set self.scene-terrains [])"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "should produce diagnostics for scene-terrains without drop")
   (assert (> (length result) 0) "should have at least one diagnostic"))
@@ -307,11 +421,15 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/src/bad-widget.fnl"
                               :module "bad-widget"
-                              :accesses [{:path ["renderer" "children"]
-                                          :text "renderer.children"
-                                          :line 10 :column 1
-                                          :form "renderer.children"}]
-                              :calls [{:callee "renderer:drop"
+                               :accesses [{:path ["renderer" "children"]
+                                           :text "renderer.children"
+                                           :line 10 :column 1
+                                           :form "renderer.children"}]
+                               :mutations [{:op :set
+                                            :path ["renderer" "children"]
+                                            :line 10 :column 1
+                                            :form "(set renderer.children [])"}]
+                               :calls [{:callee "renderer:drop"
                                        :receiver nil :method nil
                                        :line 15 :column 1
                                        :form "(renderer:drop)"
@@ -841,7 +959,9 @@
                                        {:callee "root:drop" :receiver "root" :method "drop" :line 1 :column 121
                                         :form "(root:drop)" :enclosing-fn "helper-with-drop"}]
                                :accesses [{:path ["root" "children"] :text "root.children" :line 1 :column 70 :form "root.children"}
-                                          {:path ["root" "children"] :text "root.children" :line 1 :column 174 :form "root.children"}]}))
+                                           {:path ["root" "children"] :text "root.children" :line 1 :column 174 :form "root.children"}]
+                               :mutations [{:op :set :path ["root" "children"] :line 1 :column 174
+                                            :form "(set root.children [])"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "unrelated returned :drop should not exempt access-only child creator")
   (var found-missing-drop false)
@@ -904,11 +1024,15 @@
                                              :length 80
                                              :form "(fn drop [self]
   (self:clear-children))"}]
-                              :accesses [{:path ["self" "children"]
-                                          :text "self.children"
-                                          :line 10 :column 1
-                                          :form "self.children"}]
-                              :calls [{:callee "self:clear-children"
+                               :accesses [{:path ["self" "children"]
+                                           :text "self.children"
+                                           :line 10 :column 1
+                                           :form "self.children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "children"]
+                                            :line 10 :column 1
+                                            :form "(set self.children [])"}]
+                               :calls [{:callee "self:clear-children"
                                        :receiver "self" :method "clear-children"
                                        :line 21 :column 1
                                        :form "(self:clear-children)"
@@ -933,11 +1057,15 @@
                                              :length 80
                                              :form "(fn drop [root]
   (root:drop-children))"}]
-                              :accesses [{:path ["root" "scene-objects"]
-                                          :text "root.scene-objects"
-                                          :line 10 :column 1
-                                          :form "root.scene-objects"}]
-                              :calls [{:callee "root:drop-children"
+                               :accesses [{:path ["root" "scene-objects"]
+                                           :text "root.scene-objects"
+                                           :line 10 :column 1
+                                           :form "root.scene-objects"}]
+                               :mutations [{:op :set
+                                            :path ["root" "scene-objects"]
+                                            :line 10 :column 1
+                                            :form "(set root.scene-objects [])"}]
+                               :calls [{:callee "root:drop-children"
                                        :receiver "root" :method "drop-children"
                                        :line 21 :column 1
                                        :form "(root:drop-children)"
@@ -962,11 +1090,15 @@
                                              :length 80
                                              :form "(fn drop [self]
   (set self.children []))"}]
-                              :accesses [{:path ["self" "children"]
-                                          :text "self.children"
-                                          :line 10 :column 1
-                                          :form "self.children"}]
-                              :calls []}))
+                               :accesses [{:path ["self" "children"]
+                                           :text "self.children"
+                                           :line 10 :column 1
+                                           :form "self.children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "children"]
+                                            :line 10 :column 1
+                                            :form "(set self.children [])"}]
+                               :calls []}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "public drop without child cleanup should still report diagnostics")
   (var found-missing-cleanup false)
@@ -992,11 +1124,15 @@
                                              :length 80
                                              :form "(fn drop [self]
   (metrics.drop-children))"}]
-                              :accesses [{:path ["self" "children"]
-                                          :text "self.children"
-                                          :line 10 :column 1
-                                          :form "self.children"}]
-                              :calls [{:callee "metrics.drop-children"
+                               :accesses [{:path ["self" "children"]
+                                           :text "self.children"
+                                           :line 10 :column 1
+                                           :form "self.children"}]
+                               :mutations [{:op :set
+                                            :path ["self" "children"]
+                                            :line 10 :column 1
+                                            :form "(set self.children [])"}]
+                               :calls [{:callee "metrics.drop-children"
                                        :receiver "metrics" :method "drop-children"
                                        :line 21 :column 1
                                        :form "(metrics.drop-children)"
@@ -1095,9 +1231,19 @@
 ;; Register all child-drop tests
 ;; layout.owned-child-drop
 (table.insert tests {:name "child-drop allows file without retained children"
-                     :fn child-drop-allows-file-without-retained-children})
+                      :fn child-drop-allows-file-without-retained-children})
+(table.insert tests {:name "child-drop allows read-only entity children"
+                     :fn child-drop-allows-read-only-entity-children})
+(table.insert tests {:name "child-drop allows read-only scene children"
+                     :fn child-drop-allows-read-only-scene-children})
+(table.insert tests {:name "child-drop flags mutated children without drop"
+                     :fn child-drop-flags-mutated-children-without-drop})
+(table.insert tests {:name "child-drop flags mutated scene children without drop"
+                     :fn child-drop-flags-mutated-scene-children-without-drop})
+(table.insert tests {:name "child-drop still flags Layout and LayoutRoot constructors"
+                     :fn child-drop-still-flags-layout-and-layoutroot-constructors})
 (table.insert tests {:name "child-drop allows Layout with drop fn"
-                     :fn child-drop-allows-layout-with-drop-fn})
+                      :fn child-drop-allows-layout-with-drop-fn})
 ;; R1-3: local drop
 (table.insert tests {:name "child-drop allows Layout with local drop"
                      :fn child-drop-allows-layout-with-local-drop})
