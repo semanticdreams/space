@@ -18,19 +18,24 @@
   (assert (string.find contents needle 1 true)
           (.. message " (missing: " needle ")")))
 
-(fn constraints-target-recipe [makefile]
-  (local (start) (string.find makefile "\nconstraints:" 1 true))
+(fn make-target-recipe [makefile target]
+  (local header (.. target ":"))
+  (local header-length (string.len header))
+  (local (start) (string.find makefile (.. "\n" header) 1 true))
   (local target-start (if start (+ start 1) 1))
-  (assert (= (string.sub makefile target-start (+ target-start 11)) "constraints:")
-          "Makefile should contain a constraints target")
-  (local (next-target) (string.find makefile "\n%S[^\n]-:" (+ target-start 12)))
+  (assert (= (string.sub makefile target-start (+ target-start header-length -1)) header)
+          (.. "Makefile should contain a " target " target"))
+  (local (next-target) (string.find makefile "\n%S[^\n]-:" (+ target-start header-length)))
   (if next-target
       (string.sub makefile target-start (- next-target 1))
       (string.sub makefile target-start)))
 
+(fn constraints-target-recipe [makefile]
+  (make-target-recipe makefile "constraints"))
+
 (fn test-constraints-target-recipe-is-isolated []
   (local makefile (table.concat [".PHONY: constraints test"
-                                 "constraints: build"
+                                 "constraints: fennel-check"
                                  "\t./build/space -m constraints.runner:main -- --target repo"
                                  ""
                                  "test: constraints"
@@ -42,22 +47,25 @@
 
 (fn test-makefile-wires-constraints-target []
   (local makefile (read-repo-file "Makefile"))
+  (local fennel-recipe (make-target-recipe makefile "fennel-check"))
   (local recipe (constraints-target-recipe makefile))
   (assert (string.find makefile "^.PHONY:.*constraints")
           "Makefile .PHONY declaration should include constraints")
+  (assert-contains makefile "SPACE_TEST_ENV = SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(CURDIR)/assets"
+                   "Makefile should declare shared test environment variables")
+  (assert-contains makefile "SPACE_FENNEL_ENV = FENNEL_PATH=$(CURDIR)/assets/lua/?.fnl\\;$(CURDIR)/assets/lua/?/init.fnl FENNEL_MACRO_PATH=$(CURDIR)/assets/lua/?.fnl\\;$(CURDIR)/assets/lua/?/init.fnl"
+                   "Makefile should declare shared Fennel environment variables")
+  (assert-contains makefile "SPACE_RUNTIME_ENV = $(SPACE_TEST_ENV) $(SPACE_FENNEL_ENV)"
+                   "Makefile should compose shared runtime environment variables")
+  (assert-contains fennel-recipe "fennel-check: build"
+                   "fennel-check should depend on build")
+  (assert-contains fennel-recipe "$(SPACE_RUNTIME_ENV) ./build/space -m tools.fennel-check:main -- --target repo"
+                   "fennel-check target should run the repo Fennel compile gate")
   (assert-contains makefile "test: constraints"
                    "make test should depend on constraints")
-  (assert-contains recipe "constraints: build"
-                   "Makefile should declare a constraints target")
-  (assert-contains recipe "SPACE_DISABLE_AUDIO=1"
-                   "constraints command should disable audio")
-  (assert-contains recipe "SPACE_ASSETS_PATH=$(shell pwd)/assets"
-                   "constraints command should use absolute SPACE_ASSETS_PATH")
-  (assert-contains recipe "FENNEL_PATH=$(shell pwd)/assets/lua/?.fnl\\;$(shell pwd)/assets/lua/?/init.fnl"
-                   "constraints command should configure FENNEL_PATH")
-  (assert-contains recipe "FENNEL_MACRO_PATH=$(shell pwd)/assets/lua/?.fnl\\;$(shell pwd)/assets/lua/?/init.fnl"
-                   "constraints command should configure FENNEL_MACRO_PATH")
-  (assert-contains recipe "./build/space -m constraints.runner:main -- --target repo"
+  (assert-contains recipe "constraints: fennel-check"
+                   "constraints should depend on the Fennel compile gate")
+  (assert-contains recipe "$(SPACE_RUNTIME_ENV) ./build/space -m constraints.runner:main -- --target repo"
                    "constraints target should run the repo constraints command"))
 
 (fn ctest-block-has-fixture? [cmake test-name]
