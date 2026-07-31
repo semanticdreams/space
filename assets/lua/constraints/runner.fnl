@@ -154,8 +154,9 @@
              :counts counts
              :diagnostics filtered-diagnostics}))
         ;; No baseline data — compute status from unfiltered diagnostics
-        (let [final-status (compute-status all-diagnostics)
-              counts (Diagnostics.summary final-status all-diagnostics)]
+        (do
+          (local final-status (compute-status all-diagnostics))
+          (local counts (Diagnostics.summary final-status all-diagnostics))
           {:status final-status
            :counts counts
            :diagnostics all-diagnostics}))))
@@ -189,12 +190,15 @@
   (local all-rules (RuleRegistry.all-rules))
   (local target-suites (or target.suites []))
   (local applicable-rules [])
+  (local registered-rule-ids [])
   (each [_ rule (ipairs all-rules)]
     (let [rule-targets (or rule.targets [:repo :unit :app :files])
-          rule-family (or rule.family "")]
+          rule-family (or rule.family "")
+          rule-id (or rule.id rule.constraint-id "unknown-rule")]
+      (table.insert registered-rule-ids rule-id)
       (when (and (table-contains? rule-targets target.kind)
-                 (or (= (length target-suites) 0)
-                     (table-contains? target-suites rule-family)))
+                  (or (= (length target-suites) 0)
+                      (table-contains? target-suites rule-family)))
         (table.insert applicable-rules rule))))
   ;; 4. Execute each applicable rule with fact context
   (local all-diagnostics [])
@@ -223,7 +227,7 @@
     (if baseline-data
         (let [baseline-result (Baseline.apply all-diagnostics
                                               baseline-data
-                                              present-rule-ids)
+                                               registered-rule-ids)
               filtered-diagnostics baseline-result.diagnostics]
           ;; Append baseline diagnostics (worsened, stale, missing-required)
           (each [_ bd (ipairs baseline-result.baseline-diagnostics)]
@@ -252,25 +256,27 @@
   (local arg (or opts-or-argv {}))
   (if (and (= (type arg) :table) (. arg :rules))
       ;; Old interface: {:rules [] :target ... :print fn :exit fn :baseline-data tbl}
-      (let [o arg
-            print-fn (or o.print print)
-            exit-fn (or o.exit os.exit)
-            rules (or o.rules [])
-            target (or o.target {:kind :repo :name "default"})
-            result (M.run {:rules rules
-                           :target target
-                           :baseline-data o.baseline-data})]
+      (do
+        (local o arg)
+        (local print-fn (or o.print print))
+        (local exit-fn (or o.exit os.exit))
+        (local rules (or o.rules []))
+        (local target (or o.target {:kind :repo :name "default"}))
+        (local result (M.run {:rules rules
+                              :target target
+                              :baseline-data o.baseline-data}))
         (print-fn (json.dumps result))
         (if (= result.status :pass)
             (exit-fn 0)
             (exit-fn 1)))
       ;; New interface: argv (sequential table) or nil → full pipeline
-      (let [argv (if (= (type arg) :table) arg [])
-            target (Targets.resolve argv {})
-            ;; Check if old-style injected print/exit are present
-            print-fn (or (. arg :print) print)
-            exit-fn (or (. arg :exit) os.exit)
-            result (M.run-target target {})]
+      (do
+        (local argv (if (= (type arg) :table) arg []))
+        (local target (Targets.resolve argv {}))
+        ;; Check if old-style injected print/exit are present
+        (local print-fn (or (. arg :print) print))
+        (local exit-fn (or (. arg :exit) os.exit))
+        (local result (M.run-target target {}))
         (print-fn (json.dumps result))
         (if (= result.status :pass)
             (exit-fn 0)

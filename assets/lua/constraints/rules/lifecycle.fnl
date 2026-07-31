@@ -260,7 +260,7 @@
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []
-  [{:id "lifecycle.event-registration-cleanup" :family "lifecycle" :targets [:repo] :kind :static :run event-registration-cleanup-rule-run :fn event-registration-cleanup-rule-run}
-   {:id "lifecycle.required-runtime-fails-loudly" :family "lifecycle" :targets [:repo] :kind :static :run required-runtime-fails-loudly-rule-run :fn required-runtime-fails-loudly-rule-run}])
+  [{:id "lifecycle.event-registration-cleanup" :family "lifecycle" :targets [:repo :unit :app :files] :kind :static :run event-registration-cleanup-rule-run :fn event-registration-cleanup-rule-run}
+   {:id "lifecycle.required-runtime-fails-loudly" :family "lifecycle" :targets [:repo :unit :app :files] :kind :static :run required-runtime-fails-loudly-rule-run :fn required-runtime-fails-loudly-rule-run}])
 
 M

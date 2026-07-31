@@ -224,15 +224,15 @@
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []
-  [{:id "structure.max-nesting-depth" :family "structure-formatting" :targets [:repo] :kind :static
+  [{:id "structure.max-nesting-depth" :family "structure-formatting" :targets [:repo :unit :app :files] :kind :static
     :run max-nesting-depth-rule-run :fn max-nesting-depth-rule-run}
-   {:id "structure.max-function-length" :family "structure-formatting" :targets [:repo] :kind :static
+   {:id "structure.max-function-length" :family "structure-formatting" :targets [:repo :unit :app :files] :kind :static
     :run max-function-length-rule-run :fn max-function-length-rule-run}
-   {:id "structure.max-module-length" :family "structure-formatting" :targets [:repo] :kind :static
+   {:id "structure.max-module-length" :family "structure-formatting" :targets [:repo :unit :app :files] :kind :static
     :run max-module-length-rule-run :fn max-module-length-rule-run}
-   {:id "structure.large-inline-structure" :family "structure-formatting" :targets [:repo] :kind :static
+   {:id "structure.large-inline-structure" :family "structure-formatting" :targets [:repo :unit :app :files] :kind :static
     :run large-inline-structure-rule-run :fn large-inline-structure-rule-run}
-   {:id "structure.style-doctrine" :family "structure-formatting" :targets [:repo] :kind :static
+   {:id "structure.style-doctrine" :family "structure-formatting" :targets [:repo :unit :app :files] :kind :static
     :run style-doctrine-rule-run :fn style-doctrine-rule-run}])
 
 M

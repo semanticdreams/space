@@ -441,19 +441,19 @@
   "Return the list of scene-sandbox rules."
   [{:id "scene.no-legacy-world-state-scene"
     :family "scene-sandbox"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run legacy-world-state-rule-run
     :fn legacy-world-state-rule-run}
    {:id "scene.activity-slot-ownership"
     :family "scene-sandbox"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run activity-slot-ownership-rule-run
     :fn activity-slot-ownership-rule-run}
    {:id "scene.sandbox-activation-contract"
     :family "scene-sandbox"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run sandbox-activation-contract-rule-run
     :fn sandbox-activation-contract-rule-run}

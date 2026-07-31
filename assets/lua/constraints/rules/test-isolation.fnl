@@ -1193,6 +1193,6 @@
               (emit-mutation-diagnostic diagnostics diagnosed key ff path-text max-line fn-name)))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 (fn M.rules []
-  [{:id "lifecycle.global-mutation-restoration" :family "test-isolation" :targets [:repo] :kind :static :run global-mutation-restoration-rule-run :fn global-mutation-restoration-rule-run}])
+  [{:id "lifecycle.global-mutation-restoration" :family "test-isolation" :targets [:repo :unit :app :files] :kind :static :run global-mutation-restoration-rule-run :fn global-mutation-restoration-rule-run}])
 
 M

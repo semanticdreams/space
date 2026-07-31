@@ -108,6 +108,20 @@
   (local (ok err) (pcall #(Targets.resolve ["--target" "unit"] {})))
   (assert (not ok) "should fail when unit target has no --root"))
 
+(fn targets-resolve-refuses-unknown-flag []
+  (local Targets (require :constraints.targets))
+  (local (ok err) (pcall #(Targets.resolve ["--traget" "files" "--file" "/tmp/bad.fnl"] {})))
+  (assert (not ok) "should fail for an unrecognized flag")
+  (assert (string.find (tostring err) "unrecognized flag" 1 true)
+          (.. "error should mention unrecognized flag, got: " (tostring err))))
+
+(fn targets-resolve-refuses-stray-positional []
+  (local Targets (require :constraints.targets))
+  (local (ok err) (pcall #(Targets.resolve ["--target" "files" "stray" "--file" "/tmp/bad.fnl"] {})))
+  (assert (not ok) "should fail for a stray positional argument")
+  (assert (string.find (tostring err) "unexpected positional argument" 1 true)
+          (.. "error should mention positional argument, got: " (tostring err))))
+
 ;; --- Source discovery tests ---
 
 (fn source-discovers-fnl-files-recursively []
@@ -193,8 +207,10 @@
     (local r (. records 1))
     (local loc (Source.node-location r.root))
     (assert loc "node-location should return a table")
-    (assert (>= (. loc :line) 0) "line should be a number >= 0")
-    (assert (>= (. loc :column) 0) "column should be a number >= 0"))))
+    (assert (= (. loc :line) 1)
+            (.. "root should start on one-based line 1, got " (tostring (. loc :line))))
+    (assert (= (. loc :column) 1)
+            (.. "root should start on one-based column 1, got " (tostring (. loc :column)))))))
 
 (fn source-walk-visits-all-nodes-depth-first []
   (with-temp-dir (fn [dir]
@@ -370,7 +386,11 @@
 (table.insert tests {:name "targets resolve refuses missing target value"
                      :fn targets-resolve-refuses-missing-target-value})
 (table.insert tests {:name "targets resolve refuses missing root for unit"
-                     :fn targets-resolve-refuses-missing-root-for-unit})
+                      :fn targets-resolve-refuses-missing-root-for-unit})
+(table.insert tests {:name "targets resolve refuses unknown flag"
+                      :fn targets-resolve-refuses-unknown-flag})
+(table.insert tests {:name "targets resolve refuses stray positional"
+                      :fn targets-resolve-refuses-stray-positional})
 (table.insert tests {:name "source discovers fnl files recursively"
                      :fn source-discovers-fnl-files-recursively})
 (table.insert tests {:name "source excludes non-fennel files"

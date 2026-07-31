@@ -2,6 +2,69 @@
 
 (local tests [])
 
+(local fs (require :fs))
+
+(var temp-counter 0)
+(local temp-root (fs.join-path "/tmp/opencode" "constraints-default-run-test"))
+
+(fn temp-dir-name []
+  (set temp-counter (+ temp-counter 1))
+  (fs.join-path temp-root (.. "test-" (os.time) "-" temp-counter)))
+
+(fn with-temp-dir [f]
+  (local dir (temp-dir-name))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (fs.create-dirs dir)
+  (local (ok result) (pcall f dir))
+  (fs.remove-all dir)
+  (if ok result (error result)))
+
+(fn write-fixture [dir]
+  (local path (fs.join-path dir "bad-style.fnl"))
+  (fs.write-file path "(let [x 1]\n  x)\n")
+  path)
+
+(fn missing-required? [diagnostic]
+  (assert diagnostic "diagnostic is required")
+  (or diagnostic.missing-required
+      (and diagnostic.constraint-id
+           (= diagnostic.family "baseline")
+           (string.find diagnostic.message "required constraint missing" 1 true))))
+
+(fn has-constraint-id? [diagnostics id]
+  (var found false)
+  (each [_ d (ipairs diagnostics)]
+    (when (= d.constraint-id id)
+      (set found true)))
+  found)
+
+(fn assert-non-repo-target-runs-static-rules-with-default-baseline [kind]
+  (assert kind "target kind is required")
+  (local Runner (require :constraints.runner))
+  (with-temp-dir (fn [dir]
+    (local file-path (write-fixture dir))
+    (local target (if (= kind :files)
+                    {:kind :files
+                     :name "files-fixture"
+                     :roots []
+                     :files [file-path]
+                     :module-roots []
+                     :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]}
+                    {:kind kind
+                     :name (.. (tostring kind) "-fixture")
+                     :roots [dir]
+                     :files []
+                     :module-roots [dir]
+                     :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]}))
+    (local result (Runner.run-target target {}))
+    (each [_ d (ipairs result.diagnostics)]
+      (assert (not (missing-required? d))
+              (.. "non-repo target should not emit baseline.required-rule-missing; got "
+                  (or d.constraint-id "nil") " " (or d.message ""))))
+    (assert (has-constraint-id? result.diagnostics "structure.style-doctrine")
+            (.. (tostring kind) " target should execute static structure rules")))))
+
 ;; --- RuleRegistry tests ---
 
 (fn rule-registry-all-rules-returns-all-required-ids []
@@ -15,8 +78,8 @@
   ;; Collect all rule IDs from the registry
   (local registry-ids {})
   (each [_ rule (ipairs rules)]
-    (let [id (or rule.id rule.constraint-id "unknown")]
-      (tset registry-ids id true)))
+    (local id (or rule.id rule.constraint-id "unknown"))
+    (tset registry-ids id true))
 
   ;; Verify every required rule ID is present
   (each [_ required-id (ipairs BaselineData.required-rule-ids)]
@@ -29,10 +92,10 @@
   (var last-family nil)
   (local family-order [])
   (each [_ rule (ipairs rules)]
-    (let [fam (or rule.family "")]
-      (when (or (= (# family-order) 0)
-                (not= fam (. family-order (# family-order))))
-        (table.insert family-order fam))))
+    (local fam (or rule.family ""))
+    (when (or (= (# family-order) 0)
+              (not= fam (. family-order (# family-order))))
+      (table.insert family-order fam)))
   (assert (>= (# family-order) 5) "expected at least 5 families")
   (assert (or (= (. family-order 1) "scene-sandbox")
               (string.find (. family-order 1) "scene" 1 true))
@@ -54,8 +117,8 @@
     (assert rule.fn (.. "rule missing fn: " (or rule.id "nil")))
     ;; Verify target is a known target kind
     (each [_ tgt (ipairs rule.targets)]
-      (let [allowed {:repo true :unit true :app true :files true}]
-        (assert (. allowed tgt) (.. "unknown target kind: " (tostring tgt)))))))
+      (local allowed {:repo true :unit true :app true :files true})
+      (assert (. allowed tgt) (.. "unknown target kind: " (tostring tgt))))))
 
 ;; --- Runner.run-target tests ---
 
@@ -125,8 +188,23 @@
               (= result.status :violations)
               (= result.status :fail)
               (= result.status :interrupted))
-          (.. "status should be one of :pass, :violations, :fail, :interrupted, got "
-              (tostring result.status))))
+           (.. "status should be one of :pass, :violations, :fail, :interrupted, got "
+               (tostring result.status))))
+
+(fn runner-run-target-files-default-baseline-runs-static-rules []
+  "Files targets should run applicable static rules under the default baseline
+  and should not fail with baseline.required-rule-missing false positives."
+  (assert-non-repo-target-runs-static-rules-with-default-baseline :files))
+
+(fn runner-run-target-unit-default-baseline-runs-static-rules []
+  "Unit targets should run applicable static rules under the default baseline
+  and should not fail with baseline.required-rule-missing false positives."
+  (assert-non-repo-target-runs-static-rules-with-default-baseline :unit))
+
+(fn runner-run-target-app-default-baseline-runs-static-rules []
+  "App targets should run applicable static rules under the default baseline
+  and should not fail with baseline.required-rule-missing false positives."
+  (assert-non-repo-target-runs-static-rules-with-default-baseline :app))
 
 (fn runner-run-target-with-repo-target-runs-full-pipeline []
   "Prove that run-target with a repo target discovers files, extracts facts,
@@ -196,8 +274,8 @@
   (local all-rules (RuleRegistry.all-rules))
   (local registry-ids {})
   (each [_ rule (ipairs all-rules)]
-    (let [id (or rule.id rule.constraint-id "unknown")]
-      (tset registry-ids id true)))
+    (local id (or rule.id rule.constraint-id "unknown"))
+    (tset registry-ids id true))
   ;; Run the full pipeline with default baseline
   (local result (Runner.run-target target {}))
   (assert (= (type result) "table") "run-target should return a table")
@@ -247,9 +325,15 @@
 (table.insert tests {:name "runner run-target diagnostics include target metadata"
                      :fn runner-run-target-diagnostics-include-target-metadata})
 (table.insert tests {:name "runner run-target explicit files target works"
-                     :fn runner-run-target-explicit-files-target-works})
+                      :fn runner-run-target-explicit-files-target-works})
+(table.insert tests {:name "runner run-target files default baseline runs static rules"
+                      :fn runner-run-target-files-default-baseline-runs-static-rules})
+(table.insert tests {:name "runner run-target unit default baseline runs static rules"
+                      :fn runner-run-target-unit-default-baseline-runs-static-rules})
+(table.insert tests {:name "runner run-target app default baseline runs static rules"
+                      :fn runner-run-target-app-default-baseline-runs-static-rules})
 (table.insert tests {:name "runner run-target with repo target runs full pipeline"
-                     :fn runner-run-target-with-repo-target-runs-full-pipeline})
+                      :fn runner-run-target-with-repo-target-runs-full-pipeline})
 (table.insert tests {:name "default target suites match rule families"
                      :fn default-target-suites-match-rule-families})
 (table.insert tests {:name "default target runs all required rules"

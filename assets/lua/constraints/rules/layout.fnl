@@ -1138,19 +1138,19 @@
   "Return the list of layout-rendering rules."
   [{:id "layout.no-setters-in-layouters"
     :family "layout-rendering"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run no-setters-in-layouters-rule-run
     :fn no-setters-in-layouters-rule-run}
    {:id "layout.owned-child-drop"
     :family "layout-rendering"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run owned-child-drop-rule-run
     :fn owned-child-drop-rule-run}
    {:id "layout.interactive-context-assertion"
     :family "layout-rendering"
-    :targets [:repo]
+    :targets [:repo :unit :app :files]
     :kind :static
     :run interactive-context-assertion-rule-run
     :fn interactive-context-assertion-rule-run}])

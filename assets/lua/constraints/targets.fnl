@@ -39,23 +39,27 @@
       (if (= arg "--target")
           (do
             (set i (+ i 1))
-            (if (or (> i (# argv)) (= "" (. argv i)))
+            (if (or (> i (# argv)) (= "" (. argv i))
+                    (and (. argv i) (string.match (. argv i) "^%-%-")))
                 (set error "missing value for --target")
                 (set target (. argv i))))
           (= arg "--root")
           (do
             (set i (+ i 1))
-            (if (or (> i (# argv)) (= "" (. argv i)))
+            (if (or (> i (# argv)) (= "" (. argv i))
+                    (and (. argv i) (string.match (. argv i) "^%-%-")))
                 (set error "missing value for --root")
                 (table.insert roots (fs.absolute (. argv i)))))
           (= arg "--file")
           (do
             (set i (+ i 1))
-            (if (or (> i (# argv)) (= "" (. argv i)))
+            (if (or (> i (# argv)) (= "" (. argv i))
+                    (and (. argv i) (string.match (. argv i) "^%-%-")))
                 (set error "missing value for --file")
                 (table.insert files (fs.absolute (. argv i)))))
-          ;; else unknown flag, skip
-          ))
+          (and (= (type arg) :string) (arg:match "^%-%-"))
+          (set error (.. "unrecognized flag: " arg))
+          (set error (.. "unexpected positional argument: " (tostring arg)))))
     (set i (+ i 1)))
   {:target target
    :roots roots
@@ -78,37 +82,39 @@
            :files [absolute-path-string ...]
            :module-roots [absolute-path-string ...]
            :suites [:scene-sandbox :lifecycle :layout :structure]}"
-  (let [parsed (parse-argv (or argv []))]
-    (when parsed.error
-      (error parsed.error))
-    (let [target (. parsed :target)]
-      ;; Validate target
-      (when (and target (not (. supported-targets target)))
-        (error (.. "unsupported target: " target)))
-      ;; Default to repo
-      (let [kind (or target :repo)]
-        (if (= kind :files)
-            ;; Files target
-            (let [file-list (or parsed.files [])]
-              (when (= (# file-list) 0)
-                (error "files target requires at least one --file"))
-              {:kind :files
-               :name "files"
-               :roots (or parsed.roots [])
-               :files file-list
-               :module-roots []
-               :suites (default-suites)})
-            ;; repo, unit, app
-            (let [root-list (if (= (# parsed.roots) 0)
-                               (if (= kind :repo)
-                                   [(assets-lua-dir)]
-                                   (error (.. kind " target requires at least one --root")))
-                               parsed.roots)]
-              {:kind kind
-               :name (if (= kind :repo) "repo" (base-name (. root-list 1)))
-               :roots root-list
-               :files []
-               :module-roots root-list
-               :suites (default-suites)}))))))
+  (local parsed (parse-argv (or argv [])))
+  (when parsed.error
+    (error parsed.error))
+  (local target (. parsed :target))
+  ;; Validate target
+  (when (and target (not (. supported-targets target)))
+    (error (.. "unsupported target: " target)))
+  ;; Default to repo
+  (local kind (or target :repo))
+  (if (= kind :files)
+      ;; Files target
+      (do
+        (local file-list (or parsed.files []))
+        (when (= (# file-list) 0)
+          (error "files target requires at least one --file"))
+        {:kind :files
+         :name "files"
+         :roots (or parsed.roots [])
+         :files file-list
+         :module-roots []
+         :suites (default-suites)})
+      ;; repo, unit, app
+      (do
+        (local root-list (if (= (# parsed.roots) 0)
+                           (if (= kind :repo)
+                               [(assets-lua-dir)]
+                               (error (.. kind " target requires at least one --root")))
+                           parsed.roots))
+        {:kind kind
+         :name (if (= kind :repo) "repo" (base-name (. root-list 1)))
+         :roots root-list
+         :files []
+         :module-roots root-list
+         :suites (default-suites)})))
 
 M

@@ -79,8 +79,8 @@
   "Return {:line integer :column integer} for the start of node.
   Maps tree-sitter's row/column to Fennel/Lua line/column convention."
   (let [pt (node:start-point)]
-    {:line pt.row
-     :column pt.column}))
+    {:line (+ pt.row 1)
+     :column (+ pt.column 1)}))
 
 (fn M.walk [node f]
   "Call f on every node in a depth-first traversal."
