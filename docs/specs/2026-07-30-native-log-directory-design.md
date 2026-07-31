@@ -78,7 +78,7 @@ logger as a parse side effect.
 
 In `apps/space/main.cpp`, resolve and validate the log path before the first
 `log_init(LOG_CONFIG)`. On failure, print `error: failed to initialize logging:
-<details>` to stderr and exit non-zero. This keeps the no-silent-failures rule
+&lt;details&gt;` to stderr and exit non-zero. This keeps the no-silent-failures rule
 and prevents the runtime from silently falling back to CWD logs.
 
 Update `assets/lua/main.fnl` so normal app startup preserves the native-selected
