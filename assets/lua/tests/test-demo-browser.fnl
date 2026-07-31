@@ -325,7 +325,8 @@
     (set app.camera original-camera)
     (set app.hud original-hud)
     (set app.create-default-projection original-create-default-projection)
-    (PhysicsContainment.clear)
+    (when test-containment-manager
+      (test-containment-manager:clear))
     (set app.physics-containment-config original-containment-config)
     (when (and app.lights app.lights.set-state original-light-state)
       (app.lights:set-state original-light-state)))
