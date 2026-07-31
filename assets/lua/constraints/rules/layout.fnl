@@ -289,26 +289,27 @@
 
 (fn child-collection-path? [path]
   "Return true when path denotes one of the retained child collections."
-  (let [p (or path [])
-        plen (length p)]
-    (and (>= plen 2) (. child-creation-access-keys (. p plen)))))
+  (local p (if (= path nil) [] path))
+  (local plen (length p))
+  (and (>= plen 2) (. child-creation-access-keys (. p plen))))
 
 (fn same-path? [a b]
   "Exact path equality for child collection correlation."
-  (let [pa (or a [])
-        pb (or b [])]
-    (if (not= (length pa) (length pb))
-        false
-        (do
-          (var equal true)
-          (for [i 1 (length pa)]
-            (when (not= (. pa i) (. pb i))
-              (set equal false)))
-          equal))))
+  (local pa (if (= a nil) [] a))
+  (local pb (if (= b nil) [] b))
+  (if (not= (length pa) (length pb))
+      false
+      (do
+        (var equal true)
+        (for [i 1 (length pa)]
+          (when (not= (. pa i) (. pb i))
+            (set equal false)))
+        equal)))
 
 (fn path->dotted [path]
   "Render a fact path as dotted text for safe call-form correlation."
-  (table.concat (or path []) "."))
+  (local p (if (= path nil) [] path))
+  (table.concat p "."))
 
 (fn table-insert-mutates-path? [call path]
   "Detect supported collection mutation call evidence for table.insert.
@@ -323,12 +324,14 @@
 (fn has-child-collection-mutation? [ff path]
   "Return true when set/tset facts or supported call facts mutate path."
   (var found false)
-  (each [_ mut (ipairs (or ff.mutations []))]
+  (local mutations (if (= ff.mutations nil) [] ff.mutations))
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (each [_ mut (ipairs mutations)]
     (when (and (not found)
                (if (= mut.op :set) true (= mut.op :tset) true false)
                (same-path? mut.path path))
       (set found true)))
-  (each [_ call (ipairs (or ff.calls []))]
+  (each [_ call (ipairs calls)]
     (when (and (not found) (table-insert-mutates-path? call path))
       (set found true)))
   found)
@@ -342,14 +345,17 @@
 (fn has-direct-child-collection-mutation? [ff]
   "Direct writes/mutations to child collections are retained child evidence."
   (var found false)
-  (each [_ mut (ipairs (or ff.mutations []))]
+  (local mutations (if (= ff.mutations nil) [] ff.mutations))
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (local accesses (if (= ff.accesses nil) [] ff.accesses))
+  (each [_ mut (ipairs mutations)]
     (when (and (not found)
                (if (= mut.op :set) true (= mut.op :tset) true false)
                (child-collection-path? mut.path))
       (set found true)))
-  (each [_ call (ipairs (or ff.calls []))]
+  (each [_ call (ipairs calls)]
     (when (and (not found) (= call.callee "table.insert"))
-      (each [_ access (ipairs (or ff.accesses []))]
+      (each [_ access (ipairs accesses)]
         (when (and (not found) (access-has-correlated-child-mutation? ff access))
           (set found true)))))
   found)
@@ -361,10 +367,12 @@
 (fn has-child-creation-evidence? [ff]
   "Check if a file-fact has evidence of retained child creation."
   (var found false)
-  (each [_ call (ipairs (or ff.calls []))]
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (local accesses (if (= ff.accesses nil) [] ff.accesses))
+  (each [_ call (ipairs calls)]
     (when (. child-creation-callees call.callee)
       (set found true)))
-  (each [_ access (ipairs (or ff.accesses []))]
+  (each [_ access (ipairs accesses)]
     (when (not found)
       (when (access-has-correlated-child-mutation? ff access)
         (set found true))))
@@ -431,77 +439,107 @@
       (set found true)))
   found)
 
+(fn all-child-creating-defs-have-returned-drop? [ff all-defs]
+  "Every child-creating definition must provide an inline returned :drop."
+  (var covered true)
+  (each [_ def (ipairs all-defs)]
+    (when (and covered
+               (def-contains-child-creation-call? ff def)
+               (not (def-has-returned-drop? ff def)))
+      (set covered false)))
+  covered)
+
+(fn no-file-level-child-constructor? [ff]
+  "File-level Layout/LayoutRoot constructor evidence is not covered by returned :drop."
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (var covered true)
+  (each [_ call (ipairs calls)]
+    (when (and covered
+               (. child-creation-callees call.callee)
+               (= call.enclosing-fn nil))
+      (set covered false)))
+  covered)
+
+(fn child-evidence-covered-by-returned-drop? [ff all-defs evidence]
+  "Access or mutation evidence is covered only when a returned :drop def contains it."
+  (var covered false)
+  (each [_ def (ipairs all-defs)]
+    (when (and (not covered) (def-covers-access? ff def evidence))
+      (set covered true)))
+  covered)
+
+(fn all-mutated-child-accesses-covered? [ff all-defs]
+  "Access-path child evidence must be mutation-correlated and locally covered."
+  (local accesses (if (= ff.accesses nil) [] ff.accesses))
+  (var covered true)
+  (each [_ access (ipairs accesses)]
+    (when (and covered (access-has-correlated-child-mutation? ff access))
+      (when (not (child-evidence-covered-by-returned-drop? ff all-defs access))
+        (set covered false))))
+  covered)
+
+(fn all-direct-child-mutations-covered? [ff all-defs]
+  "Direct child collection mutation facts must be locally covered."
+  (local mutations (if (= ff.mutations nil) [] ff.mutations))
+  (var covered true)
+  (each [_ mut (ipairs mutations)]
+    (when (and covered (child-collection-path? mut.path))
+      (when (not (child-evidence-covered-by-returned-drop? ff all-defs mut))
+        (set covered false))))
+  covered)
+
+(fn no-table-insert-child-mutations? [ff]
+  "table.insert child mutations are creation evidence but not returned-drop-covered."
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (local accesses (if (= ff.accesses nil) [] ff.accesses))
+  (var covered true)
+  (each [_ call (ipairs calls)]
+    (when (and covered (= call.callee "table.insert"))
+      (each [_ access (ipairs accesses)]
+        (when (and covered (table-insert-mutates-path? call access.path))
+          (set covered false)))))
+  covered)
+
+(fn all-owned-child-evidence-covered? [ff all-defs]
+  "Return true when all child creation evidence has an accepted public drop path."
+  (and (all-child-creating-defs-have-returned-drop? ff all-defs)
+       (no-file-level-child-constructor? ff)
+       (all-mutated-child-accesses-covered? ff all-defs)
+       (all-direct-child-mutations-covered? ff all-defs)
+       (no-table-insert-child-mutations? ff)))
+
 (fn owned-child-drop-rule-run [ctx]
   "Rule: flag modules creating retained children without a public
   drop path AND child cleanup evidence."
   (var diagnostics [])
-  (each [_ ff (ipairs (or (. ctx.facts :files) []))]
+  (local files (if (= (. ctx.facts :files) nil) [] (. ctx.facts :files)))
+  (each [_ ff (ipairs files)]
     (when (has-child-creation-evidence? ff)
-      (let [has-global-drop (has-global-drop-path? ff)
-            has-cleanup (has-child-cleanup-evidence? ff)
-            all-defs (or ff.definitions [])]
-        ;; Track whether all child-creating defs have a drop path
-        (var all-covered has-global-drop)
-        (when (not has-global-drop)
-          (set all-covered true)
-          (each [_ def (ipairs all-defs)]
-            (when (and all-covered
-                        (def-contains-child-creation-call? ff def)
-                       (not (def-has-returned-drop? ff def)))
-              (set all-covered false)))
-          ;; Also check file-level creation (nil enclosing-fn) and access-based
-          (when all-covered
-            (each [_ call (ipairs (or ff.calls []))]
-              (when (and all-covered
-                         (. child-creation-callees call.callee)
-                         (= call.enclosing-fn nil))
-                (set all-covered false))))
-          (when all-covered
-            (each [_ access (ipairs (or ff.accesses []))]
-              (when all-covered
-                (local retained-access? (access-has-correlated-child-mutation? ff access))
-                (when retained-access?
-                  (var covered false)
-                  (each [_ def (ipairs all-defs)]
-                    (when (and (not covered) (def-covers-access? ff def access))
-                      (set covered true)))
-                  (when (not covered)
-                    (set all-covered false))))))
-          (when all-covered
-            (each [_ mut (ipairs (or ff.mutations []))]
-              (when (and all-covered (child-collection-path? mut.path))
-                (var covered false)
-                (each [_ def (ipairs all-defs)]
-                  (when (and (not covered) (def-covers-access? ff def mut))
-                    (set covered true)))
-                (when (not covered)
-                  (set all-covered false)))))
-          (when all-covered
-            (each [_ call (ipairs (or ff.calls []))]
-              (when (and all-covered (= call.callee "table.insert"))
-                (each [_ access (ipairs (or ff.accesses []))]
-                  (when (and all-covered (table-insert-mutates-path? call access.path))
-                    (set all-covered false)))))))
-        (when (not all-covered)
-          (table.insert diagnostics
-            (Diagnostics.violation
-              {:constraint-id "layout.owned-child-drop"
-               :family "layout-rendering"
-               :message (.. "retained child creation without public drop path in " (or ff.module ff.path))
-               :file ff.path :line 0 :column 0
-               :evidence {:file ff.path :module (or ff.module ff.path)
-                          :missing "drop definition or returned table :drop"}
-               :hint "Define a drop function or return a table with a :drop key"})))
-        (when (not has-cleanup)
-          (table.insert diagnostics
-            (Diagnostics.violation
-              {:constraint-id "layout.owned-child-drop"
-               :family "layout-rendering"
-               :message (.. "retained child creation without cleanup evidence in " (or ff.module ff.path))
-               :file ff.path :line 0 :column 0
-               :evidence {:file ff.path :module (or ff.module ff.path)
-                          :missing "child drop evidence"}
-               :hint "Add :drop calls, clear-children, or drop-children"}))))))
+      (local has-global-drop (has-global-drop-path? ff))
+      (local has-cleanup (has-child-cleanup-evidence? ff))
+      (local all-defs (if (= ff.definitions nil) [] ff.definitions))
+      (local all-covered (if has-global-drop true (all-owned-child-evidence-covered? ff all-defs)))
+      (local module-name (if (= ff.module nil) ff.path ff.module))
+      (when (not all-covered)
+        (table.insert diagnostics
+          (Diagnostics.violation
+            {:constraint-id "layout.owned-child-drop"
+             :family "layout-rendering"
+             :message (.. "retained child creation without public drop path in " module-name)
+             :file ff.path :line 0 :column 0
+             :evidence {:file ff.path :module module-name
+                        :missing "drop definition or returned table :drop"}
+             :hint "Define a drop function or return a table with a :drop key"})))
+      (when (not has-cleanup)
+        (table.insert diagnostics
+          (Diagnostics.violation
+            {:constraint-id "layout.owned-child-drop"
+             :family "layout-rendering"
+             :message (.. "retained child creation without cleanup evidence in " module-name)
+             :file ff.path :line 0 :column 0
+             :evidence {:file ff.path :module module-name
+                        :missing "child drop evidence"}
+             :hint "Add :drop calls, clear-children, or drop-children"})))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 
