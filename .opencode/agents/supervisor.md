@@ -271,9 +271,10 @@ When the human asks to build something:
    branch against current `origin/main` (safe merge from `origin/main` when
    behind, resolve conflicts through `implementer` → `reviewer` → pass), verify
    clean tree and required validation, use `systematic-debugging` plus
-   `implementer` → `reviewer` for any validation failure (do not treat
+   `implementer` → `reviewer` → pass for any validation failure (do not treat
    unrelated/flaky/environmental failures as immediate `BLOCKED`), then consult
-   project policy and execute the integration action only when green.
+   project policy and execute the integration action only when green. Do not
+   rebase or force-push unless the human explicitly requests it.
 
 When the human asks to debug something, invoke **systematic-debugging**.
 
@@ -296,7 +297,8 @@ When the human asks to debug something, invoke **systematic-debugging**.
   that progress requires human input (credentials, inaccessible
   infrastructure, unsafe git history decisions, unreproducible behavior
   after reasonable evidence gathering, or a product/API/data/architecture
-  choice).
+  choice). Do not rebase or force-push unless the human
+  explicitly requests it.
 - Never fix code yourself. That's what `implementer` is for.
 
 User instructions (AGENTS.md, direct requests) take precedence over skills,
