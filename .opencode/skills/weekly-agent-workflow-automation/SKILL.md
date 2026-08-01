@@ -38,9 +38,11 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
 6. Choose only high-confidence improvements with sanitized evidence and clear maintenance value.
 7. Dispatch `implementer` for selected changes. For skill edits, the implementer must use `writing-skills` where practical.
 8. Dispatch `reviewer`; accepted findings go back through implementer and reviewer until the result is pass.
-9. Use `systematic-debugging` for validation failures; do not weaken valid tests or ignore noise.
-10. Inspect the final diff and confirm it contains only reviewed, expected files.
-11. Commit reviewed changes, push the automation branch, create the PR, verify branch protection and required checks, then enable auto-merge only when safe.
+9. Fetch `origin` and confirm the automation branch has accounted for current `origin/main`. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and rerun validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
+10. Run validation. Use `systematic-debugging` for validation failures. A validation failure is not an immediate `BLOCKED` condition, even when it appears unrelated, flaky, timing-dependent, or environmental. Capture the failing command, failing tests, relevant output, current branch state, and `git status --porcelain`; establish root cause or the limits of available evidence; route any repository fix through `implementer` → `reviewer` → pass; commit reviewed fixes; re-fetch `origin`; recheck current `origin/main`; and rerun validation until green or a true human-input blocker is established. Do not weaken valid tests or ignore noise.
+11. Inspect the final diff and confirm it contains only reviewed, expected files.
+12. Re-fetch `origin` and recheck current `origin/main` before push or PR creation. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree.
+13. Commit reviewed changes, push the automation branch, create the PR, verify branch protection and required checks, then enable auto-merge only when safe.
 
 ## Improvement Selection
 
@@ -84,6 +86,8 @@ SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO
 
 For Fennel-facing changes, follow `AGENTS.md`: `make fennel-check`, constraints, focused tests, then broader suite.
 
+If validation fails, follow the validation failure recovery steps in the Workflow section: invoke `systematic-debugging`, route repository fixes through `implementer` → `reviewer` → pass, commit reviewed fixes, re-fetch `origin`, recheck current `origin/main`, and rerun validation until green or a true human-input blocker is established.
+
 ## Commit, Push, and PR
 
 Commit only after implementer → reviewer → pass and validation. Push with `git push origin HEAD:refs/heads/automation/weekly-agent-workflow/YYYY-Www`. Use `gh pr create --base main --head automation/weekly-agent-workflow/YYYY-Www --fill` when authenticated.
@@ -92,7 +96,12 @@ Before auto-merge, run `gh auth status`, verify protection with `gh api repos/<o
 
 ## Fail-Closed Cases
 
-Stop with BLOCKED when the checkout is dirty, analyzer execution or redaction fails, sanitized evidence is insufficient, raw sensitive data would be needed, branch protection or required checks cannot be verified, GitHub authentication is missing for PR work, validation fails, reviewer does not pass the diff, or unexpected files appear.
+Stop with BLOCKED or HUMAN_DECISION_REQUIRED when the checkout is dirty,
+analyzer execution or redaction fails, sanitized evidence is insufficient, raw
+sensitive data would be needed, branch protection or required checks cannot be
+verified, GitHub authentication is missing for PR work, reviewer does not pass
+the diff, unexpected files appear, or validation remains red after systematic
+debugging establishes a true human-input blocker.
 
 ## Red Flags
 

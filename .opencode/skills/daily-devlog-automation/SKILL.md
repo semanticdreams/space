@@ -25,10 +25,11 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 5. If no entry is warranted, stop without edits, commits, pushes, or PRs.
 6. If an entry is warranted, dispatch `implementer` to write/update the journal entry and regenerate indexes.
 7. Dispatch `reviewer` before commit and before push.
-8. Run validation.
-9. Commit only reviewed devlog automation files.
-10. Push only the dated automation branch.
-11. Open a PR and attempt auto-merge when allowed.
+8. Fetch `origin` and confirm the automation branch has accounted for current `origin/main`. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and rerun validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
+9. Run validation.
+10. Commit only reviewed devlog automation files.
+11. Push only the dated automation branch.
+12. Open a PR and attempt auto-merge when allowed.
 
 ## Meaningful Change Filter
 
@@ -56,13 +57,35 @@ The paragraph connects concrete work to current project goals, milestones, or re
 
 Run `cd docs && npm run devlog:indices && npm run docs:build`. Inspect the final diff and require only expected journal/devlog/docs automation files.
 
+## Validation Failure Recovery
+
+If required validation fails, do not commit, push, create a PR, enable
+auto-merge, or report the automation branch as ready. Capture the failing
+command, failing tests or docs build phase, relevant output, current branch
+state, and `git status --porcelain`. Invoke `systematic-debugging` and continue
+investigating even when the failure appears unrelated, flaky,
+timing-dependent, or environmental.
+
+Any repository fix, generated-doc repair, or conflict resolution must go
+through `implementer` → `reviewer` → pass before commit. After reviewed fixes
+are committed and the tree is clean, re-fetch `origin`, recheck current
+`origin/main`, rerun validation, and continue only when validation is green.
+Report BLOCKED or HUMAN_DECISION_REQUIRED only when systematic debugging
+establishes that progress requires credentials, inaccessible infrastructure,
+unsafe git history decisions, unreproducible behavior after reasonable evidence
+gathering, or a product/API/data/architecture choice.
+
 ## Commit, Push, and PR
 
-Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, and pull-request protection are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo), `gh pr merge --auto --squash ...` when rules require squash, or `gh pr merge --auto --rebase ...` when rules require rebase. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
+Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, and pull-request protection are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo) or `gh pr merge --auto --squash ...` when rules require squash. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
 
 ## Fail-Closed Cases
 
-Stop with a clear BLOCKED summary when the checkout is dirty, credentials are missing, `gh` is unavailable, validation fails, branch protection or required status checks are unavailable or cannot be verified (via classic protection or rulesets/effective branch rules), auto-merge cannot proceed, or the diff includes unexpected files.
+Stop with a clear BLOCKED or HUMAN_DECISION_REQUIRED summary when the checkout
+is dirty, credentials are missing, `gh` is unavailable, branch protection or
+required status checks are unavailable or cannot be verified, auto-merge cannot
+proceed safely, the diff includes unexpected files, or validation remains red
+after systematic debugging establishes a true human-input blocker.
 
 ## Red Flags
 
