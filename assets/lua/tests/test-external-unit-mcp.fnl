@@ -275,8 +275,8 @@
                      :fn test-service-asserts-missing-unit-manager})
 
 (fn test-normalize-logical-path-handles-single-backslash-separators []
-  (local norm (or ExternalUnitService._normalize_logical_path
-                  (fn [p] p)))
+  (local norm ExternalUnitService._normalize_logical_path)
+  (assert norm "normalize-logical-path test helper must be exported")
   ;; Single backslash separators (Windows native paths)
   (assert (= (norm "C:\\repo\\unit\\components\\view.fnl")
              "C:/repo/unit/components/view.fnl")
