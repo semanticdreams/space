@@ -21,7 +21,7 @@
   (or (= c "/") (= c "\\")))
 
 (fn normalize-logical-path [path]
-  (select 1 (string.gsub (or path "") "\\\\" "/")))
+  (select 1 (string.gsub (or path "") "\\" "/")))
 
 (fn path-basename [path]
   (local normalized (normalize-logical-path path))
@@ -663,4 +663,5 @@
 
   self)
 
-{:ExternalUnitService ExternalUnitService}
+{:ExternalUnitService ExternalUnitService
+ :_normalize_logical_path normalize-logical-path}

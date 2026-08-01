@@ -274,6 +274,27 @@
 (table.insert tests {:name "external-unit-mcp: asserts missing unit-manager"
                      :fn test-service-asserts-missing-unit-manager})
 
+(fn test-normalize-logical-path-handles-single-backslash-separators []
+  (local norm (or ExternalUnitService._normalize_logical_path
+                  (fn [p] p)))
+  ;; Single backslash separators (Windows native paths)
+  (assert (= (norm "C:\\repo\\unit\\components\\view.fnl")
+             "C:/repo/unit/components/view.fnl")
+          "should convert single backslashes to forward slashes")
+  ;; Mixed separators
+  (assert (= (norm "C:\\repo\\unit/components/view.fnl")
+             "C:/repo/unit/components/view.fnl")
+          "should normalize mixed separators")
+  ;; Already normalized path is unchanged
+  (assert (= (norm "components/view.fnl") "components/view.fnl")
+          "already-normalized path should be unchanged")
+  ;; Empty/nil
+  (assert (= (norm "") "") "empty string should return empty")
+  (assert (= (norm nil) "") "nil should return empty"))
+
+(table.insert tests {:name "external-unit-mcp: normalize-logical-path handles single backslash separators"
+                     :fn test-normalize-logical-path-handles-single-backslash-separators})
+
 (fn test-list-returns-deterministic-ordering []
   (with-temp-dir
     (fn [dir]
