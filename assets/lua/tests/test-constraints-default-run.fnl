@@ -3,6 +3,10 @@
 (local tests [])
 
 (local fs (require :fs))
+(fn asset-lua-root []
+  (local env (os.getenv "SPACE_ASSETS_PATH"))
+  (local assets-path (if env env (. (require :runtime) :assets-path) "assets"))
+  (fs.join-path assets-path "lua"))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/opencode" "constraints-default-run-test"))
@@ -163,9 +167,8 @@
 (fn runner-run-target-returns-structured-result []
   "Prove run-target returns a proper result with status, counts, and diagnostics."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
   ;; Build a files target pointing to the minimal test fixture
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "constraint-fixture"
                  :roots []
@@ -187,9 +190,8 @@
 (fn runner-run-target-diagnostics-include-target-metadata []
   "Prove that every diagnostic from run-target includes target.kind and target.name."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
   ;; Use a minimal files target — any diagnostics produced must carry target metadata
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "metadata-test-target"
                  :roots []
@@ -210,8 +212,7 @@
 (fn runner-run-target-explicit-files-target-works []
   "Prove that a non-repo files target can run through the same pipeline."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "explicit-files-test"
                  :roots []
@@ -286,8 +287,7 @@
   "Prove that run-target with a repo target discovers files, extracts facts,
   runs rules, and applies baseline — returns a structured, non-empty result."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
-  (local lua-dir (fs.absolute "assets/lua"))
+  (local lua-dir (fs.absolute (asset-lua-root)))
   (local target {:kind :repo
                  :name "repo"
                  :roots [lua-dir]

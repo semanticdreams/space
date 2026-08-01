@@ -4,8 +4,8 @@
 (local make-file-fact H.make-file-fact)
 (local make-ctx H.make-ctx)
 (local find-rule-by-id H.find-rule-by-id)
+(local fs (require :fs)) (local env (os.getenv "SPACE_ASSETS_PATH")) (local lua-root (fs.join-path (if env env (. (require :runtime) :assets-path) "assets") "lua"))
 (local tests [])
-
 ;; ==== precision fix V12: scope-safe closure-helper bypass ====
 
 (fn interactive-assertion-allows-button-clickables-pattern []
@@ -855,8 +855,7 @@
 ;; Asserts ButtonWidget and all four helpers have correct ownership/spans,
 ;; then asserts no helper diagnostics.
 (fn interactive-assertion-allows-production-buttonwidget []
-  (local fs (require :fs))
-  (local bw-path (fs.absolute "assets/lua/next-app/button-widget.fnl"))
+  (local bw-path (fs.absolute (fs.join-path lua-root "next-app" "button-widget.fnl")))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
   (local target {:kind :unit
