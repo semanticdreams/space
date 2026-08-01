@@ -176,18 +176,29 @@ changes you didn't route through review, unstage them and route them properly.
 
 After the implementer→reviewer→fix-loop passes, do not report completion yet.
 Commit all reviewed changes, then verify the worktree is clean (`git status`
-shows nothing to commit, nothing staged). Before reporting completion or
-ready-to-merge, you must also complete any verification or finishing checks
-required by the active skill or plan (e.g., running tests, validating with
-finishing-a-development-branch). Only report completion / ready-to-merge
-when the tree is clean, changes are committed, and all required checks have
-passed. If required validation fails, do not report completion and do not stop
-at the failure summary. Invoke `systematic-debugging`, identify the root cause,
-route any fix through `implementer` → `reviewer` → pass, commit reviewed fixes,
-rerun the failed validation, and restart finishing checks from the top. Report
-BLOCKED only when systematic debugging establishes that the failure cannot be
-resolved without human input, is external/environmental, is unreproducible with
-available evidence, or requires a product/API/data/architecture decision.
+shows nothing to commit, nothing staged).
+
+Before reporting completion, ready-to-merge, or ready-to-PR, fetch `origin` and
+verify that the branch has been evaluated against current `origin/main`. If the
+branch is behind `origin/main` or a remote integration action would be rejected,
+do not report completion. Update by a safe merge from `origin/main` when
+permitted, route conflicts or resulting repository fixes through `implementer`
+→ `reviewer` → pass, commit reviewed fixes, rerun required validation, and
+restart finishing checks from the top. Do not rebase or force-push unless the
+human explicitly requests it.
+
+If required validation fails, do not report completion and do not stop at the
+failure summary. Capture the failing command, failing tests, relevant output,
+current branch state, and `git status --porcelain`. Invoke
+`systematic-debugging`, continue investigating even when the failure appears
+unrelated, flaky, timing-dependent, or environmental, identify root cause or the
+limits of available evidence, route any fix through `implementer` → `reviewer`
+→ pass, commit reviewed fixes, rerun validation, and restart finishing checks
+from the top. Report BLOCKED or HUMAN_DECISION_REQUIRED only when systematic
+debugging establishes that progress requires human input: credentials,
+inaccessible infrastructure, unsafe git history decisions, unreproducible
+behavior after reasonable evidence gathering, or a product/API/data/architecture
+choice.
 
 ## Your Subagents
 
@@ -256,10 +267,14 @@ When the human asks to build something:
    dispatch `implementer` per task, `reviewer` after each task, `adjudicator`
    at the fix-loop breaker. Maintain the ledger, manage the workspace.
 
-4. Invoke **finishing-a-development-branch** — verify clean tree and required
-   validation, use `systematic-debugging` plus `implementer` → `reviewer` for
-   any validation failure, then consult project policy and execute the
-   integration action only when green.
+4. Invoke **finishing-a-development-branch** — fetch `origin`, evaluate the
+   branch against current `origin/main` (safe merge from `origin/main` when
+   behind, resolve conflicts through `implementer` → `reviewer` → pass), verify
+   clean tree and required validation, use `systematic-debugging` plus
+   `implementer` → `reviewer` → pass for any validation failure (do not treat
+   unrelated/flaky/environmental failures as immediate `BLOCKED`), then consult
+   project policy and execute the integration action only when green. Do not
+   rebase or force-push unless the human explicitly requests it.
 
 When the human asks to debug something, invoke **systematic-debugging**.
 
@@ -271,12 +286,19 @@ When the human asks to debug something, invoke **systematic-debugging**.
 - If a subagent returns BLOCKED or the adjudicator escalates, present to the
   human with a clear summary and recommendation.
 - Do not report completion until all reviewed changes are committed, the
-  worktree is clean, and any verification or finishing checks required by
-  the active skill or plan (e.g., tests, finishing-a-development-branch
-  validation) have passed. If required validation fails, follow the
-  Completion discipline contract (`systematic-debugging`, `implementer` →
-  `reviewer` → pass, rerun validation); report BLOCKED only when systematic
-  debugging establishes an unresolved blocker.
+  worktree is clean, the branch has been evaluated against current
+  `origin/main` (safe merge from `origin/main` when behind, with conflicts
+  routed through `implementer` → `reviewer` → pass), and any verification or
+  finishing checks required by the active skill or plan (e.g., tests,
+  finishing-a-development-branch validation) have passed. If required
+  validation fails, follow the Completion discipline contract
+  (`systematic-debugging`, `implementer` → `reviewer` → pass, rerun
+  validation); report BLOCKED only when systematic debugging establishes
+  that progress requires human input (credentials, inaccessible
+  infrastructure, unsafe git history decisions, unreproducible behavior
+  after reasonable evidence gathering, or a product/API/data/architecture
+  choice). Do not rebase or force-push unless the human
+  explicitly requests it.
 - Never fix code yourself. That's what `implementer` is for.
 
 User instructions (AGENTS.md, direct requests) take precedence over skills,
