@@ -41,6 +41,56 @@
   (assert captured.printed "fennel-check should print a JSON result")
   (json.loads captured.printed))
 
+(fn validation-output-strips-output-flag []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--output" "summary" "--target" "repo"] :json))
+  (assert (not parsed.error) (.. "unexpected parse error: " (tostring parsed.error)))
+  (assert (= parsed.output :summary))
+  (assert (= (# parsed.argv) 2))
+  (assert (= (. parsed.argv 1) "--target"))
+  (assert (= (. parsed.argv 2) "repo")))
+
+(fn validation-output-defaults-when-flag-absent []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--target" "repo"] :json))
+  (assert (not parsed.error) (.. "unexpected parse error: " (tostring parsed.error)))
+  (assert (= parsed.output :json))
+  (assert (= (# parsed.argv) 2))
+  (assert (= (. parsed.argv 1) "--target"))
+  (assert (= (. parsed.argv 2) "repo")))
+
+(fn validation-output-rejects-invalid-mode []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--output" "xml" "--target" "repo"] :json))
+  (assert parsed.error "invalid mode should produce an error")
+  (assert (string.find parsed.error "--output must be json or summary" 1 true)
+          (.. "unexpected error: " parsed.error)))
+
+(fn validation-output-invalid-mode-resets-prior-output []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--output" "summary" "--output" "xml"] :json))
+  (assert parsed.error "invalid mode should produce an error")
+  (assert (= parsed.output :json)))
+
+(fn validation-output-invalid-mode-keeps-default-after-later-valid []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--output" "xml" "--output" "summary"] :json))
+  (assert parsed.error "invalid mode should produce an error")
+  (assert (= parsed.output :json)))
+
+(fn validation-output-rejects-missing-mode []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--target" "repo" "--output"] :json))
+  (assert parsed.error "missing mode should produce an error")
+  (assert (string.find parsed.error "--output requires" 1 true)
+          (.. "unexpected error: " parsed.error)))
+
+(fn validation-output-missing-mode-resets-prior-output []
+  (local Output (require :tools/validation-output))
+  (local parsed (Output.split-output-argv ["--output" "summary" "--output"] :json))
+  (assert parsed.error "missing mode should produce an error")
+  (assert (= parsed.output :json)))
+
 (fn valid-explicit-file-exits-zero []
   (with-temp-dir
     (fn [dir]
@@ -132,6 +182,20 @@
                      :fn non-fennel-file-exits-one})
 (table.insert tests {:name "real entrypoint global argv checks explicit file"
                      :fn real-entrypoint-global-argv-checks-explicit-file})
+(table.insert tests {:name "validation output strips output flag"
+                     :fn validation-output-strips-output-flag})
+(table.insert tests {:name "validation output defaults when flag absent"
+                     :fn validation-output-defaults-when-flag-absent})
+(table.insert tests {:name "validation output rejects invalid mode"
+                     :fn validation-output-rejects-invalid-mode})
+(table.insert tests {:name "validation output invalid mode resets prior output"
+                     :fn validation-output-invalid-mode-resets-prior-output})
+(table.insert tests {:name "validation output invalid mode keeps default after later valid"
+                     :fn validation-output-invalid-mode-keeps-default-after-later-valid})
+(table.insert tests {:name "validation output rejects missing mode"
+                     :fn validation-output-rejects-missing-mode})
+(table.insert tests {:name "validation output missing mode resets prior output"
+                     :fn validation-output-missing-mode-resets-prior-output})
 
 (local main
   (fn []
