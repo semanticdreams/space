@@ -14,7 +14,7 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 1. Verify a clean dedicated checkout with `git status --porcelain`; stop if dirty.
 2. Verify the checkout is on a branch that can safely create `automation/daily-devlog/YYYY-MM-DD` from `origin/main`.
 3. Verify `gh auth status` before relying on PR creation or auto-merge.
-4. Verify branch protection rules and required status checks are active on the target repository before attempting auto-merge; do not assume they are available just because `gh auth status` succeeds.
+4. Verify branch protection rules and required status checks are active on the target repository before attempting auto-merge; do not assume they are available just because `gh auth status` succeeds. Protection may come from classic branch protection (HTTP 200 on `gh api repos/<owner>/<repo>/branches/main/protection`) or GitHub rulesets (classic endpoint returns HTTP 404). When the classic endpoint returns 404, verify effective branch rules via `gh api repos/<owner>/<repo>/rules/branches/main`. Required status checks (for this repo: `test`) and pull-request protection must be present in the effective rules before auto-merge. If neither classic protection nor active effective branch rules can be confirmed, fail closed.
 
 ## Workflow
 
@@ -58,11 +58,11 @@ Run `cd docs && npm run devlog:indices && npm run docs:build`. Inspect the final
 
 ## Commit, Push, and PR
 
-Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection and required checks are active before attempting auto-merge. Use `gh pr merge --auto --squash automation/daily-devlog/YYYY-MM-DD` only when protection rules and checks are confirmed available. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
+Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, and pull-request protection are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo), `gh pr merge --auto --squash ...` when rules require squash, or `gh pr merge --auto --rebase ...` when rules require rebase. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
 
 ## Fail-Closed Cases
 
-Stop with a clear BLOCKED summary when the checkout is dirty, credentials are missing, `gh` is unavailable, validation fails, branch protection or required status checks are unavailable or cannot be verified, auto-merge cannot proceed, or the diff includes unexpected files.
+Stop with a clear BLOCKED summary when the checkout is dirty, credentials are missing, `gh` is unavailable, validation fails, branch protection or required status checks are unavailable or cannot be verified (via classic protection or rulesets/effective branch rules), auto-merge cannot proceed, or the diff includes unexpected files.
 
 ## Red Flags
 
