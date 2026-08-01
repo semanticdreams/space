@@ -28,8 +28,9 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 8. Fetch `origin` and confirm the automation branch has accounted for current `origin/main`. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and rerun validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
 9. Run validation.
 10. Commit only reviewed devlog automation files.
-11. Push only the dated automation branch.
-12. Open a PR and attempt auto-merge when allowed.
+11. Re-fetch `origin` and recheck current `origin/main` before push or PR creation. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
+12. Push only the dated automation branch.
+13. Open a PR and attempt auto-merge when allowed.
 
 ## Meaningful Change Filter
 
