@@ -7,7 +7,7 @@ description: Use when implementation is complete and reviewed, to run final vali
 
 ## Overview
 
-**Core principle:** Verify clean tree → Verify required validation → If validation fails, debug root cause and route reviewed fixes → Rerun validation until green or blocked → Consult project policy → Detect environment → Execute action (or present options if no policy) → Clean up.
+**Core principle:** Verify clean tree → Verify current `origin/main` base → Verify required validation → If validation fails, debug root cause and route reviewed fixes → Rerun validation from a clean/current-base tree until green or a true human-input blocker is established → Recheck `origin/main` before integration → Consult project policy → Detect environment → Execute action (or present options if no policy) → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -33,35 +33,60 @@ If they want help committing:
 
 If they want to handle it themselves: stop and exit the skill. The branch is not finished.
 
-Never auto-stage or auto-discard. Only allowlisted coordination-artifact files may be committed or discarded here; code changes always go through implementer → reviewer.
+Never auto-stage or auto-discard. Only allowlisted coordination-artifact files may be committed or discarded here; code changes always go through `implementer` → `reviewer` → pass.
 
-## Step 1: Verify Tests
+## Step 1: Verify Current Base and Tests
+
+Fetch the current base and confirm this branch has accounted for it:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+```
+
+**If the merge-base check exits 0:** Continue to required validation.
+
+**If the merge-base check exits nonzero:** The branch has not incorporated
+current `origin/main`. Do not run final validation yet, and do not rebase or
+force-push. If a safe merge is permitted, run:
+
+```bash
+git merge --no-edit origin/main
+```
+
+If the merge has conflicts, generated-file changes, or code/test/doc changes
+that need repair, route that work through `implementer` → `reviewer` → pass.
+After reviewed fixes are committed and `git status --porcelain` is clean,
+restart this finishing skill from Step 0. If the merge requires a human
+permission or unsafe git-history decision, report HUMAN_DECISION_REQUIRED with
+the exact command and branch state.
 
 Run the project's full test suite. Consult AGENTS.md for the correct test command.
 
 **If tests fail**, integration is forbidden but the branch is not finished.
 Do all of the following:
 
-1. Capture the exact failing command, failing tests, relevant error output, and
-   current `git status --porcelain`.
+1. Capture the exact failing command, failing tests, relevant error output,
+   current branch name, `HEAD`, `origin/main`, merge-base state, and
+   `git status --porcelain`.
 2. Invoke `systematic-debugging` before proposing any fix.
-3. Identify and document the root cause. If root cause cannot be established,
-   continue gathering evidence and debugging. Do not BLOCKED here on unknown
-   root cause alone; only report BLOCKED/HUMAN_DECISION_REQUIRED when
-   systematic debugging establishes one of the enumerated blocker conditions
-   below.
-4. Route any fix through `implementer` → `reviewer` → pass. The supervisor must
-   not edit code, tests, `.opencode/**`, workflow files, or other non-allowlisted
-   files directly.
-5. After reviewed fixes are committed and the tree is clean, rerun this finishing
-   skill from Step 0.
-6. Only continue to Step 2 when the required validation suite passes.
+3. Continue investigating even when the failure appears unrelated, flaky,
+   timing-dependent, or environmental. Those labels are diagnostic information,
+   not a terminal workflow state.
+4. Establish root cause or gather enough evidence to justify why root cause
+   cannot be established with available access.
+5. Route any repository fix through `implementer` → `reviewer` → pass. The
+   supervisor must not edit code, tests, `.opencode/**`, workflow files, or
+   other non-allowlisted files directly.
+6. After reviewed fixes are committed and the tree is clean, rerun this
+   finishing skill from Step 0.
+7. Only continue to Step 2 when the required validation suite passes on a
+   clean tree that has accounted for current `origin/main`.
 
-If systematic debugging establishes that the failure is external/environmental,
-unreproducible with available evidence, or requires a human product/API/data/
-architecture decision, report BLOCKED or HUMAN_DECISION_REQUIRED with the
-evidence. A failure that is merely unrelated to this branch but does not meet
-one of these BLOCKED criteria still requires the standard debug/fix/rerun loop.
+Report `BLOCKED` or `HUMAN_DECISION_REQUIRED` only when systematic debugging
+establishes that progress requires human input: credentials, inaccessible
+infrastructure, unsafe git history decisions, unreproducible behavior after
+reasonable evidence gathering, or a product/API/data/architecture choice.
 Do not push, PR, merge, or clean up while required validation is red.
 
 **If tests pass:** continue to Step 2.
@@ -78,6 +103,21 @@ current branch and create a pull request targeting `main`"):
   1. Confirm the user has not explicitly requested a different integration action.
   2. Confirm the branch is safe for automatic integration (clean tree, tests
      passing — already confirmed in Steps 0–1).
+
+Before any automatic push or PR creation, re-fetch and recheck the base:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+```
+
+If the branch is no longer current with `origin/main`, do not push or create a
+PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes
+through `implementer` → `reviewer` → pass, commit reviewed fixes, and restart
+from Step 0 so validation runs on the updated branch. If push is rejected
+because the remote/base moved, do not force-push; fetch, update by safe merge
+when permitted, and restart from Step 0.
+
   3. If both checks pass: execute the default action automatically (push the
      current branch and create a pull request targeting the base branch).
      Keep the worktree for PR feedback and iteration — do not clean up.
@@ -152,6 +192,20 @@ git branch -d <feature-branch>
 
 ### Option 2: Push and Create PR
 
+Before pushing or creating a PR, re-fetch and recheck the base:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+```
+
+If the branch is no longer current with `origin/main`, do not push or create a
+PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes
+through `implementer` → `reviewer` → pass, commit reviewed fixes, and restart
+from Step 0 so validation runs on the updated branch. If push is rejected
+because the remote/base moved, do not force-push; fetch, update by safe merge
+when permitted, and restart from Step 0.
+
 Push the branch and create the pull request using the forge's tooling. Keep the worktree — the human iterates on PR feedback there.
 
 ### Option 3: Keep As-Is
@@ -186,5 +240,7 @@ git worktree prune
 | "Tests passed earlier this session" | Run the suite on the tree you are about to integrate. A green run only proves the tree it ran on. |
 | "They obviously want it merged" | Follow the project's integration policy, not assumptions. If AGENTS.md specifies an automatic action (push + create PR), execute it. Only present the menu when no policy exists or branch-unsafe conditions block the automatic action. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
-| "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner's explicit request. |
-| "The final suite failed, so I'll just report it and stop" | A red final suite is a debugging task. Invoke `systematic-debugging`, route reviewed fixes through `implementer` → `reviewer`, rerun validation, and finish only when green or explicitly blocked. |
+| "The final suite failed, so I'll just report it and stop" | A red final suite is a debugging task. Invoke `systematic-debugging`, route reviewed fixes through `implementer` → `reviewer` → pass, rerun validation, and finish only when green or explicitly blocked. |
+| "The failure is unrelated/flaky/environmental — nothing to do" | "Unrelated," "flaky," and "environmental" are diagnostic labels, not terminal states. Investigate, gather evidence, and route fixes through `implementer` → `reviewer` → pass. Stop only when systematic debugging establishes a true human-input blocker. |
+| "The branch is behind origin/main — I'll just push anyway" | Do not push, PR, merge, or claim ready-to-merge against a stale base. Safe-merge `origin/main` when permitted, route conflicts through `implementer` → `reviewer` → pass, commit reviewed fixes, and rerun validation from Step 0. |
+| "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Do not force-push. Fetch, update by safe merge from `origin/main` when permitted, resolve conflicts through `implementer` → `reviewer` → pass, and restart from Step 0. Do not rebase or force-push unless the human explicitly requests it. |
