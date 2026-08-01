@@ -57,16 +57,18 @@
                    "Makefile should declare shared Fennel environment variables")
   (assert-contains makefile "SPACE_RUNTIME_ENV = $(SPACE_TEST_ENV) $(SPACE_FENNEL_ENV)"
                    "Makefile should compose shared runtime environment variables")
+  (assert-contains makefile "VALIDATION_OUTPUT = $(if $(VERBOSE),json,summary)"
+                   "Makefile should select concise validation output by default and JSON for verbose runs")
   (assert-contains fennel-recipe "fennel-check: build"
                    "fennel-check should depend on build")
-  (assert-contains fennel-recipe "$(SPACE_RUNTIME_ENV) ./build/space -m tools.fennel-check:main -- --target repo"
-                   "fennel-check target should run the repo Fennel compile gate")
+  (assert-contains fennel-recipe "$(SPACE_RUNTIME_ENV) ./build/space -m tools.fennel-check:main -- --output $(VALIDATION_OUTPUT) --target repo"
+                    "fennel-check target should run the repo Fennel compile gate with the selected validation output mode")
   (assert-contains makefile "test: constraints"
                    "make test should depend on constraints")
   (assert-contains recipe "constraints: fennel-check"
                    "constraints should depend on the Fennel compile gate")
-  (assert-contains recipe "$(SPACE_RUNTIME_ENV) ./build/space -m constraints.runner:main -- --target repo"
-                   "constraints target should run the repo constraints command"))
+  (assert-contains recipe "$(SPACE_RUNTIME_ENV) ./build/space -m constraints.runner:main -- --output $(VALIDATION_OUTPUT) --target repo"
+                    "constraints target should run the repo constraints command with the selected validation output mode"))
 
 (fn ctest-block-has-fixture? [cmake test-name]
   (local (start) (string.find cmake test-name 1 true))
@@ -89,8 +91,8 @@
   (local cmake (read-repo-file "CMakeLists.txt"))
   (assert-contains cmake "add_test(NAME ${PROJECT_NAME}_experimental_constraints"
                    "CMake should declare the experimental constraints test")
-  (assert-contains cmake "COMMAND space -m constraints.runner:main -- --target repo"
-                   "experimental constraints CTest should run the repo constraints command")
+  (assert-contains cmake "COMMAND space -m constraints.runner:main -- --output summary --target repo"
+                   "experimental constraints CTest should run the repo constraints command in concise summary mode")
   (assert-contains cmake "FIXTURES_SETUP space_experimental_constraints"
                    "experimental constraints CTest should set up its fixture")
   (assert (ctest-block-has-fixture? cmake "${PROJECT_NAME}_fnl_tests")

@@ -741,7 +741,7 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
 )
 
 add_test(NAME ${PROJECT_NAME}_experimental_constraints
-    COMMAND space -m constraints.runner:main -- --target repo
+    COMMAND space -m constraints.runner:main -- --output summary --target repo
 )
 set_tests_properties(${PROJECT_NAME}_experimental_constraints PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

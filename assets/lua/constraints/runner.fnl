@@ -8,7 +8,6 @@
 (local Source (require :constraints.source))
 (local Targets (require :constraints.targets))
 (local json (require :json))
-(local Output (require :tools/validation-output))
 
 (local M {})
 
@@ -191,16 +190,6 @@
       {:required-rule-ids applicable-rule-ids
        :entries []}))
 
-(fn normalized-global-argv []
-  (local source (if _G.arg _G.arg []))
-  (local start (if (= (. source 1) "--") 2 1))
-  (local result [])
-  (var index start)
-  (while (<= index (# source))
-    (table.insert result (. source index))
-    (set index (+ index 1)))
-  result)
-
 (fn M.run-target [target opts]
   "Execute the full constraint pipeline for a target:
    1. Discover source files
@@ -272,6 +261,18 @@
           {:status final-status
            :counts counts
            :diagnostics all-diagnostics}))))
+
+(local Output (require :tools/validation-output))
+
+(fn normalized-global-argv []
+  (local source (if _G.arg _G.arg []))
+  (local start (if (= (. source 1) "--") 2 1))
+  (local result [])
+  (var index start)
+  (while (<= index (# source))
+    (table.insert result (. source index))
+    (set index (+ index 1)))
+  result)
 
 (fn M.main [opts-or-argv]
   "Entry point for the constraints runner.

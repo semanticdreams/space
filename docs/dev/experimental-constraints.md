@@ -49,7 +49,7 @@ Handoffs for Fennel-facing feature or bugfix work should include a lightweight c
 
 When an intentional architecture transition conflicts with a constraint that encodes the old contract, update the production code and the constraint contract together through reviewed changes. Do not contort production code around a stale rule, skip the gate, or add broad baselines/allowlists just to make the gate green. If the new contract is ambiguous, pause for clarification before changing constraints.
 
-Runner output verbosity remains a deferred follow-up.
+`make constraints` prints concise summaries by default to keep local and agent logs readable. Use `make constraints VERBOSE=1` for the full JSON payload from both `fennel-check` and the constraints runner, or call `./build/space -m constraints.runner:main -- --output json --target repo` directly when debugging parser/constraint details.
 
 ## Runner Statuses
 
