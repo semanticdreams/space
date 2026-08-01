@@ -33,7 +33,7 @@ If they want help committing:
 
 If they want to handle it themselves: stop and exit the skill. The branch is not finished.
 
-Never auto-stage or auto-discard. Only allowlisted coordination-artifact files may be committed or discarded here; code changes always go through implementer → reviewer.
+Never auto-stage or auto-discard. Only allowlisted coordination-artifact files may be committed or discarded here; code changes always go through `implementer` → `reviewer` → pass.
 
 ## Step 1: Verify Current Base and Tests
 
@@ -191,6 +191,20 @@ git branch -d <feature-branch>
 ```
 
 ### Option 2: Push and Create PR
+
+Before pushing or creating a PR, re-fetch and recheck the base:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+```
+
+If the branch is no longer current with `origin/main`, do not push or create a
+PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes
+through `implementer` → `reviewer` → pass, commit reviewed fixes, and restart
+from Step 0 so validation runs on the updated branch. If push is rejected
+because the remote/base moved, do not force-push; fetch, update by safe merge
+when permitted, and restart from Step 0.
 
 Push the branch and create the pull request using the forge's tooling. Keep the worktree — the human iterates on PR feedback there.
 
