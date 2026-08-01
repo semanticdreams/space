@@ -1,5 +1,8 @@
 # Devlog
 
+## 2026-08-01
+Fennel constraints graduated from experimental to stable infrastructure, with validation output now summarized by default while preserving full detail behind a verbose flag for debugging, and agent workflows tightened in parallel through skill routing, MCP-accessible lint and repair tools, and hardened enclosing-form lookup — together sharpening the compile-check-and-iterate loop so constraint-aware development stays fast and reliable as the project scales.
+
 ## 2026-07-31
 Runtime portability tightened with asset discovery that resolves from the executable through a deduplicated search order while preserving explicit overrides, and native logging now settles in a deliberate user log directory after dotenv has a chance to provide `SPACE_LOG_DIR`, keeping CLI, REPL, module, developer, installed, and portable runs predictable instead of scattering assets or `gl.log` around arbitrary launch directories.
 
