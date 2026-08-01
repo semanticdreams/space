@@ -48,6 +48,13 @@
   (assert rule "rule lifecycle.global-mutation-restoration should be in rules list")
   rule)
 
+(fn asset-lua-root []
+  "Resolve the asset Lua root via runtime or SPACE_ASSETS_PATH env."
+  (local fs (require :fs))
+  (local runtime (require :runtime))
+  (local assets-path (or runtime.assets-path (os.getenv "SPACE_ASSETS_PATH") "assets"))
+  (fs.join-path assets-path "lua"))
+
 ;; lifecycle.global-mutation-restoration (test-isolation)
 ;; --- Precision: wrapper anonymous fn restoration (with-restored-app-fields) ---
 
@@ -961,13 +968,14 @@
   "T11-3: Real-file regression using Source.discover + Facts.extract.
    The production file test-scene-activity-slots.fnl should produce zero
    lifecycle.global-mutation-restoration diagnostics after wrapper precision fix."
+  (local lua-root (asset-lua-root))
   (local fs (require :fs))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
-  (local scene-path (fs.absolute "assets/lua/tests/test-scene-activity-slots.fnl"))
+  (local scene-path (fs.absolute (fs.join-path lua-root "tests" "test-scene-activity-slots.fnl")))
   (local target {:kind :files
                  :files [scene-path]
-                 :module-roots [(fs.absolute "assets/lua")]})
+                 :module-roots [(fs.absolute lua-root)]})
   (local source-records (Source.discover target))
   (local fact-db (Facts.extract source-records))
   (local rule (get-test-isolation-rule))
