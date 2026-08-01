@@ -24,15 +24,31 @@
       result
       (error result)))
 
-(fn read-reply [client rc tries]
+(fn read-reply [client rc timeout-ms]
+  "Wait for a reply on the client socket using zmq.poll with bounded tick,
+  up to timeout-ms.  Returns the reply message or nil on timeout."
+  (local sysinfo (require :sysinfo))
   (local recv-flags (. zmq :recv-flags))
+  (local poll-events (. zmq :poll-events))
+  (local deadline (+ (sysinfo.now-ms) timeout-ms))
   (var reply nil)
-  (var count 0)
-  (while (and (not reply) (< count tries))
+  (while (and (not reply) (< (sysinfo.now-ms) deadline))
     (rc:tick)
-    (set reply (client:recv recv-flags.DONTWAIT))
-    (set count (+ count 1)))
+    ;; Poll for readability, capping the interval to the remaining budget
+    (local remaining (- deadline (sysinfo.now-ms)))
+    (local poll-timeout (math.min 50 (math.max 0 remaining)))
+    (local ready (zmq.poll [{:socket client :events poll-events.IN}] poll-timeout))
+    (local entry (. ready 1))
+    (when (and entry entry.revents (> entry.revents 0))
+      (set reply (client:recv recv-flags.DONTWAIT))))
   reply)
+
+(fn permitted? [err-msg]
+  "Return true if the error message indicates a known permission/protocol issue
+  that should skip the test rather than fail."
+  (if (string.find err-msg "Operation not permitted" 1 true) true
+      (string.find err-msg "Permission denied" 1 true) true
+      (string.find err-msg "Protocol not supported" 1 true) true))
 
 (fn remote-control-ok []
   (with-endpoint
@@ -40,9 +56,7 @@
       (local socket-types (. zmq :socket-types))
       (local (ok rc-or-error) (pcall (fn [] (RemoteControl {:endpoint endpoint}))))
       (when (not ok)
-        (when (or (string.find rc-or-error "Operation not permitted" 1 true)
-                  (string.find rc-or-error "Permission denied" 1 true)
-                  (string.find rc-or-error "Protocol not supported" 1 true))
+        (when (permitted? rc-or-error)
           (print "Skipping remote control test: ipc bind not permitted")
           (lua "return true"))
         (error rc-or-error))
@@ -64,9 +78,7 @@
       (local socket-types (. zmq :socket-types))
       (local (ok rc-or-error) (pcall (fn [] (RemoteControl {:endpoint endpoint}))))
       (when (not ok)
-        (when (or (string.find rc-or-error "Operation not permitted" 1 true)
-                  (string.find rc-or-error "Permission denied" 1 true)
-                  (string.find rc-or-error "Protocol not supported" 1 true))
+        (when (permitted? rc-or-error)
           (print "Skipping remote control test: ipc bind not permitted")
           (lua "return true"))
         (error rc-or-error))

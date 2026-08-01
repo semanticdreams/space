@@ -308,16 +308,23 @@
 ;; R1-1: Runner.main tolerates nil opts (runtime zero-arg entry point)
 (fn runner-main-handles-nil-opts []
   (local Runner (require :constraints.runner))
+  (local previous-run-target Runner.run-target)
   ;; The runtime calls module functions with no arguments.
   ;; Verify Runner.main does not crash when opts is nil.
-  ;; We stub os.exit because the real one would terminate the test process.
+  ;; We stub os.exit because the real one would terminate the test process,
+  ;; and we stub run-target to avoid redundant full-repo execution.
   (var exit-code nil)
   (var printed nil)
   (local orig-exit os.exit)
   (local orig-print print)
   (tset os :exit (fn [code] (set exit-code code)))
   (tset _G :print (fn [msg] (set printed msg)))
+  (tset Runner :run-target (fn [_target _opts]
+                             {:status :pass
+                              :counts {:total 0 :by-family {} :by-severity {}}
+                              :diagnostics []}))
   (local (ok err) (pcall #(Runner.main)))  ;; nil opts
+  (tset Runner :run-target previous-run-target)
   (tset os :exit orig-exit)
   (tset _G :print orig-print)
   (assert ok (.. "Runner.main(nil) must not crash, got: " (tostring err)))
