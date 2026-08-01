@@ -4,13 +4,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def dry_run(target: str) -> str:
+def dry_run(target: str, extra_env: dict[str, str] | None = None) -> str:
+    env = {**subprocess.os.environ}
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         ["make", "-n", target],
         cwd=REPO_ROOT,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout + result.stderr
@@ -28,7 +32,7 @@ def test_default_build_uses_single_logged_minimal_configure_and_build() -> None:
     assert "--log build/logs/build.log" in output
     assert '--label "space minimal build"' in output
     assert "cmake -B build" in output
-    assert "cmake --build build -- -j" in output
+    assert "cmake --build build -- -j1" in output
     assert_has_profile_flags(output, profile="minimal", cef="OFF")
     assert "-DSPACE_ENABLE_CEF=ON" not in output
     assert "cd build && make" not in output
@@ -41,8 +45,22 @@ def test_full_build_uses_same_log_mechanism_with_cef_enabled() -> None:
     assert "--log build/logs/build.log" in output
     assert '--label "space full CEF build"' in output
     assert "cmake -B build" in output
-    assert "cmake --build build -- -j" in output
+    assert "cmake --build build -- -j1" in output
     assert_has_profile_flags(output, profile="full", cef="ON")
+
+
+def test_build_jobs_defaults_to_1_and_accepts_override() -> None:
+    # Default dry-run uses -j1
+    default_output = dry_run("build")
+    assert "cmake --build build -- -j1" in default_output
+
+    # Override via BUILD_JOBS environment variable still works
+    override_output = dry_run("build", extra_env={"BUILD_JOBS": "3"})
+    assert "cmake --build build -- -j3" in override_output
+
+    # build-full also respects the override
+    full_override_output = dry_run("build-full", extra_env={"BUILD_JOBS": "3"})
+    assert "cmake --build build -- -j3" in full_override_output
 
 
 def test_cmake_aliases_make_profile_intent_explicit() -> None:
