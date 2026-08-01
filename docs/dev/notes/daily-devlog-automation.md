@@ -39,7 +39,7 @@ The UI prompt is intentionally short because `.opencode/skills/daily-devlog-auto
 
 ## Safety model
 
-The automation fails closed when credentials, `gh` authentication, branch protection, checks, or a clean checkout are unavailable. Daily entries contain only frontmatter, a date heading, and one short narrative paragraph connecting concrete work to current project goals or milestones — no commit hashes, author lists, raw file lists, or bullet-point summaries.
+The automation fails closed when credentials, `gh` authentication, branch protection (classic protection or GitHub rulesets/effective branch rules), required status checks, pull-request protection, or a clean checkout are unavailable. The auto-merge method is selected from the effective branch rules (`--merge`, `--squash`, or `--rebase`) rather than hard-coded. Daily entries contain only frontmatter, a date heading, and one short narrative paragraph connecting concrete work to current project goals or milestones — no commit hashes, author lists, raw file lists, or bullet-point summaries.
 
 ## Validation and recovery
 
