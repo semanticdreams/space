@@ -172,6 +172,40 @@
       (assert (= diagnostic.kind "compile"))
       (assert (= diagnostic.file (fs.absolute path))))))
 
+(fn summary-output-valid-file-is-concise []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "valid.fnl" "{:ok true}\n"))
+      (local captured (run-main-capturing ["--output" "summary" "--target" "files" "--file" path]))
+      (assert (= captured.exit-code 0))
+      (assert (= captured.printed "fennel-check: pass (checked 1 file)")))))
+
+(fn json-output-remains-default []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "valid.fnl" "{:ok true}\n"))
+      (local captured (run-main-capturing ["--target" "files" "--file" path]))
+      (local result (parse-result captured))
+      (assert (= captured.exit-code 0))
+      (assert result.ok)
+      (assert (= result.status "pass")))))
+
+(fn summary-output-broken-file-includes-diagnostic-and-rerun []
+  (with-temp-dir
+    (fn [dir]
+      (local path (write-temp-file dir "broken.fnl" "(fn broken [x]\n"))
+      (local captured (run-main-capturing ["--output" "summary" "--target" "files" "--file" path]))
+      (assert (= captured.exit-code 1))
+      (assert (string.find captured.printed "fennel-check: fail (checked 1 file, 1 failed)" 1 true))
+      (assert (string.find captured.printed (fs.absolute path) 1 true))
+      (assert (string.find captured.printed "rerun with --output json" 1 true)))))
+
+(fn invalid-output-mode-exits-one []
+  (local captured (run-main-capturing ["--output" "xml" "--target" "repo"]))
+  (assert (= captured.exit-code 1))
+  (assert (string.find captured.printed "fennel-check: fail" 1 true))
+  (assert (string.find captured.printed "--output must be json or summary" 1 true)))
+
 (table.insert tests {:name "valid explicit file exits 0"
                      :fn valid-explicit-file-exits-zero})
 (table.insert tests {:name "broken explicit file exits 1"
@@ -181,7 +215,15 @@
 (table.insert tests {:name "non-Fennel file exits 1"
                      :fn non-fennel-file-exits-one})
 (table.insert tests {:name "real entrypoint global argv checks explicit file"
-                     :fn real-entrypoint-global-argv-checks-explicit-file})
+                      :fn real-entrypoint-global-argv-checks-explicit-file})
+(table.insert tests {:name "summary output valid file is concise"
+                     :fn summary-output-valid-file-is-concise})
+(table.insert tests {:name "JSON output remains default"
+                     :fn json-output-remains-default})
+(table.insert tests {:name "summary output broken file includes diagnostic and rerun"
+                     :fn summary-output-broken-file-includes-diagnostic-and-rerun})
+(table.insert tests {:name "invalid output mode exits one"
+                     :fn invalid-output-mode-exits-one})
 (table.insert tests {:name "validation output strips output flag"
                      :fn validation-output-strips-output-flag})
 (table.insert tests {:name "validation output defaults when flag absent"
