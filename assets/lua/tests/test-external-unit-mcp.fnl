@@ -882,6 +882,12 @@
           (local ids {})
           (each [_ art (ipairs info.source-artifacts)]
             (tset ids art.source-id true))
+          ;; Verify no source-id contains OS-absolute-path markers or backslashes
+          (each [sid _ (pairs ids)]
+            (assert (not (string.find sid ":" 1 true))
+                    (.. "source-id must not contain ':': " sid))
+            (assert (not (string.find sid "\\" 1 true))
+                    (.. "source-id must not contain backslash: " sid)))
           ;; The nested file must be addressable by its relative path
           (assert (. ids "components/view.fnl")
                   (.. "expected components/view.fnl in source artifacts, got keys: "

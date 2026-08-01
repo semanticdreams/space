@@ -17,8 +17,15 @@
       "filesystem"
       "unknown"))
 
+(fn path-separator? [c]
+  (or (= c "/") (= c "\\")))
+
+(fn normalize-logical-path [path]
+  (select 1 (string.gsub (or path "") "\\\\" "/")))
+
 (fn path-basename [path]
-  (local (name) (string.match path "([^/]+)$"))
+  (local normalized (normalize-logical-path path))
+  (local name (string.match normalized "([^/]+)$"))
   name)
 
 (fn path-has-fnl-extension? [path]
@@ -53,9 +60,11 @@
       ;; addressable by source-id.  For flat units, fall back to basename.
       (local source-id
         (if unit-root
-            (let [prefix (.. unit-root "/")]
-              (if (= (string.sub path 1 (# prefix)) prefix)
-                  (string.sub path (+ (# prefix) 1))
+            (let [norm-root (normalize-logical-path unit-root)
+                  norm-path (normalize-logical-path path)
+                  prefix (.. norm-root "/")]
+              (if (= (string.sub norm-path 1 (# prefix)) prefix)
+                  (string.sub norm-path (+ (# prefix) 1))
                   (path-basename path)))
             (path-basename path)))
       ;; Reject duplicate source-ids to prevent collisions.
@@ -121,9 +130,9 @@
   (assert (not (or (string.match source-id "^/")
                    (string.match source-id "^%a:[\\/]")))
           (.. operation " :source_id must be relative, not absolute"))
-  (assert (not (or (string.match source-id "%f[^/]%.%./")
-                   (string.match source-id "%.%.$")
-                   (= source-id "..")))
+  (assert (not (or (string.match source-id "%f[^/\\]%.%.[/\\]")
+                    (string.match source-id "%.%.$")
+                    (= source-id "..")))
           (.. operation " :source_id must not contain .. segments")))
 
 (fn is-directory-unit? [unit]
@@ -179,14 +188,17 @@
         (local primary-path (get-primary-source-path unit))
         (set root (fs.parent primary-path))
         (set raw-joined primary-path)))
-  ;; Path containment check against unit root
+  ;; Path containment check against unit root — compare normalized paths
+  ;; so that Windows backslash separators are treated the same as slashes.
   (local root-absolute (fs.absolute root))
   (local resolved-absolute (fs.absolute raw-joined))
-  (assert (and (>= (# resolved-absolute) (# root-absolute))
-               (= (string.sub resolved-absolute 1 (# root-absolute)) root-absolute)
-               (or (= (# resolved-absolute) (# root-absolute))
-                   (= (string.sub resolved-absolute (+ (# root-absolute) 1)
-                                  (+ (# root-absolute) 1)) "/")))
+  (local norm-root (normalize-logical-path root-absolute))
+  (local norm-resolved (normalize-logical-path resolved-absolute))
+  (assert (and (>= (# norm-resolved) (# norm-root))
+               (= (string.sub norm-resolved 1 (# norm-root)) norm-root)
+               (or (= (# norm-resolved) (# norm-root))
+                   (= (string.sub norm-resolved (+ (# norm-root) 1)
+                                  (+ (# norm-root) 1)) "/")))
           (.. operation ": source_id escapes unit directory: " source-id))
   ;; Reject symlink at the resolved path itself
   (when (fs.exists resolved-absolute)
