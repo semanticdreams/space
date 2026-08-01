@@ -91,3 +91,26 @@ test('supervisor permissions keep existing --squash daily allow alongside new --
     assert.ok(hasSquashAllow,
         'supervisor.md should retain the existing --squash daily allow for transitional safety')
 })
+
+test('daily devlog skill attributes work by origin/main landing date, not author date', async () => {
+    await loadFiles()
+
+    const oneLineSkill = skillContent.replace(/\s+/g, ' ')
+    const rejectsAuthorDates = /(?:author|original commit|commit\/author) dates?.{0,220}(?:must not|never|do not|not decide|not cause|skipped|backdated)|(?:must not|never|do not).{0,220}(?:author|original commit|commit\/author) dates?/i
+
+    assert.match(oneLineSkill, /origin\/main/i,
+        'SKILL.md should name origin/main as the source for recent work')
+    assert.match(oneLineSkill, /source of truth/i,
+        'SKILL.md should call origin/main the source of truth')
+    assert.match(oneLineSkill, /mainline|first-parent/i,
+        'SKILL.md should require mainline or first-parent inspection')
+    assert.match(oneLineSkill, /merge commits|PR merges|landed ranges/i,
+        'SKILL.md should mention merge commits, PR merges, or landed ranges')
+    assert.match(oneLineSkill, /land(?:ed|ing)|merge(?:d|s)?/i,
+        'SKILL.md should describe landed or merged work')
+    assert.ok(rejectsAuthorDates.test(oneLineSkill),
+        'SKILL.md should say author/original commit dates must not decide devlog eligibility')
+    assert.doesNotMatch(skillContent,
+        /Inspect recent journal entries, docs notes, plans\/specs, and commits since the latest journal entry or recent day boundary\./,
+        'SKILL.md should not keep the ambiguous commits-since workflow wording')
+})
