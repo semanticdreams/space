@@ -13,6 +13,14 @@ branch reference — not local `main`. Local `main` may be stale or contain
 unrelated local commits. Use local `main` only when explicitly performing a
 local merge or integration operation that requires it.
 
+Before final validation, PR creation, or any ready-to-merge claim, fetch
+`origin` and evaluate the branch against current `origin/main`. If the branch
+is behind `origin/main` or remote integration would be rejected, update the
+feature branch by a safe merge from `origin/main` when permitted, resolve any
+conflicts through `implementer` → `reviewer` → pass, commit reviewed fixes, and
+rerun validation from a clean tree. Do not rebase or force-push unless the human
+explicitly requests it.
+
 After implementation is complete — reviewed, committed, tests passing, tree
 clean — the default integration action is to push the current branch and create a
 pull request targeting `main`. Do this automatically; do not present an
@@ -22,10 +30,16 @@ unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 `main`).
 
 If required validation fails after implementation, review, or commit, do not
-finish, push, create a pull request, merge, or clean up the branch. Invoke the
-`systematic-debugging` skill, identify the root cause, route any fix through
-`implementer` → `reviewer` → pass, rerun validation, and only proceed with the
-default integration action when the required suite is green.
+finish, push, create a pull request, merge, clean up the branch, or claim
+ready-to-merge. Capture the failing command, failing tests, relevant output,
+current branch state, and `git status --porcelain`. Invoke the
+`systematic-debugging` skill and continue investigating even when the failure
+appears unrelated, flaky, timing-dependent, or environmental. Establish root
+cause or gather enough evidence to explain why root cause cannot be established
+with available access. Route any repository fix through `implementer` →
+`reviewer` → pass, commit reviewed fixes, rerun validation from a clean/current
+`origin/main` base, and only proceed with the default integration action when
+the required suite is green.
 
 ## Project Structure & Modules
 
