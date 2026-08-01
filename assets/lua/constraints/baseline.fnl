@@ -1,4 +1,4 @@
-;; Baseline module for experimental Fennel constraints.
+;; Baseline module for Fennel constraints.
 ;; Provides baseline policy: fingerprinting, suppression, worsened/stale/missing-required detection.
 
 (local json (require :json))

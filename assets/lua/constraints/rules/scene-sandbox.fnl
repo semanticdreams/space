@@ -1,4 +1,4 @@
-;; Scene/Sandbox constraint rules for experimental Fennel constraints.
+;; Scene/Sandbox constraint rules for Fennel constraints.
 ;; Four rules covering legacy state, activity slot ownership,
 ;; sandbox activation contract, and render context routing.
 

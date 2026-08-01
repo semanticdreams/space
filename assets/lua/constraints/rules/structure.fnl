@@ -1,4 +1,4 @@
-;; Structure and Formatting constraint rules for experimental Fennel constraints.
+;; Structure and Formatting constraint rules for Fennel constraints.
 
 (local Diagnostics (require :constraints.diagnostics))
 (local M {})

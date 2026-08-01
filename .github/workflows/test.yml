@@ -80,7 +80,7 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: make build
 
-      - name: Run experimental constraints
+      - name: Run constraints
         run: make constraints
 
       - name: ccache stats

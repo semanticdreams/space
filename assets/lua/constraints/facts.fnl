@@ -1,4 +1,4 @@
-;; Static fact extraction for experimental Fennel constraints.
+;; Static fact extraction for Fennel constraints.
 ;; Walks tree-sitter AST nodes to collect requires, definitions, exports,
 ;; calls, accesses, mutations, and metrics from Fennel source files.
 

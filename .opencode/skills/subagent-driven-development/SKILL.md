@@ -33,7 +33,7 @@ Record BASE (`git rev-parse HEAD`) before dispatching.
 3. Interfaces and decisions from earlier tasks the brief cannot know
 4. The report-file path (`task-N-report.md` in the workspace)
 5. Context: whether this is a fresh dispatch or a fix-round resume
-6. For Fennel-facing tasks, relevant compile-check and constraint validation expectations from `AGENTS.md`/`docs/dev/experimental-constraints.md`: `make fennel-check` or touched-file `tools.fennel-check` first, `make constraints` second, focused tests third, broader suite last.
+6. For Fennel-facing tasks, relevant compile-check and constraint validation expectations from `AGENTS.md`/`docs/dev/constraints.md`: `make fennel-check` or touched-file `tools.fennel-check` first, `make constraints` second, focused tests third, broader suite last.
 
 **Report file:** `task-N-report.md` in the plan's workspace. The implementer writes its full report there and returns only status summary.
 

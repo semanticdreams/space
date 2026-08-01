@@ -1,4 +1,4 @@
-;; Runner module for experimental Fennel constraints.
+;; Runner module for Fennel constraints.
 ;; Aggregates rule execution, status precedence, and JSON output.
 
 (local Baseline (require :constraints.baseline))
