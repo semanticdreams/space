@@ -44,7 +44,7 @@ Once your agent environment is connected to a Space checkout, these repository c
 
 - **`AGENTS.md`** is the always-on repository guidance. Agents read it on startup and follow its rules for every session. It covers branch conventions, build commands, test invocation, coding style, and project structure.
 - **`.opencode/**`** is the repo-local source for Space agents, skills, and OpenCode configuration. It includes agent definitions, skill files that provide specialized guidance for Fennel, UI, testing, and graph work, and the OpenCode configuration file. This in-repo configuration is canonical for this repository — no separate global config repository is needed.
-- **Restart OpenCode after `.opencode/**` changes.** When you add or modify agents, skills, or configuration under `.opencode/`, restart OpenCode so the updated definitions take effect. OpenCode loads these files at startup and does not hot-reload them.
+- **Restart OpenCode after `.opencode/**` changes.** When you add or modify agents, skills, or configuration under `.opencode/`, restart OpenCode so the updated definitions and workflow instruction changes take effect. OpenCode loads these files at startup and does not hot-reload them.
 - **Follow repository validation expectations from `AGENTS.md`.** Agents must respect the validation ladder: for Fennel work, run compile checks first, then constraints, then focused tests, then the broader suite. Required validation failures are debugging tasks, not items to bypass.
 - **Full Space validation.** When a change touches code that could affect the broader system, run the full test suite:
 
@@ -53,18 +53,40 @@ Once your agent environment is connected to a Space checkout, these repository c
   ```
 
 - **Fennel-facing work** must use the project-native Fennel validation ladder from `AGENTS.md`. Do not use system `fennel`, `fennel-ls`, `fnlfmt`, or ad-hoc evaluation as validation oracles. Use `tools.fennel-check`, constraints, and the test harness instead.
-- **Required validation failures** should be treated as debugging tasks rather than bypassed. When a required suite fails, invoke systematic debugging, identify the root cause, route the fix through implement → review → pass, and only proceed when the suite is green.
+- **Required validation failures**: see [Validation continuation and current base](#validation-continuation-and-current-base) for the full contract.
+
+## Validation continuation and current base
+
+Required validation failures are active debugging work, not a terminal workflow
+state. When a required suite fails, agents capture the failing command, failing
+tests, relevant output, current branch state, and `git status --porcelain`;
+invoke `systematic-debugging`; and continue investigating even when the failure
+appears unrelated, flaky, timing-dependent, or environmental.
+
+Repository fixes, generated-file repairs, and conflict resolutions go through
+`implementer` → `reviewer` → pass before commit. Agents rerun validation from a
+clean tree and proceed only when the required suite is green, or when systematic
+debugging establishes a true human-input blocker such as missing credentials,
+inaccessible infrastructure, an unsafe git-history decision, unreproducible
+behavior after reasonable evidence gathering, or a product/API/data/architecture
+choice.
+
+Before final validation, PR creation, or a ready-to-merge claim, agents fetch
+`origin` and evaluate the branch against current `origin/main`. If the branch is
+behind, they use a safe merge from `origin/main` when permitted, route resulting
+fixes through review, and rerun validation. Agents do not rebase or force-push
+unless the human explicitly requests it.
 
 ## Branch and pull request policy
 
 All agent-driven changes follow these branch and PR rules:
 
 - Pull requests target `main`.
-- Final validation and diff/base checks use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
+- Final validation and PR creation require a branch that is current with `origin/main`. Diff/base checks always use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
 - After implementation is complete — reviewed, committed, all tests passing, and the tree clean — the default integration action is to push the current branch and create a pull request targeting `main`.
 - Do not push directly to `main`. Always work on a feature branch and open a pull request.
 
-If required validation fails after implementation, review, or commit, do not finish, push, create a PR, merge, or clean up the branch. Debug the failure, fix it through the normal review cycle, and only proceed with integration when the required suite is green.
+If required validation fails after implementation, review, or commit, see [Validation continuation and current base](#validation-continuation-and-current-base). Do not finish, push, create a PR, merge, or clean up the branch while validation is red.
 
 ## Exclusions
 
