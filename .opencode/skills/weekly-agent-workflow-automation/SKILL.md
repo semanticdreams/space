@@ -19,7 +19,7 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
 ## Workflow
 
 1. `git fetch origin main`.
-2. Create or reset the run branch from `origin/main`: `automation/weekly-agent-workflow/YYYY-Www`.
+2. Create the run branch from `origin/main` (`automation/weekly-agent-workflow/YYYY-Www`) only when it does not already exist. If the branch already exists, switch to it, fetch `origin`, safe-merge `origin/main` when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and do not reset unless the human explicitly requests it.
 3. Run the analyzer and save sanitized evidence to a local scratch path that is not under `docs/`, for example:
 
    ```bash
