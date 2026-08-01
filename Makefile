@@ -1,15 +1,31 @@
-.PHONY: build cmake debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release fennel-check constraints test test-e2e test-live-hot-reload test-slow test-integration test-all-lua profile commit prof download-models-data resize-logo docs devlog test-windows-wine
+.PHONY: build build-full cmake cmake-minimal cmake-full debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release fennel-check constraints test test-e2e test-live-hot-reload test-slow test-integration test-all-lua profile commit prof download-models-data resize-logo docs devlog test-windows-wine
 
 SPACE_TEST_ENV = SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(CURDIR)/assets
 SPACE_FENNEL_ENV = FENNEL_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl FENNEL_MACRO_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl
 SPACE_RUNTIME_ENV = $(SPACE_TEST_ENV) $(SPACE_FENNEL_ENV)
 VALIDATION_OUTPUT = $(if $(VERBOSE),json,summary)
 
-cmake:
-	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
+BUILD_DIR = build
+BUILD_LOG = $(BUILD_DIR)/logs/build.log
+BUILD_JOBS = $(shell nproc)
+CMAKE_RELEASE = cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
+CMAKE_MINIMAL = $(CMAKE_RELEASE) -DSPACE_BUILD_PROFILE=minimal -DSPACE_ENABLE_CEF=OFF
+CMAKE_FULL = $(CMAKE_RELEASE) -DSPACE_BUILD_PROFILE=full -DSPACE_ENABLE_CEF=ON
+BUILD_LOG_RUNNER = ./scripts/build-log-runner.sh --log $(BUILD_LOG)
 
-build: cmake
-	cd build && $(MAKE) -j$(shell nproc)
+cmake: cmake-minimal
+
+cmake-minimal:
+	$(CMAKE_MINIMAL) .
+
+cmake-full:
+	$(CMAKE_FULL) .
+
+build:
+	@$(BUILD_LOG_RUNNER) --label "space minimal build" -- bash -lc '$(CMAKE_MINIMAL) . && cmake --build $(BUILD_DIR) -- -j$(BUILD_JOBS)'
+
+build-full:
+	@$(BUILD_LOG_RUNNER) --label "space full CEF build" -- bash -lc '$(CMAKE_FULL) . && cmake --build $(BUILD_DIR) -- -j$(BUILD_JOBS)'
 
 debug:
 	mkdir -p build/debug && cd build/debug && cmake -DCMAKE_BUILD_TYPE=Debug ../..
@@ -28,10 +44,10 @@ devlog:
 commit:
 	codex exec "run `git add -A` and commit with a fitting message"
 
-pack:
+pack: build-full
 	cd build && cpack
 
-appimage: build
+appimage: build-full
 	./scripts/build-appimage.sh
 
 install:
