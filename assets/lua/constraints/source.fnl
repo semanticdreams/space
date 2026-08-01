@@ -31,7 +31,7 @@
   "Replace backslashes with forward slashes so that Windows and Linux
   paths can be compared and split with a single delimiter."
   (local s (if path path ""))
-  (select 1 (string.gsub s "%\\" "/")))
+  (select 1 (string.gsub s "\\" "/")))
 
 (fn path-under-root? [file-path root]
   "Return true when file-path is equal to root or inside root (case-insensitive),

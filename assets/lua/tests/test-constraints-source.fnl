@@ -88,8 +88,8 @@
   (assert (= result.kind :files) (.. "expected :files, got " (tostring result.kind)))
   (assert result.files "files target should have files list")
   (assert (> (# result.files) 0) "files list should not be empty")
-  (assert (= (. result.files 1) "/tmp/space/constraints-one.fnl")
-          "files list should contain the specified file"))
+  (assert (= (. result.files 1) (fs.absolute "/tmp/space/constraints-one.fnl"))
+          "files list should contain the absolute specified file"))
 
 (fn targets-resolve-refuses-unsupported-target []
   (local Targets (require :constraints.targets))
@@ -151,7 +151,7 @@
     (local Source (require :constraints.source))
     (local records (Source.discover target))
     (assert (= (# records) 1) (.. "expected 1 fennel record, got " (# records)))
-    (assert (= (fs.parent (. records 1 :path)) dir)))))
+    (assert (= (fs.parent (. records 1 :path)) (fs.absolute dir))))))
 
 (fn source-parses-files-with-tree-sitter []
   (with-temp-dir (fn [dir]
@@ -434,7 +434,7 @@
     (assert (= (# records) 1)
             (.. "expected 1 fennel record, got " (# records)))
     (local r (. records 1))
-    (assert (= r.path fnl-path) "only .fnl file should be discovered"))))
+    (assert (= r.path (fs.absolute fnl-path)) "only .fnl file should be discovered"))))
 
 ;; --- Missing/unreadable root tests (R1-3) ---
 
