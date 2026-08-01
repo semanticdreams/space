@@ -18,10 +18,12 @@
       "unknown"))
 
 (fn path-separator? [c]
-  (or (= c "/") (= c "\\")))
+  (if (= c "/") true
+      (= c "\\") true
+      false))
 
 (fn normalize-logical-path [path]
-  (select 1 (string.gsub (or path "") "\\" "/")))
+  (select 1 (string.gsub (if path path "") "\\" "/")))
 
 (fn path-basename [path]
   (local normalized (normalize-logical-path path))
