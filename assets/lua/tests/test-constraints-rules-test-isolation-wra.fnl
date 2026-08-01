@@ -50,13 +50,6 @@
   (assert rule "rule lifecycle.global-mutation-restoration should be in rules list")
   rule)
 
-(fn asset-lua-root []
-  "Resolve the asset Lua root via runtime or SPACE_ASSETS_PATH env."
-  (local fs (require :fs))
-  (local runtime (require :runtime))
-  (local assets-path (or runtime.assets-path (os.getenv "SPACE_ASSETS_PATH") "assets"))
-  (fs.join-path assets-path "lua"))
-
 ;; ======================================================================
 ;; T11-WRA: with-restored-app wrapper recognition (same-file def required)
 ;; ======================================================================
@@ -305,8 +298,12 @@
   "T11-WRA-RF: Real-file regression. test-sandbox-activity.fnl should
    produce ZERO lifecycle.global-mutation-restoration diagnostics after
    with-restored-app wrapper recognition is implemented."
-  (local lua-root (asset-lua-root))
   (local fs (require :fs))
+  (local runtime (require :runtime))
+  (local assets-path (if runtime.assets-path runtime.assets-path
+                        (os.getenv "SPACE_ASSETS_PATH") (os.getenv "SPACE_ASSETS_PATH")
+                        "assets"))
+  (local lua-root (fs.join-path assets-path "lua"))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
   (local sandbox-path (fs.absolute (fs.join-path lua-root "tests" "test-sandbox-activity.fnl")))
