@@ -136,12 +136,25 @@ sudo zypper install \
   libpng16-devel
 ```
 
-Build and run:
+Build and run for normal local development:
 
 ```bash
 make build
 make run
 ```
+
+`make build` is the quiet default local build. It prints the full build log path before configure/build work starts, writes the complete CMake and compiler transcript to `build/logs/build.log`, and prints a concise success or failure summary. On failure, the terminal includes a bounded tail from `build/logs/build.log`; inspect the full log file for the complete transcript.
+
+The default local Makefile profile is minimal and CEF-off. `make build`, `make cmake`, and `make cmake-minimal` configure with `-DSPACE_BUILD_PROFILE=minimal -DSPACE_ENABLE_CEF=OFF`.
+
+For browser-surface development, CEF integration work, or full local packaging checks, use the explicit full profile:
+
+```bash
+make build-full
+make cmake-full
+```
+
+The full profile configures with `-DSPACE_BUILD_PROFILE=full -DSPACE_ENABLE_CEF=ON` and uses the same `build/logs/build.log` quiet build mechanism for `make build-full`.
 
 To run the app directly, use `./build/space -m main`.
 By default, `./build/space` also starts the main app; use `./build/space --repl` for the embedded Fennel REPL.
@@ -193,11 +206,13 @@ sudo dnf install dpkg-dev rpm-build
 - Use `make install-deb` to install a built `.deb` locally.
 - Use `make install-rpm` to install a built `.rpm` locally.
 
-Build an AppImage (portable Linux bundle):
+Build an AppImage (portable Linux bundle) from the full CEF-enabled local profile:
 
-```
+```bash
 make appimage
 ```
+
+`make appimage` depends on `make build-full` so local AppImage checks include browser/CEF runtime files. `make pack` also depends on `make build-full` before running CPack. Minimal release artifacts remain available through `scripts/build-linux.sh --profile minimal`.
 
 This writes `build/space-<version>-x86_64.AppImage`.
 
@@ -235,12 +250,11 @@ for Rust compilation.
 Wallet-core integration is disabled by default. Enable it by configuring with `-DSPACE_ENABLE_WALLET_CORE=ON`
 (e.g. `make cmake` then `cmake -DSPACE_ENABLE_WALLET_CORE=ON ..`).
 
-CEF embedded browser integration is Linux-only right now and enabled by default in the project `make cmake` flow.
-The pinned defaults are baked into CMake, so no extra flags are required for standard builds:
+CEF embedded browser integration is Linux-only right now. The normal local `make build` path is intentionally CEF-off for faster agent and developer feedback. Use the explicit full Makefile path when browser surfaces, CEF helper behavior, or CEF packaging contents are relevant:
 
 ```bash
-make cmake
-make build
+make cmake-full
+make build-full
 ```
 
 If you need to override the pinned build, you can still pass:
