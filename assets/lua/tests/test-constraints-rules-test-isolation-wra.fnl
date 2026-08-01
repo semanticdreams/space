@@ -299,10 +299,7 @@
    produce ZERO lifecycle.global-mutation-restoration diagnostics after
    with-restored-app wrapper recognition is implemented."
   (local fs (require :fs))
-  (local runtime (require :runtime))
-  (local assets-path (if runtime.assets-path runtime.assets-path
-                        (os.getenv "SPACE_ASSETS_PATH") (os.getenv "SPACE_ASSETS_PATH")
-                        "assets"))
+  (local assets-path (if (os.getenv "SPACE_ASSETS_PATH") (os.getenv "SPACE_ASSETS_PATH") "assets"))
   (local lua-root (fs.join-path assets-path "lua"))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
