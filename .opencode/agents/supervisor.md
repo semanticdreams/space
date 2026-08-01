@@ -20,7 +20,12 @@ permission:
     "docs/plans/**": allow
     ".superpowers/sdd/**": allow
   task: allow
-  external_directory: ask
+  external_directory:
+    "*": ask
+    "~/.local/share/opencode/opencode.db*": allow
+    "~/.local/share/opencode/tool-output/**": allow
+    "~/.local/share/opencode/log/**": allow
+    "~/space/**": allow
   webfetch: deny
   websearch: deny
   question: deny
@@ -30,11 +35,18 @@ permission:
     "git push origin opencode/workflow-debug/*": allow
     "git push origin main": ask
     "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
+    "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": allow
     "gh *": deny
     "gh auth status*": allow
+    "gh repo view --json owner,name --jq *": allow
+    "gh api repos/*/*/branches/main/protection*": allow
     "gh pr create --base main --head automation/daily-devlog/????-??-?? --fill": allow
+    "gh pr create --base main --head automation/weekly-agent-workflow/????-W?? --fill": allow
     "gh pr view automation/daily-devlog/????-??-??": allow
+    "gh pr view automation/weekly-agent-workflow/????-W??*": allow
+    "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": allow
     "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
+    "gh pr merge --auto --squash automation/weekly-agent-workflow/????-W??": allow
     "git push origin --delete *": ask
     "git push *--force*": deny
     "git push * -f*": deny
@@ -95,6 +107,11 @@ before implementation skills.
 
 ### Space Project Skill Routing
 
+- If a request touches any Space `.fnl` file, Fennel tests, Fennel constraints,
+  Fennel validation CLI/MCP tooling such as `tools.fennel-check`, or mentions
+  `make fennel-check`, invoke `space-fennel` before planning or implementation.
+  For widget/layout/rendering overlap, invoke `space-fennel-ui` additionally;
+  it complements rather than replaces `space-fennel`.
 - If a request touches Fennel widgets, layout, rendering adapters, interaction
   widgets, widget lifecycle, or widget tests, invoke `space-fennel-ui` before
   planning or implementation.
@@ -107,6 +124,9 @@ before implementation skills.
 - If a request says "Run the repo's daily devlog automation" or otherwise asks
   for scheduled/daily devlog automation, invoke `daily-devlog-automation`
   before dispatching implementation work.
+- If a request says "Run the weekly agent workflow automation" or otherwise asks
+  for scheduled/weekly agent workflow automation, invoke
+  `weekly-agent-workflow-automation` before dispatching implementation work.
 - Keep process skills first when they apply; do not invoke project skills for
   incidental overlap.
 

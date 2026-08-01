@@ -2,7 +2,7 @@
 (local gl (require :gl))
 
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
-(local NextAppRenderers (require :next-app/renderers))
+(local {: NextAppRenderers} (require :next-app/renderers))
 
 (fn clamp-size [value]
   (math.max 1 (math.floor (or value 1))))

@@ -18,6 +18,7 @@ public:
     Audio();
     ~Audio();
 
+    bool available() const;
     void update(uint32_t); // For streaming or timed cleanup
 
     // Sound loading and management
@@ -75,8 +76,8 @@ public:
     void reset();
 
 private:
-    ALCdevice* device;
-    ALCcontext* context;
+    ALCdevice* device { nullptr };
+    ALCcontext* context { nullptr };
 
     std::unordered_map<std::string, ALuint> buffers;
     std::vector<ALuint> activeSources;

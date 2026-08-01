@@ -266,8 +266,85 @@
                                :rotation (* twist (* base-rot-y base-rot-x))}))
               cuboids)))))
 
+(fn make-interaction-adapters [router]
+  ;; Adapter tables — widget-expected method names → router methods.
+  ;; Method-call arity: (clickables:register node) passes clickables as
+  ;; self and node as the first explicit arg.
+  (local clickables
+    {:register (fn [_self node] (router:register-clickable node))
+     :unregister (fn [_self node] (router:unregister-clickable node))
+     :register-right-click (fn [_self node] (router:register-clickable node))
+     :unregister-right-click (fn [_self node] (router:unregister-clickable node))
+     :register-double-click (fn [_self node] (router:register-clickable node))
+     :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
+  (local hoverables
+    {:register (fn [_self node] (router:register-hoverable node))
+     :unregister (fn [_self node] (router:unregister-hoverable node))})
+  {:clickables clickables :hoverables hoverables})
+
+(fn build-header-texts [renderer-options]
+  (local title-text (if (= renderer-options.title nil) "Next App" renderer-options.title))
+  (local title-scale (if (= renderer-options.title-scale nil) 0.11 renderer-options.title-scale))
+  (local title (TextWidget {:name "next-app-title" :text title-text :scale title-scale}))
+  (local subtitle-text (if (= renderer-options.subtitle nil) "New widgets on next-layout" renderer-options.subtitle))
+  (local subtitle-scale (if (= renderer-options.subtitle-scale nil) 0.07 renderer-options.subtitle-scale))
+  (local subtitle (TextWidget {:name "next-app-subtitle" :text subtitle-text :scale subtitle-scale}))
+  (local note-text (if (= renderer-options.note nil) "Panel + Flex + Button + Toggle + Progress + SSBO text" renderer-options.note))
+  (local note-scale (if (= renderer-options.note-scale nil) 0.055 renderer-options.note-scale))
+  (local note (TextWidget {:name "next-app-note" :text note-text :scale note-scale}))
+  {:title title :subtitle subtitle :note note})
+
+(fn build-button-row [clickables hoverables focus-context]
+  (local run-button
+    (ButtonWidget {:name "next-button-run"
+                   :text "Run"
+                   :variant :secondary
+                   :focus focus-context
+                   :clickables clickables
+                   :hoverables hoverables
+                   :text-scale 0.06
+                   :background-color (glm.vec4 0.15 0.46 0.95 0.96)
+                   :hover-background-color (glm.vec4 0.20 0.52 0.98 1)
+                   :pressed-background-color (glm.vec4 0.10 0.36 0.85 1)}))
+  (local inspect-button
+    (ButtonWidget {:name "next-button-inspect"
+                   :text "Inspect"
+                   :variant :secondary
+                   :focus focus-context
+                   :clickables clickables
+                   :hoverables hoverables
+                   :text-scale 0.06
+                   :background-color (glm.vec4 0.18 0.62 0.72 0.96)
+                   :hover-background-color (glm.vec4 0.22 0.68 0.78 1)
+                   :pressed-background-color (glm.vec4 0.12 0.50 0.62 1)}))
+  (local ship-button
+    (ButtonWidget {:name "next-button-ship"
+                   :text "Ship"
+                   :variant :secondary
+                   :focus focus-context
+                   :clickables clickables
+                   :hoverables hoverables
+                   :text-scale 0.06
+                   :background-color (glm.vec4 0.62 0.30 0.86 0.96)
+                   :hover-background-color (glm.vec4 0.69 0.36 0.91 1)
+                   :pressed-background-color (glm.vec4 0.52 0.24 0.72 1)}))
+  (local button-row
+    (NextFlex.Flex {:name "next-button-row"
+                    :axis :x
+                    :gap 0.06
+                    :children [(NextFlex.FlexChild run-button 1)
+                               (NextFlex.FlexChild inspect-button 1)
+                               (NextFlex.FlexChild ship-button 1)]}))
+  {:run-button run-button
+   :inspect-button inspect-button
+   :ship-button ship-button
+   :row button-row})
+
 (fn build-ui-root [renderer-options]
   (local router (InteractionRouter.new))
+  (local adapters (make-interaction-adapters router))
+  (local clickables adapters.clickables)
+  (local hoverables adapters.hoverables)
   (var focus-context nil)
   (when (= renderer-options.enable-focus true)
     (local {: FocusManager} (require :focus))
@@ -285,59 +362,23 @@
                                            (set node.get-focus-bounds opts.get-focus-bounds)))})
     (set router.focus-manager manager))
 
-  (local title
-    (TextWidget {:name "next-app-title"
-                 :text (or renderer-options.title "Next App")
-                 :scale (or renderer-options.title-scale 0.11)}))
-  (local subtitle
-    (TextWidget {:name "next-app-subtitle"
-                 :text (or renderer-options.subtitle "New widgets on next-layout")
-                 :scale (or renderer-options.subtitle-scale 0.07)}))
-  (local note
-    (TextWidget {:name "next-app-note"
-                 :text (or renderer-options.note "Panel + Flex + Button + Toggle + Progress + SSBO text")
-                 :scale (or renderer-options.note-scale 0.055)}))
+  (local headers (build-header-texts renderer-options))
+  (local title headers.title)
+  (local subtitle headers.subtitle)
+  (local note headers.note)
 
-  (local run-button
-    (ButtonWidget {:name "next-button-run"
-                   :text "Run"
-                   :variant :secondary
-                   :focus focus-context
-                   :text-scale 0.06
-                   :background-color (glm.vec4 0.15 0.46 0.95 0.96)
-                   :hover-background-color (glm.vec4 0.20 0.52 0.98 1)
-                   :pressed-background-color (glm.vec4 0.10 0.36 0.85 1)}))
-  (local inspect-button
-    (ButtonWidget {:name "next-button-inspect"
-                   :text "Inspect"
-                   :variant :secondary
-                   :focus focus-context
-                   :text-scale 0.06
-                   :background-color (glm.vec4 0.18 0.62 0.72 0.96)
-                   :hover-background-color (glm.vec4 0.22 0.68 0.78 1)
-                   :pressed-background-color (glm.vec4 0.12 0.50 0.62 1)}))
-  (local ship-button
-    (ButtonWidget {:name "next-button-ship"
-                   :text "Ship"
-                   :variant :secondary
-                   :focus focus-context
-                   :text-scale 0.06
-                   :background-color (glm.vec4 0.62 0.30 0.86 0.96)
-                   :hover-background-color (glm.vec4 0.69 0.36 0.91 1)
-                   :pressed-background-color (glm.vec4 0.52 0.24 0.72 1)}))
-
-  (local button-row
-    (NextFlex.Flex {:name "next-button-row"
-                    :axis :x
-                    :gap 0.06
-                    :children [(NextFlex.FlexChild run-button 1)
-                               (NextFlex.FlexChild inspect-button 1)
-                               (NextFlex.FlexChild ship-button 1)]}))
+  (local buttons (build-button-row clickables hoverables focus-context))
+  (local run-button buttons.run-button)
+  (local inspect-button buttons.inspect-button)
+  (local ship-button buttons.ship-button)
+  (local button-row buttons.row)
 
   (local perf-toggle
     (ToggleWidget {:name "next-toggle-perf"
                    :text "Perf mode"
                    :checked? true
+                   :clickables clickables
+                   :hoverables hoverables
                    :width 0.34
                    :height 0.16
                    :on-color (glm.vec4 0.22 0.80 0.56 1)
@@ -347,6 +388,8 @@
     (ToggleWidget {:name "next-toggle-logs"
                    :text "Verbose logs"
                    :checked? false
+                   :clickables clickables
+                   :hoverables hoverables
                    :width 0.34
                    :height 0.16
                    :on-color (glm.vec4 0.22 0.80 0.56 1)
@@ -496,9 +539,11 @@
    :router router
    :focus-context focus-context
    :run-button run-button
-   :inspect-button inspect-button
-   :ship-button ship-button
-   :search-input search-input
+    :inspect-button inspect-button
+    :ship-button ship-button
+    :perf-toggle perf-toggle
+    :logs-toggle logs-toggle
+    :search-input search-input
    :virtual-list virtual-list})
 
 (fn NextAppRenderers [opts]
@@ -707,4 +752,5 @@
    :get-last-submit-stats (fn [_self] last-submit-stats)
    :drop drop})
 
-NextAppRenderers
+{:build-ui-root build-ui-root
+ :NextAppRenderers NextAppRenderers}

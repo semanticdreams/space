@@ -47,6 +47,8 @@
 
 (fn build-profile-tree []
   (local rows [])
+  (local stub-clickables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)})
+  (local stub-hoverables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)})
   (for [i 1 180]
     (local row
       (NextFlex.Flex {:name (.. "row-" i)
@@ -54,6 +56,8 @@
                       :gap 0.02
                       :children [(NextFlex.FlexChild (ToggleWidget {:width 0.26
                                                                      :height 0.11
+                                                                     :clickables stub-clickables
+                                                                     :hoverables stub-hoverables
                                                                      :checked? (= (% i 2) 0)}) 0)
                                  (NextFlex.FlexChild (ProgressWidget {:value (/ (% i 10) 10)
                                                                        :width 0.34

@@ -37,15 +37,15 @@
   (local SystemCursors (require :system-cursors))
   (set app.intersectables (Intersectables))
   (set app.clickables (Clickables {:intersectables app.intersectables}))
-  (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+  (set app.hoverables (Hoverables {:intersectables app.intersectables})) (local clickables (assert app.clickables "input systems require app.clickables")) (local hoverables (assert app.hoverables "input systems require app.hoverables"))
   (set app.movables (Movables {:intersectables app.intersectables}))
   (set app.resizables (Resizables {:intersectables app.intersectables}))
   (set app.touch-gesture-targets
        (TouchGestureTargets {:intersectables app.intersectables}))
   (set app.system-cursors (SystemCursors))
   {:intersectables app.intersectables
-   :clickables app.clickables
-   :hoverables app.hoverables
+   :clickables clickables
+   :hoverables hoverables
    :movables app.movables
    :resizables app.resizables
    :touch-gesture-targets app.touch-gesture-targets

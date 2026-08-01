@@ -8,8 +8,8 @@
 
 (fn ToggleWidget [opts]
   (local options (or opts {}))
-  (local clickables options.clickables)
-  (local hoverables options.hoverables)
+  (local clickables (assert options.clickables "ToggleWidget requires clickables"))
+  (local hoverables (assert options.hoverables "ToggleWidget requires hoverables"))
   (local gap (or options.gap 0.08))
   (local width (or options.width 0.36))
   (local height (or options.height 0.16))

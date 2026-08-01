@@ -24,13 +24,15 @@
   (states:add-state :normal {})
   (states:add-state :tetris {})
   (states:set-state :normal)
-  (states.changed:connect
-    (fn [event]
-      (table.insert state-record.transitions event.current)))
+  (local changed-handler
+    (states.changed:connect
+      (fn [event]
+        (table.insert state-record.transitions event.current))))
   (set app.states states)
   (StateSystemBindings.bind-states-host states)
   (local (ok result) (pcall (fn [] (body state-record))))
   (do
+    (states.changed:disconnect changed-handler true)
     (StateSystemBindings.bind-states-host original-states)
     (set app.states original-states)
     (set app.engine original-engine)

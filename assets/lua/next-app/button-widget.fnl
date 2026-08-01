@@ -51,8 +51,8 @@
   (local focus-outline-width (or options.focus-outline-width 0.02))
   (local focusable? (not (= options.focusable? false)))
   (local focus-context options.focus)
-  (local clickables options.clickables)
-  (local hoverables options.hoverables)
+  (local clickables (assert options.clickables "ButtonWidget requires clickables"))
+  (local hoverables (assert options.hoverables "ButtonWidget requires hoverables"))
   (local system-cursors options.system-cursors)
 
   (local base-text-style

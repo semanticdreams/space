@@ -161,6 +161,8 @@
   (local objects (world:getCollisionObjectArray))
   (length objects))
 
+(fn activate-and-assert-containment [w y] (w:activate {})
+  (assert (= (. (. app.physics-containment-config.bounds.min) 2) y) "World activation should not overwrite app containment from world state"))
 (fn manager-creates-and-activates-default-home []
   (with-temp-dir
     (fn [root]
@@ -511,14 +513,24 @@
       (set world.runtime {:physics-containment-config {:mode "manual-bounds"
                                                        :bounds {:min [-500 -1450 -500]
                                                                 :max [500 500 500]}}})
-      (world:activate {})
-      ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
-      ;; containment is supplied by Scene slot activation (sandbox activity).
-      ;; The runtime config is not leaked to app globals.
-      (assert (= (. (. world.runtime.physics-containment-config.bounds.min) 2) -1450)
-              "World activation should preserve runtime containment state")
+      (local original-config app.physics-containment-config)
+      (set app.physics-containment-config {:mode "manual-bounds"
+                                            :bounds {:min [-500 -777 -500]
+                                                     :max [500 500 500]}})
+      (local (ok? err)
+        (pcall
+          (fn []
+            (world:activate {})
+            ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
+            ;; containment is supplied by Scene slot activation (sandbox activity).
+            ;; The runtime config is preserved and not leaked to app globals.
+            (assert (= (. (. app.physics-containment-config.bounds.min) 2) -777)
+                    "World activation should not overwrite app containment from world state")
+            (assert (= (. (. world.runtime.physics-containment-config.bounds.min) 2) -1450)
+                    "World activation should preserve runtime containment state"))))
+      (set app.physics-containment-config original-config)
+      (if (not ok?) (error err))
       true)))
-
 (fn home-world-captures-runtime-containment-on-drop []
   (with-temp-dir
     (fn [root]

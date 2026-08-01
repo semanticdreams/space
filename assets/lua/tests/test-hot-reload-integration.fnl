@@ -26,26 +26,29 @@
   (set (. package.loaded "main") nil)
   (require :main))
 
-(fn install-renderer-stub! []
-  (var skybox-state {})
-  (var background-state {})
-  (set app.renderers {:skybox {:set-state (fn [_self state]
-                                            (set skybox-state state)
-                                            true)
-                               :get-state (fn [_self]
-                                            skybox-state)}
-                      :set-background-state (fn [_self state]
-                                              (set background-state state)
-                                              true)
-                      :get-background-state (fn [_self]
-                                               background-state)
-                      :apply-theme (fn [_self _theme] true)
-                      :prerender-sub-apps (fn [_self] true)
-                      :draw-target (fn [_self _target _opts] true)
-                      :update (fn [_self] true)
-                      :on-viewport-changed (fn [_self _viewport] true)
-                      :drop (fn [_self] true)})
-  app.renderers)
+(fn make-renderer-stub []
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (var background-state {:enabled? false :color [0.5 0.5 0.5] :texture nil})
+  {:skybox {:set-state (fn [_self state]
+                          (set skybox-state state)
+                          true)
+            :get-state (fn [_self]
+                         skybox-state)}
+   :set-background-state (fn [_self state]
+                           (set background-state state)
+                           true)
+   :get-background-state (fn [_self]
+                            background-state)
+   :apply-theme (fn [_self _theme] true)
+   :prerender-sub-apps (fn [_self] true)
+   :draw-target (fn [_self _target _opts] true)
+   :update (fn [_self] true)
+    :on-viewport-changed (fn [_self _viewport] true)
+    :drop (fn [_self] true)})
+
+(fn apply-renderer-viewport! [opts]
+  (when (and app.renderers opts.viewport)
+    (app.renderers:on-viewport-changed opts.viewport)))
 
 (fn with-temp-dir [f]
   (local handle (tempfile.TemporaryDirectory {:prefix "units-test-"}))
@@ -55,6 +58,36 @@
   (if ok
       result
       (error result)))
+
+(fn finish-protected-result [body-ok body-result cleanup-ok cleanup-result]
+  (if body-ok
+      (if cleanup-ok body-result (error cleanup-result))
+      (error body-result)))
+
+(fn cleanup-app-hot-reload-controller-and-main! []
+  (when app.hot-reload-controller
+    (app.hot-reload-controller:drop)
+    (set app.hot-reload-controller nil))
+  (when (= (type (. (require :main) :drop)) :function)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-if-engine! []
+  (when (and (= (type (. (require :main) :drop)) :function) app.engine)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-loaded! []
+  (when (= (type (. (require :main) :drop)) :function)
+    (drop-main-and-restore-test-fixture!)))
+
+(fn cleanup-main-var-if-engine! [Main]
+  (when (and (= (type Main.drop) :function) app.engine)
+    (Main.drop)
+    (restore-test-runner-app-services!)))
+
+(fn cleanup-controller-and-main-if-engine! [controller]
+  (when controller
+    (controller:drop))
+  (cleanup-main-if-engine!))
 
 (fn count-searcher-occurrences [target]
   (var count 0)
@@ -75,13 +108,16 @@
       (local Main (require-main!))
       (local DebugLog (require :debug-log))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local original-config app.hot-reload-config)
       (local original-controller app.hot-reload-controller)
       (local original-worlds-dir app.worlds-dir)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (set app.hot-reload-controller nil)
       (set app.hot-reload-config {:enabled true
                                   :watch-paths [watch-root]
@@ -131,28 +167,27 @@
               (controller:drop))
             (set app.hot-reload-controller nil)
             true)))
-      (when app.hot-reload-controller
-        (app.hot-reload-controller:drop)
-        (set app.hot-reload-controller nil))
-      (when (= (type (. (require :main) :drop)) :function)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-app-hot-reload-controller-and-main!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (set app.hot-reload-controller original-controller)
       (set app.worlds-dir original-worlds-dir)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn drop-app-cleans-hot-reload-controller-and-callback []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local original-config app.hot-reload-config)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (set app.hot-reload-config {:enabled true
                                   :watch-paths [(fs.join-path runtime.assets-path "lua")]
                                   :preserve-modules ["app-bootstrap"
@@ -174,24 +209,24 @@
             (assert (= app.hot-reload-callback-id nil)
                     "Expected drop to clear app.hot-reload-callback-id")
             true)))
-      (when (and (= (type Main.drop) :function)
-                 app.engine)
-        (pcall (fn [] (Main.drop)))
-        (restore-test-runner-app-services!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-main-var-if-engine! Main))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn app-init-refreshes-agent-preset-context-after-drop []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -214,21 +249,23 @@
             (assert (not (= reset-context.activity "stale-mode"))
                     "Expected app init to overwrite stale preset context")
             true)))
-      (when (= (type (. (require :main) :drop)) :function)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-main-loaded!))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hud-unit-reload-roundtrips-panel-state []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -275,26 +312,24 @@
             (assert after-panel.relative-position
                     "Expected HUD unit reload to preserve panel position state")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-hud-file-changes-to-hud-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -354,25 +389,23 @@
                        (length (or before-state.panels [])))
                     "Expected routed HUD reload to preserve panel count")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn canvas-unit-reload-roundtrips-surface-state []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -443,26 +476,24 @@
             (assert (= after-panel.restorer-module before-panel.restorer-module)
                     "Expected canvas unit reload to preserve panel restorer module")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-canvas-file-changes-to-canvas-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -530,26 +561,24 @@
                        (length (or before-state.panels [])))
                     "Expected routed canvas reload to preserve panel count")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-workspace-shell-state-file-changes-to-app-root []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -592,26 +621,24 @@
             (assert (not (= app.world-manager old-world-manager))
                     "Expected workspace shell helper reload to replace app root ownership")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-shared-triangle-line-to-canvas-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -656,26 +683,24 @@
             (assert app.graph-view
                     "Canvas unit reload should recreate graph view for shared triangle-line changes")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-drawing-render-file-changes-to-drawing-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -728,26 +753,24 @@
             (assert app.activity-command-hints-provider
                     "Expected drawing activity unit reload to restore command hints hook")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-           (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-graph-view-file-changes-to-graph-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -796,25 +819,23 @@
             (assert app.graph-view
                     "Expected graph activity unit reload to restore graph view")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn graph-activity-registers-active-activity-snapshot-hooks []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -832,26 +853,24 @@
             (assert app.graph-view
                     "Graph activity restore-active-activity should keep graph view active")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-board-file-changes-to-board-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+          (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -899,23 +918,21 @@
             (assert app.board-view
                     "Expected board activity unit reload to restore board view")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn unloading-active-drawing-activity-updates-shell-state []
   (local Main (require-main!))
   (local original-init-renderers AppBootstrap.init-renderers)
+  (local original-renderers app.renderers)
   (set AppBootstrap.init-renderers
-       (fn [_opts]
-         (install-renderer-stub!)))
+       (fn [opts]
+         (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+         app.renderers))
   (local (ok result)
     (pcall
       (fn []
@@ -938,23 +955,24 @@
         (assert (not (= app.activity-drawing-enabled? true))
                 "Expected drawing-only hooks to clear after unloading drawing activity")
         true)))
-  (when (and (= (type (. (require :main) :drop)) :function)
-             app.engine)
-    (drop-main-and-restore-test-fixture!))
+  (local (cleanup-ok cleanup-result)
+    (pcall cleanup-main-if-engine!))
+  (set app.renderers original-renderers)
   (set AppBootstrap.init-renderers original-init-renderers)
-  (if ok
-      result
-      (error result)))
+  (finish-protected-result ok result cleanup-ok cleanup-result))
 
 (fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
       (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-renderers app.renderers)
       (local watch-root (fs.join-path runtime.assets-path "lua"))
       (set AppBootstrap.init-renderers
-           (fn [_opts]
-             (install-renderer-stub!)))
+           (fn [opts]
+             (set app.renderers (make-renderer-stub))
+              (apply-renderer-viewport! opts)
+             app.renderers))
       (var controller nil)
       (local (ok result)
         (pcall
@@ -996,16 +1014,11 @@
             (assert (= debug-state.last-target-unit-id "drawing-activity")
                     "Expected drawing activity actions file change to target drawing activity unit")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall cleanup-controller-and-main-if-engine! controller))
+      (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (table.insert tests {:name "full app root reload roundtrips active world"
                      :fn full-app-root-reload-roundtrips-active-world})

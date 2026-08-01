@@ -88,6 +88,10 @@
     :tests.test-list-view
     :tests.test-search-view
     :tests.test-fennel-interpreter-view
+    :tests.test-tree-sitter-fennel
+    :tests.test-fennel-validation
+    :tests.test-fennel-check-cli
+    :tests.test-fennel-validation-mcp
     :tests.test-launchables
     :tests.test-random
     :tests.test-tempfile
@@ -155,6 +159,7 @@
     :tests.test-renderers
     :tests.test-widget-cuboid
     :tests.test-radial
+    :tests.test-audio-disabled
     :tests.test-volume
     :tests.test-kernels
     :tests.test-physics-containment
@@ -187,7 +192,19 @@
     :tests.test-repo-display
     :tests.test-panel-transfer
     :tests.test-sandbox-scene-world-data
-    :tests.test-external-unit-mcp]})
+    :tests.test-external-unit-mcp
+    :tests.test-constraints-runner
+    :tests.test-constraints-source
+    :tests.test-constraints-facts
+    :tests.test-constraints-baseline
+    :tests.test-constraints-rules-scene-sandbox
+    :tests.test-constraints-rules-lifecycle
+     :tests.test-constraints-rules-test-isolation
+     :tests.test-constraints-rules-test-isolation-precision
+    :tests.test-constraints-rules-layout
+    :tests.test-constraints-rules-structure
+    :tests.test-constraints-default-run
+    :tests.test-constraints-integration-config]})
 
 (local main
   (fn []

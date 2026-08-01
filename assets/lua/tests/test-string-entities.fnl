@@ -27,6 +27,31 @@
       (local store (StringEntityStore.StringEntityStore {:base-dir root}))
       (f store root))))
 
+(fn disconnect-signal-handlers [records]
+  (each [_ record (ipairs records)]
+    (record.signal:disconnect record.handler true)))
+
+(fn rethrow-after-signal-cleanup [ok result cleanup-records]
+  (local (cleanup-ok cleanup-result) (pcall disconnect-signal-handlers cleanup-records))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn exercise-string-created-signal [store counts]
+  (store:create-entity {:value "test"})
+  (assert (= counts.created 1) "created signal should be emitted"))
+
+(fn exercise-string-updated-signal [store counts]
+  (local entity (store:create-entity {:value "test"}))
+  (store:update-entity entity.id {:value "updated"})
+  (assert (= counts.updated 1) "updated signal should be emitted"))
+
+(fn exercise-string-deleted-signal [store counts]
+  (local entity (store:create-entity {:value "test"}))
+  (store:delete-entity entity.id)
+  (assert (= counts.deleted 1) "deleted signal should be emitted"))
+
 (fn string-entity-store-creates-entities []
   (with-temp-store
     (fn [store _root]
@@ -77,28 +102,32 @@
 (fn string-entity-store-emits-created-signal []
   (with-temp-store
     (fn [store _root]
-      (var created-count 0)
-      (store.string-entity-created:connect (fn [_] (set created-count (+ created-count 1))))
-      (store:create-entity {:value "test"})
-      (assert (= created-count 1) "created signal should be emitted"))))
+      (local counts {:created 0})
+      (local created-handler (fn [_] (set counts.created (+ counts.created 1))))
+      (store.string-entity-created:connect created-handler)
+      (local (ok result) (pcall exercise-string-created-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.string-entity-created :handler created-handler}]))))
 
 (fn string-entity-store-emits-updated-signal []
   (with-temp-store
     (fn [store _root]
-      (var updated-count 0)
-      (store.string-entity-updated:connect (fn [_] (set updated-count (+ updated-count 1))))
-      (local entity (store:create-entity {:value "test"}))
-      (store:update-entity entity.id {:value "updated"})
-      (assert (= updated-count 1) "updated signal should be emitted"))))
+      (local counts {:updated 0})
+      (local updated-handler (fn [_] (set counts.updated (+ counts.updated 1))))
+      (store.string-entity-updated:connect updated-handler)
+      (local (ok result) (pcall exercise-string-updated-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.string-entity-updated :handler updated-handler}]))))
 
 (fn string-entity-store-emits-deleted-signal []
   (with-temp-store
     (fn [store _root]
-      (var deleted-count 0)
-      (store.string-entity-deleted:connect (fn [_] (set deleted-count (+ deleted-count 1))))
-      (local entity (store:create-entity {:value "test"}))
-      (store:delete-entity entity.id)
-      (assert (= deleted-count 1) "deleted signal should be emitted"))))
+      (local counts {:deleted 0})
+      (local deleted-handler (fn [_] (set counts.deleted (+ counts.deleted 1))))
+      (store.string-entity-deleted:connect deleted-handler)
+      (local (ok result) (pcall exercise-string-deleted-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.string-entity-deleted :handler deleted-handler}]))))
 
 (fn string-entity-store-preserves-multiline-values []
   (with-temp-store
@@ -211,6 +240,14 @@
 (table.insert tests {:name "string entity list node view loads"
                      :fn string-entity-list-node-view-loads})
 (table.insert tests {:name "string entity node view loads"
-                     :fn string-entity-node-view-loads})
+                      :fn string-entity-node-view-loads})
 
-tests
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "string-entities"
+                       :tests tests})))
+
+{:name "string-entities"
+ :tests tests
+ :main main}

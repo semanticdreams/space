@@ -13,6 +13,22 @@
   (fh:close)
   bytes)
 
+(fn cleanup [client]
+  (when client
+    (client:close)))
+
+(fn with-cleanup [client body]
+  (local (ok result) (pcall body))
+  (local (cleanup-ok cleanup-result) (pcall cleanup client))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn assert-no-client-error [error-message]
+  (when error-message
+    (error (.. "client error: " error-message))))
+
 (fn main []
   (local token-path (assert (os.getenv "SPACE_REALTIME_TOKEN_PATH") "SPACE_REALTIME_TOKEN_PATH required"))
   (local client-id-value (assert (os.getenv "SPACE_REALTIME_CLIENT_ID") "SPACE_REALTIME_CLIENT_ID required"))
@@ -70,23 +86,23 @@
       (set done true)))
   (client:connect {:client-id client-id
                    :connect-token (read-binary token-path)})
-  (local ok
-    (callbacks.run-loop {:poll-jobs true
-                         :poll-http false
-                         :poll-process false
-                         :sleep-ms 1
-                         :timeout-ms 5000
-                         :until (fn []
-                                  (when settle-ticks
-                                    (set settle-ticks (- settle-ticks 1))
-                                    (when (<= settle-ticks 0)
-                                      (set done true)))
-                                  done)}))
-  (client:close)
-  (assert ok "client timed out waiting for pong")
-  (assert feature-deactivated "client feature-deactivated callback should fire")
-  (assert (not error-message)
-          (or (and error-message (.. "client error: " error-message))
-              "client error")))
+  (fn done-after-settle? []
+    (when settle-ticks
+      (set settle-ticks (- settle-ticks 1))
+      (when (<= settle-ticks 0)
+        (set done true)))
+    done)
+  (with-cleanup client
+    (fn []
+      (local loop-ok
+        (callbacks.run-loop {:poll-jobs true
+                             :poll-http false
+                             :poll-process false
+                             :sleep-ms 1
+                             :timeout-ms 5000
+                             :until done-after-settle?}))
+      (assert loop-ok "client timed out waiting for pong")
+      (assert feature-deactivated "client feature-deactivated callback should fire")
+      (assert-no-client-error error-message))))
 
 {:main main}

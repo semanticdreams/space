@@ -5,6 +5,22 @@
 (fn msg->string [msg]
   ((. msg :to-string) msg))
 
+(fn cleanup-zmq [records ctx]
+  (each [_ record (ipairs records)]
+    (when (and record.socket record.endpoint)
+      (record.socket:disconnect record.endpoint))
+    (when record.socket
+      (record.socket:close)))
+  (when ctx
+    (ctx:close)))
+
+(fn rethrow-after-zmq-cleanup [ok result records ctx]
+  (local (cleanup-ok cleanup-result) (pcall cleanup-zmq records ctx))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
 (fn zmq-version []
   (local version (zmq.version))
   (assert (and version.major version.minor version.patch))
@@ -15,17 +31,19 @@
   (local ctx (zmq.Context 1))
   (local rep (ctx:socket socket-types.REP))
   (local req (ctx:socket socket-types.REQ))
+  (local endpoint "inproc://req-rep")
   (rep:bind "inproc://req-rep")
-  (req:connect "inproc://req-rep")
-  (req:send "ping")
-  (local msg (rep:recv))
-  (assert (= (msg->string msg) "ping"))
-  (rep:send "pong")
-  (local reply (req:recv))
-  (assert (= (msg->string reply) "pong"))
-  (rep:close)
-  (req:close)
-  (ctx:close)
+  (req:connect endpoint)
+  (local (ok result) (pcall (fn []
+                              (req:send "ping")
+                              (local msg (rep:recv))
+                              (assert (= (msg->string msg) "ping"))
+                              (rep:send "pong")
+                              (local reply (req:recv))
+                              (assert (= (msg->string reply) "pong")))))
+  (rethrow-after-zmq-cleanup ok result [{:socket req :endpoint endpoint}
+                                        {:socket rep}]
+                             ctx)
   true)
 
 (fn multipart-send-recv []
@@ -33,17 +51,19 @@
   (local ctx (zmq.Context 1))
   (local sender (ctx:socket socket-types.PAIR))
   (local receiver (ctx:socket socket-types.PAIR))
+  (local endpoint "inproc://multipart")
   (sender:bind "inproc://multipart")
-  (receiver:connect "inproc://multipart")
-  (sender:send ["alpha" "beta" "gamma"])
-  (local parts (receiver:recv-multipart))
-  (assert (= (length parts) 3))
-  (assert (= (msg->string (. parts 1)) "alpha"))
-  (assert (= (msg->string (. parts 2)) "beta"))
-  (assert (= (msg->string (. parts 3)) "gamma"))
-  (sender:close)
-  (receiver:close)
-  (ctx:close)
+  (receiver:connect endpoint)
+  (local (ok result) (pcall (fn []
+                              (sender:send ["alpha" "beta" "gamma"])
+                              (local parts (receiver:recv-multipart))
+                              (assert (= (length parts) 3))
+                              (assert (= (msg->string (. parts 1)) "alpha"))
+                              (assert (= (msg->string (. parts 2)) "beta"))
+                              (assert (= (msg->string (. parts 3)) "gamma")))))
+  (rethrow-after-zmq-cleanup ok result [{:socket receiver :endpoint endpoint}
+                                        {:socket sender}]
+                             ctx)
   true)
 
 (fn nonblocking-and-poll []
@@ -53,18 +73,20 @@
   (local ctx (zmq.Context 1))
   (local sender (ctx:socket socket-types.PAIR))
   (local receiver (ctx:socket socket-types.PAIR))
+  (local endpoint "inproc://poll")
   (sender:bind "inproc://poll")
-  (receiver:connect "inproc://poll")
-  (assert (= (receiver:recv recv-flags.DONTWAIT) nil))
-  (sender:send "ready")
-  (local polled (zmq.poll [{:socket receiver :events poll-events.IN}] 10))
-  (local revents (. (. polled 1) "revents"))
-  (assert (> revents 0))
-  (local msg (receiver:recv))
-  (assert (= (msg->string msg) "ready"))
-  (sender:close)
-  (receiver:close)
-  (ctx:close)
+  (receiver:connect endpoint)
+  (local (ok result) (pcall (fn []
+                              (assert (= (receiver:recv recv-flags.DONTWAIT) nil))
+                              (sender:send "ready")
+                              (local polled (zmq.poll [{:socket receiver :events poll-events.IN}] 10))
+                              (local revents (. (. polled 1) "revents"))
+                              (assert (> revents 0))
+                              (local msg (receiver:recv))
+                              (assert (= (msg->string msg) "ready")))))
+  (rethrow-after-zmq-cleanup ok result [{:socket receiver :endpoint endpoint}
+                                        {:socket sender}]
+                             ctx)
   true)
 
 (fn socket-options []
@@ -103,15 +125,16 @@
       (lua "return true"))
     (error err))
   (req:connect endpoint)
-  (req:send "hello")
-  (local msg (rep:recv))
-  (assert (= (msg->string msg) "hello"))
-  (rep:send "world")
-  (local reply (req:recv))
-  (assert (= (msg->string reply) "world"))
-  (rep:close)
-  (req:close)
-  (ctx:close)
+  (local (ok-roundtrip result) (pcall (fn []
+                                        (req:send "hello")
+                                        (local msg (rep:recv))
+                                        (assert (= (msg->string msg) "hello"))
+                                        (rep:send "world")
+                                        (local reply (req:recv))
+                                        (assert (= (msg->string reply) "world")))))
+  (rethrow-after-zmq-cleanup ok-roundtrip result [{:socket req :endpoint endpoint}
+                                                  {:socket rep}]
+                             ctx)
   (when (fs.exists path)
     (fs.remove path))
   true)

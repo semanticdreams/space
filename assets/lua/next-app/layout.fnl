@@ -370,7 +370,7 @@
 (set Node.set-frame set-frame)
 (set Node.layout-set-frame layout-set-frame)
 (set Node.add-child add-child)
-(set Node.clear-children clear-children)
+(set Node.clear-children clear-children) (set Node.drop (fn [self] (self:clear-children)))
 (set Node.mark-measure-dirty mark-measure-dirty)
 (set Node.mark-layout-dirty mark-layout-dirty)
 (set Node.mark-transform-dirty mark-transform-dirty)

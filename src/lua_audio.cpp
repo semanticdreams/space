@@ -18,11 +18,16 @@ sol::table create_audio_table(sol::state_view lua)
         sol::no_constructor,
         "loadSound", &Audio::loadSound,
         "loadSoundAsync", [](Audio& self, const std::string& name, const std::string& path, sol::object cb) {
-            (void) self;
             std::optional<uint64_t> cb_id;
             if (cb.is<sol::function>()) {
                 sol::function fn = cb.as<sol::function>();
                 cb_id = lua_callbacks_register(fn);
+            }
+            if (!self.available()) {
+                if (cb_id) {
+                    lua_callbacks_enqueue_value(cb_id.value(), sol::lua_nil);
+                }
+                return false;
             }
             ResourceManager::ReadyCallback onReady = [cb_id](const std::string&) {
                 if (cb_id) {

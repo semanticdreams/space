@@ -55,8 +55,8 @@
 
 (fn make-test-ctx []
     (local intersector (Intersectables))
-    (local clickables (Clickables {:intersectables intersector}))
-    (local hoverables (Hoverables {:intersectables intersector}))
+    (local clickables (assert (Clickables {:intersectables intersector}) "wallet view test context requires clickables"))
+    (local hoverables (assert (Hoverables {:intersectables intersector}) "wallet view test context requires hoverables"))
     (local triangle (make-vector-buffer))
     (local text-buffer (make-vector-buffer))
     (local image-batches {})

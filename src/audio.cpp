@@ -12,6 +12,11 @@
 #include <AL/alext.h>
 
 namespace {
+bool audio_disabled() {
+    const char* disableAudio = std::getenv("SPACE_DISABLE_AUDIO");
+    return disableAudio && std::string(disableAudio) == "1";
+}
+
 void ensure_openal_drivers() {
     if (std::getenv("ALSOFT_DRIVERS")) {
         return;
@@ -162,6 +167,10 @@ bool loadWavFile(const std::string& filepath,
 }
 
 Audio::Audio() {
+    if (audio_disabled()) {
+        return;
+    }
+
     device = open_al_device();
     if (!device) {
         std::cerr << "Failed to open OpenAL device." << std::endl;
@@ -189,6 +198,10 @@ Audio::Audio() {
 }
 
 Audio::~Audio() {
+    if (!available()) {
+        return;
+    }
+
     std::vector<ALuint> sources = activeSources;
     for (ALuint source : sources) {
         if (streamingSources.find(source) != streamingSources.end()) {
@@ -213,11 +226,21 @@ Audio::~Audio() {
     }
 }
 
+bool Audio::available() const {
+    return context != nullptr;
+}
+
 void Audio::update(uint32_t dt) {
+    if (!available()) {
+        return;
+    }
     cleanupStoppedSources();
 }
 
 bool Audio::loadSound(const std::string& name, const std::string& filepath) {
+    if (!available()) {
+        return false;
+    }
     if (buffers.find(name) != buffers.end()) return true; // Already loaded
 
     std::unique_ptr<std::uint8_t[]> data;
@@ -231,7 +254,7 @@ bool Audio::loadSound(const std::string& name, const std::string& filepath) {
     }
     //std::cout << "Loaded WAV file: " << filepath << format << " " << freq << std::endl;
 
-    ALuint buffer;
+    ALuint buffer = 0;
     alGenBuffers(1, &buffer);
     ALenum err = alGetError();
     if (err != AL_NO_ERROR) {
@@ -257,6 +280,9 @@ ALuint Audio::createBufferFromPcm(const std::string& name,
                                   std::size_t size_bytes,
                                   ALenum format,
                                   ALsizei freq) {
+    if (!available()) {
+        return 0;
+    }
     if (buffers.find(name) != buffers.end()) {
         return buffers[name];
     }
@@ -289,12 +315,14 @@ bool Audio::isSoundReady(const std::string& name) const {
 void Audio::unloadSound(const std::string& name) {
     auto it = buffers.find(name);
     if (it != buffers.end()) {
-        alDeleteBuffers(1, &it->second);
+        if (available()) {
+            alDeleteBuffers(1, &it->second);
+        }
         buffers.erase(it);
     }
 }
 ALuint Audio::createSource(ALuint buffer, const glm::vec3& position, bool loop, bool positional) {
-    if (!context) {
+    if (!available() || buffer == 0) {
         return 0;
     }
     ALuint source = 0;
@@ -326,7 +354,7 @@ ALuint Audio::createSource(ALuint buffer, const glm::vec3& position, bool loop, 
 }
 
 ALuint Audio::createSourceWithoutBuffer(const glm::vec3& position, bool loop, bool positional) {
-    if (!context) {
+    if (!available()) {
         return 0;
     }
     ALuint source = 0;
@@ -356,6 +384,9 @@ ALuint Audio::createSourceWithoutBuffer(const glm::vec3& position, bool loop, bo
 }
 
 void Audio::waitForSoundToFinish(ALuint source) {
+    if (!available() || source == 0) {
+        return;
+    }
     ALint state;
     do {
         alGetSourcei(source, AL_SOURCE_STATE, &state);
@@ -364,6 +395,9 @@ void Audio::waitForSoundToFinish(ALuint source) {
 }
 
 ALuint Audio::playSound(const std::string& name, const glm::vec3& position, bool loop, bool positional) {
+    if (!available()) {
+        return 0;
+    }
     auto it = buffers.find(name);
     if (it == buffers.end()) {
         std::cerr << "Sound not loaded: " << name << std::endl;
@@ -371,12 +405,18 @@ ALuint Audio::playSound(const std::string& name, const glm::vec3& position, bool
     }
 
     ALuint source = createSource(it->second, position, loop, positional);
+    if (source == 0) {
+        return 0;
+    }
     alSourcePlay(source);
     activeSources.push_back(source);
     return source;
 }
 
 void Audio::stopSound(ALuint sourceId) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourceStop(sourceId);
 }
 
@@ -400,7 +440,7 @@ bool Audio::queueStreamPcm16(ALuint sourceId,
                              int channels,
                              int sample_rate,
                              double pts_seconds) {
-    if (sourceId == 0 || !samples || sample_count == 0 || sample_rate <= 0) {
+    if (!available() || sourceId == 0 || !samples || sample_count == 0 || sample_rate <= 0) {
         return false;
     }
     if (channels != 1 && channels != 2) {
@@ -457,6 +497,9 @@ bool Audio::queueStreamPcm16(ALuint sourceId,
 }
 
 void Audio::reclaimProcessedStreamBuffers(ALuint sourceId) {
+    if (!available()) {
+        return;
+    }
     if (streamingSources.find(sourceId) == streamingSources.end()) {
         return;
     }
@@ -484,7 +527,7 @@ void Audio::reclaimProcessedStreamBuffers(ALuint sourceId) {
 }
 
 void Audio::destroyStreamingSource(ALuint sourceId) {
-    if (sourceId == 0) {
+    if (!available() || sourceId == 0) {
         return;
     }
     if (streamingSources.find(sourceId) == streamingSources.end()) {
@@ -522,21 +565,21 @@ void Audio::destroyStreamingSource(ALuint sourceId) {
 }
 
 void Audio::pauseSource(ALuint sourceId) {
-    if (sourceId == 0) {
+    if (!available() || sourceId == 0) {
         return;
     }
     alSourcePause(sourceId);
 }
 
 void Audio::playSource(ALuint sourceId) {
-    if (sourceId == 0) {
+    if (!available() || sourceId == 0) {
         return;
     }
     alSourcePlay(sourceId);
 }
 
 double Audio::getSourceOffsetSeconds(ALuint sourceId) const {
-    if (sourceId == 0) {
+    if (!available() || sourceId == 0) {
         return 0.0;
     }
     ALfloat offset = 0.0f;
@@ -548,7 +591,7 @@ double Audio::getSourceOffsetSeconds(ALuint sourceId) const {
 }
 
 double Audio::getStreamingClockSeconds(ALuint sourceId, double fallback_seconds) const {
-    if (sourceId == 0) {
+    if (!available() || sourceId == 0) {
         return fallback_seconds;
     }
 
@@ -571,10 +614,16 @@ double Audio::getStreamingClockSeconds(ALuint sourceId, double fallback_seconds)
 }
 
 void Audio::setListenerPosition(const glm::vec3& position) {
+    if (!available()) {
+        return;
+    }
     alListener3f(AL_POSITION, position.x, position.y, position.z);
 }
 
 void Audio::setListenerOrientation(const glm::vec3& forward, const glm::vec3& up) {
+    if (!available()) {
+        return;
+    }
     float orientation[6] = {
         forward.x, forward.y, forward.z,
         up.x, up.y, up.z
@@ -583,62 +632,107 @@ void Audio::setListenerOrientation(const glm::vec3& forward, const glm::vec3& up
 }
 
 void Audio::setListenerVelocity(const glm::vec3& velocity) {
+    if (!available()) {
+        return;
+    }
     alListener3f(AL_VELOCITY, velocity.x, velocity.y, velocity.z);
 }
 
 void Audio::setSourcePosition(ALuint sourceId, const glm::vec3& position) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSource3f(sourceId, AL_POSITION, position.x, position.y, position.z);
 }
 
 void Audio::setSourceVelocity(ALuint sourceId, const glm::vec3& velocity) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSource3f(sourceId, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
 }
 
 void Audio::setSourceDirection(ALuint sourceId, const glm::vec3& direction) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSource3f(sourceId, AL_DIRECTION, direction.x, direction.y, direction.z);
 }
 
 void Audio::setSourceGain(ALuint sourceId, float gain) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_GAIN, gain);
 }
 
 void Audio::setSourcePitch(ALuint sourceId, float pitch) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_PITCH, pitch);
 }
 
 void Audio::setSourceMaxDistance(ALuint sourceId, float distance) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_MAX_DISTANCE, distance);
 }
 
 void Audio::setSourceRolloffFactor(ALuint sourceId, float factor) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_ROLLOFF_FACTOR, factor);
 }
 
 void Audio::setSourceReferenceDistance(ALuint sourceId, float distance) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_REFERENCE_DISTANCE, distance);
 }
 
 void Audio::setSourceMinGain(ALuint sourceId, float gain) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_MIN_GAIN, gain);
 }
 
 void Audio::setSourceMaxGain(ALuint sourceId, float gain) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_MAX_GAIN, gain);
 }
 
 void Audio::setSourceConeInnerAngle(ALuint sourceId, float angle_degrees) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_CONE_INNER_ANGLE, angle_degrees);
 }
 
 void Audio::setSourceConeOuterAngle(ALuint sourceId, float angle_degrees) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_CONE_OUTER_ANGLE, angle_degrees);
 }
 
 void Audio::setSourceConeOuterGain(ALuint sourceId, float gain) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     alSourcef(sourceId, AL_CONE_OUTER_GAIN, gain);
 }
 
 void Audio::setSourcePositional(ALuint sourceId, bool positional) {
+    if (!available() || sourceId == 0) {
+        return;
+    }
     if (positional) {
         alSourcei(sourceId, AL_SOURCE_RELATIVE, AL_FALSE);
     } else {
@@ -657,6 +751,9 @@ float Audio::getMasterVolume() const {
 }
 
 void Audio::cleanupStoppedSources() {
+    if (!available()) {
+        return;
+    }
     auto it = activeSources.begin();
     while (it != activeSources.end()) {
         if (streamingSources.find(*it) != streamingSources.end()) {
@@ -681,7 +778,7 @@ void Audio::reset() {
     for (ALuint source : sources) {
         if (streamingSources.find(source) != streamingSources.end()) {
             destroyStreamingSource(source);
-        } else {
+        } else if (available()) {
             alSourceStop(source);
             alDeleteSources(1, &source);
         }
@@ -695,9 +792,15 @@ void Audio::reset() {
 
     // 2. Delete all buffers (if you plan to reload them)
     for (auto& pair : buffers) {
-        alDeleteBuffers(1, &pair.second);
+        if (available()) {
+            alDeleteBuffers(1, &pair.second);
+        }
     }
     buffers.clear();
+
+    if (audio_disabled()) {
+        return;
+    }
 
     // 3. Tear down OpenAL context and device
     if (context) {
@@ -729,5 +832,8 @@ void Audio::reset() {
 }
 
 void Audio::applyMasterVolume() {
+    if (!available()) {
+        return;
+    }
     alListenerf(AL_GAIN, masterVolume);
 }

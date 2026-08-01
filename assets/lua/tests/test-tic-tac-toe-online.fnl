@@ -176,8 +176,8 @@
         (BuildContext {:layout-root layout-root
                        :pointer-target scene
                        :panel-target scene
-                       :clickables mock-app.clickables
-                       :hoverables mock-app.hoverables
+                        :clickables (assert mock-app.clickables "tic tac toe online test requires app.clickables")
+                        :hoverables (assert mock-app.hoverables "tic tac toe online test requires app.hoverables")
                        :movables mock-app.movables
                        :resizables mock-app.resizables
                        :intersectables mock-app.intersectables
@@ -675,7 +675,63 @@
 ;; Main
 ;; ═══════════════════════════════════════
 
-(fn main []
+(fn quiet-validation? []
+  (not (os.getenv "TEST_VERBOSE")))
+
+(fn append-captured-output! [captured args]
+  (var text "")
+  (each [i value (ipairs args)]
+    (when (> i 1)
+      (set text (.. text "\t")))
+    (set text (.. text (tostring value))))
+  (table.insert captured text))
+
+(fn unexpected-captured-output [captured]
+  (local markers ["[sol2]" "level=warning" "level=error" "WARNING" "[WARN" "[ERROR" "FAIL:" "Failures:"])
+  (var found nil)
+  (each [_ line (ipairs captured)]
+    (var expected-noise? false)
+    (when (string.find line "force_sse_reject" 1 true)
+      (set expected-noise? true))
+    (when (string.find line "[mcp] tool space_unit_edit_file error" 1 true)
+      (set expected-noise? true))
+    (when (string.find line "expected whitespace before token" 1 true)
+      (set expected-noise? true))
+    (when (not expected-noise?)
+      (each [_ marker (ipairs markers)]
+        (when (and (not found) (string.find line marker 1 true))
+          (set found line)))))
+  found)
+
+(fn with-quiet-output [body]
+  (if (quiet-validation?)
+      (do
+        (local logging (require :logging))
+        (local original-mcp-level (logging.get-level "mcp"))
+        (local original-space-level (logging.get-level "space"))
+        (logging.set-level "mcp" "error")
+        (logging.set-level "space" "warn")
+        (local original-print _G.print)
+        (local original-io-write io.write)
+        (local original-io-flush io.flush)
+        (local captured [])
+        (set _G.print (fn [...] (append-captured-output! captured [...])))
+        (set io.write (fn [...] (append-captured-output! captured [...])))
+        (set io.flush (fn [...] nil))
+        (local (ok result) (pcall body))
+        (set io.flush original-io-flush)
+        (set io.write original-io-write)
+        (set _G.print original-print)
+        (logging.set-level "space" original-space-level)
+        (logging.set-level "mcp" original-mcp-level)
+        (local unexpected (unexpected-captured-output captured))
+        (when unexpected
+          (print (.. "Unexpected tic-tac-toe validation output: " unexpected))
+          (error unexpected))
+        (if ok result (error result)))
+      (body)))
+
+(fn main-body []
   (print "Agent Online: Tic-Tac-Toe Game")
   (print "==============================")
   (math.randomseed (math.floor (now-ms)))
@@ -685,7 +741,15 @@
   (print (.. "Results: " passed " passed, " failed " failed"))
   (when (> (# failures) 0)
     (print "Failures:")
-    (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error))))
+    (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error)))))
+
+(fn main []
+  (with-quiet-output main-body)
+  (when (quiet-validation?)
+    (print (.. "Executed " (+ passed failed) " Lua tests"))
+    (when (> (# failures) 0)
+      (print "Failures:")
+      (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error)))))
   (when (> failed 0) (os.exit 1)))
 
 {:main main}

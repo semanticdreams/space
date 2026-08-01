@@ -120,6 +120,8 @@ Once you're clear on requirements:
 
 While iterating, run the focused test for what you're changing; run the full suite once before committing, not after every edit.
 
+For Fennel-facing work, run the compile check before constraints and tests when feasible: `make fennel-check` for broad changes, or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for narrow `.fnl` changes. Then run `make constraints` or relevant explicit-file constraints before focused Fennel tests. Before claiming `DONE`, report compile-check evidence, constraint status, and test evidence in that order. If constraints conflict with an intentional design change, return `NEEDS_CONTEXT` when the new contract is ambiguous; otherwise update code and constraints together within assigned scope instead of bypassing the gate or contorting production code around a stale contract. For delimiter failures, inspect the nearest enclosing form rather than relying on unsupported validators such as `fennel-ls` or `fnlfmt`.
+
 ## Implementation Rules
 
 1. Inspect the repository before editing.
@@ -221,6 +223,7 @@ status contract as your first report.
 Write your full report to the report file specified in your task brief:
 - What you implemented (or what you attempted, if blocked)
 - What you tested and test results
+- Constraint Impact for feature/bugfix work: `helped catch`, `obstructed/noisy`, `changed constraint`, or `not applicable`
 - **TDD Evidence** (if TDD was required for this task):
   - RED: command run, relevant failing output before implementation, and why the failure was expected
   - GREEN: command run and relevant passing output after implementation

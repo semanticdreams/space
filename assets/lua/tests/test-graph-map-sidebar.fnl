@@ -221,8 +221,8 @@
         s))
 
 (fn find-clickable-by-label [target-text]
-    (var found nil)
-    (each [_ obj (ipairs app.clickables.left-click-objects)]
+    (local clickables (assert app.clickables "graph map sidebar test requires app.clickables")) (var found nil)
+    (each [_ obj (ipairs clickables.left-click-objects)]
         (when (and (not found) obj.on-click)
             (local label (button-label obj))
             (when (= label target-text)

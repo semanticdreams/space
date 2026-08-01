@@ -4,6 +4,86 @@
 (local realtime-test-features (require :realtime.test-features))
 (local tests [])
 
+(fn cleanup [handle]
+  (when handle
+    (handle:close)))
+
+(fn cleanup-handles [handles]
+  (var first-error nil)
+  (each [_ handle (ipairs handles)]
+    (local (ok result) (pcall cleanup handle))
+    (when (and (not ok) (not first-error))
+      (set first-error result)))
+  (when first-error
+    (error first-error)))
+
+(fn with-cleanup [handles body]
+  (local (ok result) (pcall body))
+  (local (cleanup-ok cleanup-result) (pcall cleanup-handles handles))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn expect-zero-client-id-connect-fails [client connect-token]
+  (local (zero-client-id-ok _zero-client-id-err)
+    (pcall (fn []
+             (client:connect {:client-id 0
+                              :connect-token connect-token}))))
+  (assert (not zero-client-id-ok) "client connect should require non-zero client-id"))
+
+(fn expect-running-server-guards [server client connect-token signed issued-at expires-at]
+  (local (unknown-running-deactivate-ok _unknown-running-deactivate-err)
+    (pcall (fn []
+             (server:deactivate-feature 0 999))))
+  (assert (not unknown-running-deactivate-ok)
+          "running server should reject unknown feature deactivation")
+  (local (unknown-running-send-ok _unknown-running-send-err)
+    (pcall (fn []
+             (server:send-reliable 0 999 "oops"))))
+  (assert (not unknown-running-send-ok)
+          "running server should reject unknown feature payload sends")
+  (expect-zero-client-id-connect-fails client connect-token)
+  (local unsigned-ticket {:ticket-id "ticket-2"
+                          :subject-user-id "dev-user"
+                          :client-id 4242
+                          :server-scope "loopback"
+                          :allowed-features [1 2 3]
+                          :issued-at issued-at
+                          :expires-at expires-at
+                          :secret "dev-secret"})
+  (local (unsigned-ok _unsigned-err)
+    (pcall (fn []
+             (server:create-connect-token {:signed-ticket unsigned-ticket
+                                           :secret "dev-secret"}))))
+  (assert (not unsigned-ok) "raw unsigned ticket fields should not be accepted by create-connect-token")
+  (local wrong-scope-signed
+    (realtime.make-dev-ticket {:ticket-id "ticket-wrong-scope"
+                               :subject-user-id "dev-user"
+                               :client-id 4242
+                               :server-scope "other-server"
+                               :allowed-features [1 2 3]
+                               :issued-at issued-at
+                               :expires-at expires-at
+                               :secret "dev-secret"}))
+  (local (wrong-scope-ok _wrong-scope-err)
+    (pcall (fn []
+             (server:create-connect-token {:signed-ticket wrong-scope-signed
+                                           :secret "dev-secret"}))))
+  (assert (not wrong-scope-ok) "ticket server scope should be enforced during token creation")
+  (local (bad-expire-ok _bad-expire-err)
+    (pcall (fn []
+             (server:create-connect-token {:signed-ticket signed
+                                           :secret "dev-secret"
+                                           :expire-seconds 0}))))
+  (assert (not bad-expire-ok) "non-positive expire-seconds should fail loudly")
+  (local (bad-timeout-ok _bad-timeout-err)
+    (pcall (fn []
+             (server:create-connect-token {:signed-ticket signed
+                                           :secret "dev-secret"
+                                           :timeout-seconds 0}))))
+  (assert (not bad-timeout-ok) "non-positive timeout-seconds should fail loudly"))
+
 (fn module-exports []
   (assert realtime.available "realtime module should be available")
   (assert (= (realtime.version) "1.2.5") "realtime version should match vendored yojimbo")
@@ -36,8 +116,8 @@
   (assert (= (type client.connect) :function) "client should expose connect")
   (assert (not (server:is-running)) "server should not be running before start")
   (assert (not (client:is-connected)) "client should not be connected before connect")
-  (server:close)
-  (client:close))
+  (cleanup server)
+  (cleanup client))
 
 (fn lifecycle-guards []
   (local service (realtime.Service))
@@ -143,7 +223,7 @@
                  (server:start))))
       (set restart-during-close-failed (not restart-ok))))
   (server:start)
-  (server:close)
+  (cleanup server)
   (assert stopped-callback-fired "server close should dispatch stopped callback before callback teardown")
   (assert stopped-saw-not-running "stopped callback should observe a non-running server")
   (assert restart-during-close-failed "server close should reject restart attempts during shutdown")
@@ -151,13 +231,13 @@
   (callbacks.dispatch)
   (assert unrelated-callback-fired "unrelated callbacks should remain queued after server close")
   (callbacks.unregister unrelated-callback-id)
-  (server:close)
+  (cleanup server)
   (local (server-after-close-ok _server-after-close-err)
     (pcall (fn []
              (server:start))))
   (assert (not server-after-close-ok) "server operations after close should fail loudly")
-  (client:close)
-  (client:close)
+  (cleanup client)
+  (cleanup client)
   (local (client-after-close-ok _client-after-close-err)
     (pcall (fn []
              (client:connect {:client-id 1
@@ -210,67 +290,17 @@
                                         :bind-address "127.0.0.1:0"
                                         :server-scope "loopback"
                                         :max-clients 1}))
-  (server:start)
-  (local connect-token (server:create-connect-token {:signed-ticket signed
-                                                     :secret "dev-secret"}))
-  (assert (> (# connect-token) 0) "dev ticket output should be accepted by create-connect-token")
-  (local (unknown-running-deactivate-ok _unknown-running-deactivate-err)
-    (pcall (fn []
-             (server:deactivate-feature 0 999))))
-  (assert (not unknown-running-deactivate-ok)
-          "running server should reject unknown feature deactivation")
-  (local (unknown-running-send-ok _unknown-running-send-err)
-    (pcall (fn []
-             (server:send-reliable 0 999 "oops"))))
-  (assert (not unknown-running-send-ok)
-          "running server should reject unknown feature payload sends")
-  (local client (service:create-client {:registry registry
-                                        :bind-address "127.0.0.1:0"}))
-  (local (zero-client-id-ok _zero-client-id-err)
-    (pcall (fn []
-             (client:connect {:client-id 0
-                              :connect-token connect-token}))))
-  (assert (not zero-client-id-ok) "client connect should require non-zero client-id")
-  (client:close)
-  (local unsigned-ticket {:ticket-id "ticket-2"
-                          :subject-user-id "dev-user"
-                          :client-id 4242
-                          :server-scope "loopback"
-                          :allowed-features [1 2 3]
-                          :issued-at issued-at
-                          :expires-at expires-at
-                          :secret "dev-secret"})
-  (local (unsigned-ok _unsigned-err)
-    (pcall (fn []
-             (server:create-connect-token {:signed-ticket unsigned-ticket
-                                           :secret "dev-secret"}))))
-  (assert (not unsigned-ok) "raw unsigned ticket fields should not be accepted by create-connect-token")
-  (local wrong-scope-signed
-    (realtime.make-dev-ticket {:ticket-id "ticket-wrong-scope"
-                               :subject-user-id "dev-user"
-                               :client-id 4242
-                               :server-scope "other-server"
-                               :allowed-features [1 2 3]
-                               :issued-at issued-at
-                               :expires-at expires-at
-                               :secret "dev-secret"}))
-  (local (wrong-scope-ok _wrong-scope-err)
-    (pcall (fn []
-             (server:create-connect-token {:signed-ticket wrong-scope-signed
-                                           :secret "dev-secret"}))))
-  (assert (not wrong-scope-ok) "ticket server scope should be enforced during token creation")
-  (local (bad-expire-ok _bad-expire-err)
-    (pcall (fn []
-             (server:create-connect-token {:signed-ticket signed
-                                           :secret "dev-secret"
-                                           :expire-seconds 0}))))
-  (assert (not bad-expire-ok) "non-positive expire-seconds should fail loudly")
-  (local (bad-timeout-ok _bad-timeout-err)
-    (pcall (fn []
-             (server:create-connect-token {:signed-ticket signed
-                                           :secret "dev-secret"
-                                           :timeout-seconds 0}))))
-  (assert (not bad-timeout-ok) "non-positive timeout-seconds should fail loudly")
+  (local handles [server])
+  (with-cleanup handles
+    (fn []
+      (server:start)
+      (local connect-token (server:create-connect-token {:signed-ticket signed
+                                                         :secret "dev-secret"}))
+      (assert (> (# connect-token) 0) "dev ticket output should be accepted by create-connect-token")
+      (local client (service:create-client {:registry registry
+                                            :bind-address "127.0.0.1:0"}))
+      (table.insert handles client)
+      (expect-running-server-guards server client connect-token signed issued-at expires-at)))
   (local wildcard-server
     (service:create-server {:registry registry
                             :bind-address "0.0.0.0:0"
@@ -282,7 +312,7 @@
              (wildcard-server:create-connect-token {:signed-ticket signed
                                                     :secret "dev-secret"}))))
   (assert (not wildcard-token-ok) "wildcard bind without connect-addresses should fail loudly")
-  (wildcard-server:close)
+  (cleanup wildcard-server)
   (local advertised-server
     (service:create-server {:registry registry
                             :bind-address "0.0.0.0:0"
@@ -295,7 +325,7 @@
                                              :secret "dev-secret"}))
   (assert (> (# advertised-token) 0)
           "wildcard bind with connect-addresses should mint a connect token")
-  (advertised-server:close)
+  (cleanup advertised-server)
   (local (wildcard-advertised-ok _wildcard-advertised-err)
     (pcall (fn []
              (service:create-server {:registry registry
@@ -326,7 +356,6 @@
                                         :expires-at expires-at
                                         :secret "dev-secret"}))))
   (assert (not oversized-ticket-ok) "oversized auth ticket fields should fail during signing")
-  (server:close)
   (local verified
     (realtime.verify-dev-ticket {:payload-json (. signed "payload-json")
                                  :signature (. signed "signature")

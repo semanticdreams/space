@@ -67,6 +67,12 @@ Rules:
     - If the change is documentation/config only and existing docs/dev pages
       remain canonical, the plan must state why no additional docs/dev page is
       needed.
+18. For plans that touch `.fnl` files, Fennel tests, Fennel constraints, or
+    Fennel CLI/MCP tooling, name the validation ladder explicitly: compile
+    check first (`make fennel-check` or touched-file `tools.fennel-check`),
+    constraints second, focused Fennel tests third, and the broader relevant
+    suite last. Include enclosing form repair guidance when delimiter or parse
+    errors are in scope.
 
 Return only raw Markdown suitable for PLAN.md — do NOT wrap the output in a
 code fence. The plan must use these exact section headings so that automated

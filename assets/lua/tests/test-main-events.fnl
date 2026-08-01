@@ -17,12 +17,18 @@
 
 (local tests [])
 
-(local ensure-renderers
-  (fn []
-    (set app.renderers {:update (fn [_] nil)
-                          :on-viewport-changed (fn [_ _] nil)
-                          :drop (fn [_] nil)})
-    app.renderers))
+(local minimal-renderers
+  {:update (fn [_] nil)
+   :on-viewport-changed (fn [_ _] nil)
+   :drop (fn [_] nil)})
+
+(fn with-minimal-renderers [f]
+  (local original-renderers app.renderers)
+  (set app.renderers minimal-renderers)
+  (local (ok result) (pcall f))
+  (set app.renderers original-renderers)
+  (when (not ok) (error result))
+  result)
 
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
@@ -219,52 +225,56 @@
 
 (fn window-resize-updates-viewport-and-layout-root []
   (reset-state)
-  (ensure-renderers)
-  (set (. app.engine "pixel-width") 960)
-  (set (. app.engine "pixel-height") 540)
-  (app.engine.events.window-resized.emit {:width 640 :height 360})
-  (assert (= app.viewport.width 960))
-  (assert (= app.viewport.height 540)))
+  (with-minimal-renderers
+    (fn []
+      (set (. app.engine "pixel-width") 960)
+      (set (. app.engine "pixel-height") 540)
+      (app.engine.events.window-resized.emit {:width 640 :height 360})
+      (assert (= app.viewport.width 960))
+      (assert (= app.viewport.height 540)))))
 
 (fn drop-keeps-engine-events-and-clears-layout-root []
   (reset-state)
-  (ensure-renderers)
   (local original-intersectables app.intersectables)
   (local original-clickables app.clickables)
   (local original-hoverables app.hoverables)
   (var fired false)
-  (app.engine.events.key-down.connect (fn [_] (set fired true)))
-  (set app.layout-root {:mark-measure-dirty (fn [_])})
-  (set app.active-world-runtime {:id :stale-runtime})
-  (Main.drop)
-  (when (not app.intersectables)
-    (set app.intersectables (or original-intersectables (Intersectables))))
-  (when (not app.clickables)
-    (set app.clickables (or original-clickables (Clickables {:intersectables app.intersectables}))))
-  (when (not app.hoverables)
-    (set app.hoverables (or original-hoverables (Hoverables {:intersectables app.intersectables}))))
-  (assert (= app.layout-root nil))
-  (assert (= app.active-world-runtime nil)
-          "app.drop should clear stale active-world-runtime")
-  (app.engine.events.key-down.emit {:key 10})
-  (assert fired))
+  (with-minimal-renderers
+    (fn []
+      (app.engine.events.key-down.connect (fn [_] (set fired true)))
+      (set app.layout-root {:mark-measure-dirty (fn [_])})
+      (set app.active-world-runtime {:id :stale-runtime})
+      (Main.drop)
+      (when (not app.intersectables)
+        (set app.intersectables (if original-intersectables original-intersectables (Intersectables))))
+      (when (not app.clickables)
+        (set app.clickables (if original-clickables original-clickables (Clickables {:intersectables app.intersectables}))))
+      (when (not app.hoverables)
+        (set app.hoverables (if original-hoverables original-hoverables (Hoverables {:intersectables app.intersectables}))))
+      (assert (= app.layout-root nil))
+      (assert (= app.active-world-runtime nil)
+              "app.drop should clear stale active-world-runtime")
+      (app.engine.events.key-down.emit {:key 10})
+      (assert fired))))
 
 (fn other-events-leave-viewport-untouched []
   (reset-state)
-  (ensure-renderers)
-  (app.set-viewport {:width 111 :height 222})
-  (app.engine.events.key-down.emit {:key 97})
-  (assert (= app.viewport.width 111))
-  (assert (= app.viewport.height 222)))
+  (with-minimal-renderers
+    (fn []
+      (app.set-viewport {:width 111 :height 222})
+      (app.engine.events.key-down.emit {:key 97})
+      (assert (= app.viewport.width 111))
+      (assert (= app.viewport.height 222)))))
 
 (fn window-pixel-size-change-updates-viewport []
   (reset-state)
-  (ensure-renderers)
-  (set (. app.engine "pixel-width") 2560)
-  (set (. app.engine "pixel-height") 1440)
-  (app.engine.events.window-pixel-size-changed.emit {:width 2560 :height 1440})
-  (assert (= app.viewport.width 2560))
-  (assert (= app.viewport.height 1440)))
+  (with-minimal-renderers
+    (fn []
+      (set (. app.engine "pixel-width") 2560)
+      (set (. app.engine "pixel-height") 1440)
+      (app.engine.events.window-pixel-size-changed.emit {:width 2560 :height 1440})
+      (assert (= app.viewport.width 2560))
+      (assert (= app.viewport.height 1440)))))
 
 (fn bind-active-world-runtime-restores-runtime-interaction-surface []
   (with-restored-app-fields bind-state-keys
@@ -1182,41 +1192,17 @@
                      :fn direct-activity-deactivation-emits-one-shell-change})
 (table.insert tests {:name "Active activity unregister emits one shell change"
                      :fn active-activity-unregister-emits-one-shell-change})
-(table.insert tests {:name "Failed activity deactivate restores shell suppression"
-                     :fn failed-activity-deactivate-restores-shell-suppression})
-(table.insert tests {:name "Theme reapply does not emit transient activity events"
-                     :fn theme-reapply-does-not-emit-transient-activity-events})
-(table.insert tests {:name "Failed activity cleanup restores shell suppression"
-                     :fn failed-activity-cleanup-restores-shell-suppression})
-(table.insert tests {:name "Failed activity prepare restores previous activity"
-                     :fn failed-activity-prepare-restores-previous-activity})
-(table.insert tests {:name "Failed activity commit restores previous activity"
-                     :fn failed-activity-commit-restores-previous-activity})
-(table.insert tests {:name "Failed retained activity reactivation invalidates target session"
-                     :fn failed-retained-activity-reactivation-invalidates-target-session})
-(table.insert tests {:name "Failed pending activity restore does not emit shell change"
-                     :fn failed-pending-activity-restore-does-not-emit-shell-change})
-(table.insert tests {:name "bind-active-world-runtime emits shell once for surface sync"
-                     :fn bind-active-world-runtime-emits-shell-once-for-surface-sync})
-(table.insert tests {:name "bind-active-world-runtime respects shell suppression"
-                      :fn bind-active-world-runtime-respects-shell-suppression})
+(table.insert tests {:name "Failed activity deactivate restores shell suppression" :fn failed-activity-deactivate-restores-shell-suppression})
+(table.insert tests {:name "Theme reapply does not emit transient activity events" :fn theme-reapply-does-not-emit-transient-activity-events})
+(table.insert tests {:name "Failed activity cleanup restores shell suppression" :fn failed-activity-cleanup-restores-shell-suppression})
+(table.insert tests {:name "Failed activity prepare restores previous activity" :fn failed-activity-prepare-restores-previous-activity})
+(table.insert tests {:name "Failed activity commit restores previous activity" :fn failed-activity-commit-restores-previous-activity})
+(table.insert tests {:name "Failed retained activity reactivation invalidates target session" :fn failed-retained-activity-reactivation-invalidates-target-session})
+(table.insert tests {:name "Failed pending activity restore does not emit shell change" :fn failed-pending-activity-restore-does-not-emit-shell-change})
+(table.insert tests {:name "bind-active-world-runtime emits shell once for surface sync" :fn bind-active-world-runtime-emits-shell-once-for-surface-sync})
+(table.insert tests {:name "bind-active-world-runtime respects shell suppression" :fn bind-active-world-runtime-respects-shell-suppression})
 
-(fn app-drop-releases-active-input-before-state-teardown []
-  ;; Regression test: app.drop must release active input before unbinding the
-  ;; states host.  Without this ordering, unit-manager:clear unloads units
-  ;; whose drop/disconnect calls require the states host, which is already nil.
-  (reset-state)
-  (ensure-renderers)
-  ;; Save global app systems that Main.drop destroys, so subsequent test
-  ;; modules are not affected by the teardown in this test.
-  (local saved-intersectables app.intersectables)
-  (local saved-clickables app.clickables)
-  (local saved-hoverables app.hoverables)
-  (local saved-movables app.movables)
-  (local saved-resizables app.resizables)
-  (local saved-system-cursors app.system-cursors)
-  (local saved-renderers app.renderers)
-  (local saved-states app.states)
+(fn app-drop-active-input-before-state-teardown-body []
   (var last-state nil)
   (local states-host
     {:active-name (fn [_self] "normal")
@@ -1237,16 +1223,28 @@
                  :load (fn [_ctx] nil)
                  :unload (fn [_ctx]
                            (InputState.disconnect-input input))}))
-  (set app.unit-manager (or app.unit-manager (UnitManager)))
+  (set app.unit-manager (if app.unit-manager app.unit-manager (UnitManager)))
   (app.unit-manager:register unit)
   (unit:load {})
   (assert (= (InputState.active-input) input)
           "Input must remain active after unit load")
   (Main.drop)
   (assert disconnected? "Input should have been disconnected during drop")
-  (assert (not (InputState.active-input)) "No input should be active after drop")
-  ;; Restore global app systems destroyed by Main.drop so subsequent
-  ;; modules (test-states, etc.) are not affected.
+  (assert (not (InputState.active-input)) "No input should be active after drop"))
+
+(fn app-drop-releases-active-input-before-state-teardown []
+  (reset-state)
+  (local original-renderers app.renderers)
+  (local saved-intersectables app.intersectables)
+  (local saved-clickables (assert app.clickables "test requires app.clickables"))
+  (local saved-hoverables (assert app.hoverables "test requires app.hoverables"))
+  (set app.renderers minimal-renderers)
+  (local saved-movables app.movables)
+  (local saved-resizables app.resizables)
+  (local saved-system-cursors app.system-cursors)
+  (local saved-states app.states)
+  (local (ok err) (pcall app-drop-active-input-before-state-teardown-body))
+  (set app.renderers original-renderers)
   (when (not app.intersectables)
     (set app.intersectables saved-intersectables))
   (when (not app.clickables)
@@ -1259,10 +1257,10 @@
     (set app.resizables saved-resizables))
   (when (not app.system-cursors)
     (set app.system-cursors saved-system-cursors))
-  (set app.renderers saved-renderers)
   (set app.states saved-states)
   (InputState.reset)
-  (StateSystemBindings.bind-states-host saved-states))
+  (StateSystemBindings.bind-states-host saved-states)
+  (when (not ok) (error err)))
 (table.insert tests {:name "app.drop releases active input before state teardown" :fn app-drop-releases-active-input-before-state-teardown})
 
 (local main

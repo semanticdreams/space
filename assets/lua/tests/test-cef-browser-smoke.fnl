@@ -9,8 +9,10 @@
   "data:text/html,%3Chtml%3E%3Cbody%3ECEF%20SMOKE%3C/body%3E%3C/html%3E")
 
 (fn run-cef-browser-smoke []
+  (local prev-app app)
   (global app {})
   (set app.testing true)
+  (local prev-engine app.engine)
   (set app.engine (EngineModule.Engine {:headless false
                                          :width 128
                                          :height 128
@@ -61,6 +63,8 @@
   (app.engine.events.updated:disconnect updated-handle true)
   (destroy-surface surface-id)
   (app.engine:shutdown)
+  (set app.engine prev-engine)
+  (global app prev-app)
   (assert ok err))
 
 (local main

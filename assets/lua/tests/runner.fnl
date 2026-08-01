@@ -116,7 +116,7 @@
       (when (not (= module-name :tests.test-keyring))
         (table.insert filtered module-name)))
     (set result filtered))
-  result)
+  result) (fn ensure-test-interactions [Intersectables Clickables Hoverables] (when (not app.intersectables) (set app.intersectables (Intersectables))) (when (not app.clickables) (set app.clickables (Clickables {:intersectables app.intersectables}))) (when (not app.hoverables) (set app.hoverables (Hoverables {:intersectables app.intersectables}))) (assert app.clickables "test runner requires app.clickables") (assert app.hoverables "test runner requires app.hoverables"))
 
 (fn setup-test-env [test-verbose]
   (global app {})
@@ -221,12 +221,12 @@
 
   (app.engine:start)
 
-  (when (not app.intersectables)
-    (set app.intersectables (Intersectables)))
-  (when (not app.clickables)
-    (set app.clickables (Clickables {:intersectables app.intersectables})))
-  (when (not app.hoverables)
-    (set app.hoverables (Hoverables {:intersectables app.intersectables})))
+  (ensure-test-interactions Intersectables Clickables Hoverables)
+
+
+
+
+
 
   ;; Reapply texture stubs in case bindings overwrote them.
   (when textures
@@ -401,5 +401,13 @@
   (app.engine:shutdown)
   suite)
 
+(fn shutdown-test-env []
+  "Shut down the test environment: drop the app and reset it to an empty table."
+  (when (and app app.drop)
+    (app.drop))
+  (set app {}))
+
 {:run-modules run-modules
- :run-tests run-tests}
+ :run-tests run-tests
+ :setup-test-env setup-test-env
+ :shutdown-test-env shutdown-test-env}

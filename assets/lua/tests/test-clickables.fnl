@@ -78,6 +78,7 @@
 (fn simulate-click [clickables payload]
   (with-pointer-ray
     (fn []
+      (assert clickables "clickables test requires clickables router")
       (clickables:on-mouse-button-down payload)
       (clickables:on-mouse-button-up payload))))
 
@@ -109,6 +110,7 @@
       (set called true)))
   (with-pointer-ray
     (fn []
+      (assert clickables "clickables test requires clickables router")
       (clickables:on-mouse-button-down {:button 1 :x 0 :y 0 :timestamp 10})
       (clickables:on-mouse-button-up {:button 1
                                       :x 0
@@ -129,9 +131,10 @@
   (assert stub.state.last-double))
 
 (fn clickables-prefer-hud-intersection []
+  (local clickables (Clickables))
+  (assert clickables "clickables test requires clickables router")
   (with-pointer-target-rays
     (fn []
-      (local clickables (Clickables))
       (local hud (make-pointer-target-clickable app.hud 10))
       (local scene (make-pointer-target-clickable app.scene 1))
       (clickables:register hud.object)
@@ -141,12 +144,13 @@
       (assert (= scene.state.clicks 0) "scene target should not receive click when hud hit"))))
 
 (fn clickables-suppress-release-for-disabled-pointer-target []
+  (local clickables (Clickables))
+  (assert clickables "clickables test requires clickables router")
   (with-pointer-target-rays
     (fn []
       (local original-enabled app.pointer-target-enabled?)
       (var enabled? true)
       (set app.pointer-target-enabled? (fn [_target] enabled?))
-      (local clickables (Clickables))
       (local target {:screen-pos-ray app.scene.screen-pos-ray})
       (local stub (make-pointer-target-clickable target 1))
       (clickables:register stub.object)

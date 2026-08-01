@@ -57,13 +57,30 @@ OpenCode users: restart after `.opencode/**` changes.
 - **Build timeouts:** A cold `make build` can take hours. Always pass an explicit `timeout` parameter:
   - `make build`: `timeout: 14400000` (4 hours).
   - `make cmake`: `timeout: 600000` (10 minutes).
-  - Err on the high side rather than restarting from scratch.
-- `make run` executes `space` with `SPACE_ASSETS_PATH=../assets`.
-- Default test invocation: `make test` or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure`.
-- Standard full-suite command: `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
+  - A killed build may leave partial artifacts; err on the high side rather than
+    restarting from scratch.
+- `make run` executes `space` with `SPACE_ASSETS_PATH=../assets` (via `./space -m main`).
+- When running Lua/Fennel tests from the CLI, always set `SPACE_ASSETS_PATH` to the absolute `assets` path (e.g. ``SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main``) so path-sensitive suites like `FsView` can resolve fixtures correctly.
+- Fennel macros live under `assets/lua`; when invoking tests directly with `./build/space -m ...` set `FENNEL_PATH` and `FENNEL_MACRO_PATH` to `$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl` to ensure `(import-macros ...)` resolves.
+- For Fennel-facing work, run the validation ladder in order: compile check first (`make fennel-check` or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for touched `.fnl` files), constraints second (`make constraints` or explicit-file constraints when appropriate), focused Fennel tests third, and the broader relevant suite such as `make test` last. Compile/constraints/test evidence should be reported in handoffs.
+- Do not use system `fennel`, system `lua`, `fennel-ls`, `fnlfmt`, `./build/space --compile`, or `./build/space -e` as validation oracles for Space Fennel. Use the project-native `tools.fennel-check` command and constraints/tests instead.
+- For Fennel-facing work, `make constraints` runs after `make fennel-check` so constraint violations surface before slower debugging loops. The experimental constraints gate is blocking even though it is experimental; every result other than `pass` (`violations`, `fail`, or `interrupted`) exits nonzero and should be diagnosed and fixed through reviewed code or reviewed baseline data, not bypassed. See [Experimental Fennel Constraints](docs/dev/experimental-constraints.md).
+- Default test invocation is `make test` (or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure`) after a build; prefer this unless you specifically need a narrowed `./build/space -m tests.test-...` run. Use `ctest -V` or `TEST_VERBOSE=1` only when debugging test output.
+- `make test` already depends on `make constraints`, so full-suite runs execute the experimental constraints gate before normal Fennel tests; do not duplicate `make constraints` immediately before `make test` unless the early, faster feedback is useful.
+- Disable audio for CLI test runs by default to avoid sandbox/PortAudio warnings: prefix commands with `SPACE_DISABLE_AUDIO=1` (e.g. `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main`).
+- When running tests, point `XDG_DATA_HOME` outside the repo to avoid littering the workspace (use `XDG_DATA_HOME=/tmp/space/tests/xdg-data` unless otherwise specified). Agents should always skip keyring-backed tests (`SKIP_KEYRING_TESTS=1`). Standard full-suite command: `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
+- `make debug` configures `build/debug/` and launches `gdb ./space`.
+- `make test` or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure` runs all registered tests once the build is up to date.
+- When Lua/Fennel work needs additional bindings or host scaffolding, update the relevant C++ (e.g. `apps/space/main.cpp`, `src/` modules) yourself and rerun `make build` to confirm the harness still compiles before handing the change back.
+- On parentheses imbalance in Fennel code, especially when the code is deeply nested, inspect the nearest enclosing form around the reported location, then restructure the code by moving logic into helper functions in order to simplify the code structure and reduce nesting.
+- Fennel parse errors often report the place where the parser finally got confused, not the form that actually caused the problem. If an innocent-looking binding such as `local build` or a closing delimiter is blamed, first isolate the bad form by temporarily removing chunks of logic until the file compiles, then re-add them step by step. Use that to find the real construct before doing broader restructuring.
+- For live debugging, `space` supports `--remote-control=<zmq endpoint>` which evaluates Fennel code inside the running app; use `./build/space -m tools.remote-control-client:main -- --endpoint <endpoint> -c "<code>"` to send commands, and only enable it on trusted machines. The eval environment exposes `remote_control.create/resolve/reject/poll` for async results (create an id, resolve it inside a signal callback, then poll by id). Use `scripts/remote-control-heavy.sh` to exercise the async flow against a live app.
+- When asked to debug a running app, prefer using the remote-control endpoint if the app was started with `--remote-control`; `make run` defaults to `ipc:///tmp/space-rc.sock`, otherwise ask for the endpoint, then send Fennel snippets via the client to inspect or modify state.
+- Use `scripts/remote-control-debug.sh` for repeatable live-debug or live-inspect queries; update it as needed instead of ad-hoc client invocations, and run it outside the sandbox so IPC access works.
+- `scripts/remote-control-debug.sh` should always contain only the latest debug query; replace its contents for new questions instead of adding flags or multiple modes.
+- Use `app.next-frame` when remote-control scripts need to wait for a frame to render before reading state or running render-capture.
 - E2E tests: `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test-e2e` (must run outside sandbox).
 - Add C++ tests under `tests/` with `CMakeLists.txt` registration; mirror runtime asset setup from `apps/space/main.cpp`.
-- For live debugging: use `--remote-control=<zmq endpoint>`; the `space-testing-runtime` skill covers remote-control and profiling workflows.
 - Profilers: `make prof target=<name>`; the `space-testing-runtime` skill covers profiling workflows.
 
 ## Coding Style & High-Risk Rules
@@ -82,8 +99,10 @@ OpenCode users: restart after `.opencode/**` changes.
 ## Commit Conventions
 
 - Use the `type(scope)` format as described by the `git-commit` skill.
-- Scopes: `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
-- Before committing, run the full test suite (see Build, Run & Test above).
+- Scopes (when useful): `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
+- For Fennel-facing feature or bugfix handoffs, include a lightweight constraint-impact line when relevant: helped, obstructed/noisy, changed, or not applicable.
+- Before committing, run the full test suite:
+  `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
 
 ## Assets & Configuration Tips
 

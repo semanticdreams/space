@@ -27,6 +27,31 @@
       (local store (LinkEntityStore.LinkEntityStore {:base-dir root}))
       (f store root))))
 
+(fn disconnect-signal-handlers [records]
+  (each [_ record (ipairs records)]
+    (record.signal:disconnect record.handler true)))
+
+(fn rethrow-after-signal-cleanup [ok result cleanup-records]
+  (local (cleanup-ok cleanup-result) (pcall disconnect-signal-handlers cleanup-records))
+  (if (not ok)
+      (error result)
+      (not cleanup-ok)
+      (error cleanup-result)))
+
+(fn exercise-link-created-signal [store counts]
+  (store:create-entity {:source-key "a" :target-key "b"})
+  (assert (= counts.created 1) "created signal should be emitted"))
+
+(fn exercise-link-updated-signal [store counts]
+  (local entity (store:create-entity {:source-key "a" :target-key "b"}))
+  (store:update-entity entity.id {:source-key "c"})
+  (assert (= counts.updated 1) "updated signal should be emitted"))
+
+(fn exercise-link-deleted-signal [store counts]
+  (local entity (store:create-entity {:source-key "a" :target-key "b"}))
+  (store:delete-entity entity.id)
+  (assert (= counts.deleted 1) "deleted signal should be emitted"))
+
 (fn link-entity-store-creates-entities []
   (with-temp-store
     (fn [store _root]
@@ -82,28 +107,32 @@
 (fn link-entity-store-emits-created-signal []
   (with-temp-store
     (fn [store _root]
-      (var created-count 0)
-      (store.link-entity-created:connect (fn [_] (set created-count (+ created-count 1))))
-      (store:create-entity {:source-key "a" :target-key "b"})
-      (assert (= created-count 1) "created signal should be emitted"))))
+      (local counts {:created 0})
+      (local created-handler (fn [_] (set counts.created (+ counts.created 1))))
+      (store.link-entity-created:connect created-handler)
+      (local (ok result) (pcall exercise-link-created-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.link-entity-created :handler created-handler}]))))
 
 (fn link-entity-store-emits-updated-signal []
   (with-temp-store
     (fn [store _root]
-      (var updated-count 0)
-      (store.link-entity-updated:connect (fn [_] (set updated-count (+ updated-count 1))))
-      (local entity (store:create-entity {:source-key "a" :target-key "b"}))
-      (store:update-entity entity.id {:source-key "c"})
-      (assert (= updated-count 1) "updated signal should be emitted"))))
+      (local counts {:updated 0})
+      (local updated-handler (fn [_] (set counts.updated (+ counts.updated 1))))
+      (store.link-entity-updated:connect updated-handler)
+      (local (ok result) (pcall exercise-link-updated-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.link-entity-updated :handler updated-handler}]))))
 
 (fn link-entity-store-emits-deleted-signal []
   (with-temp-store
     (fn [store _root]
-      (var deleted-count 0)
-      (store.link-entity-deleted:connect (fn [_] (set deleted-count (+ deleted-count 1))))
-      (local entity (store:create-entity {:source-key "a" :target-key "b"}))
-      (store:delete-entity entity.id)
-      (assert (= deleted-count 1) "deleted signal should be emitted"))))
+      (local counts {:deleted 0})
+      (local deleted-handler (fn [_] (set counts.deleted (+ counts.deleted 1))))
+      (store.link-entity-deleted:connect deleted-handler)
+      (local (ok result) (pcall exercise-link-deleted-signal store counts))
+      (rethrow-after-signal-cleanup
+        ok result [{:signal store.link-entity-deleted :handler deleted-handler}]))))
 
 (fn link-entity-store-stores-metadata []
   (with-temp-store
@@ -218,6 +247,14 @@
 (table.insert tests {:name "link entity list node view loads"
                      :fn link-entity-list-node-view-loads})
 (table.insert tests {:name "entities node includes link type"
-                     :fn entities-node-includes-link-type})
+                      :fn entities-node-includes-link-type})
 
-tests
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "link-entities"
+                       :tests tests})))
+
+{:name "link-entities"
+ :tests tests
+ :main main}

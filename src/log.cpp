@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cctype>
 #include <mutex>
+#include <unordered_map>
 
 #include <spdlog/async.h>
 #include <spdlog/fmt/fmt.h>
@@ -14,12 +15,14 @@
 namespace {
 
 std::mutex log_mutex;
+std::mutex log_levels_mutex;
 std::shared_ptr<spdlog::logger> async_logger;
 std::vector<spdlog::sink_ptr> log_sinks;
 spdlog::sink_ptr log_file_sink;
 bool log_ready = false;
 std::atomic<const std::atomic<uint64_t>*> frame_id_provider { nullptr };
 std::string log_output_path = std::string(GL_LOG_FILE);
+std::unordered_map<std::string, LogLevel> configured_logger_levels;
 
 spdlog::level::level_enum to_spd_level(LogLevel level)
 {
@@ -34,6 +37,25 @@ spdlog::level::level_enum to_spd_level(LogLevel level)
             return spdlog::level::err;
     }
     return spdlog::level::info;
+}
+
+LogLevel from_spd_level(spdlog::level::level_enum level)
+{
+    switch (level) {
+        case spdlog::level::trace:
+        case spdlog::level::debug:
+            return Debug;
+        case spdlog::level::info:
+            return Info;
+        case spdlog::level::warn:
+            return Warning;
+        case spdlog::level::err:
+        case spdlog::level::critical:
+        case spdlog::level::off:
+            return Error;
+        default:
+            return Info;
+    }
 }
 
 void ensure_logger()
@@ -288,6 +310,13 @@ void log_init(const LogConfig& config)
         auto logger = log_get_logger(name);
         logger->set_level(to_spd_level(config.reporting_level));
     }
+    {
+        std::lock_guard<std::mutex> level_lock(log_levels_mutex);
+        configured_logger_levels.clear();
+        for (const auto& name : default_loggers) {
+            configured_logger_levels[name] = config.reporting_level;
+        }
+    }
     log_set_level_for("shader", Warning);
 
     async_logger = log_get_logger("space");
@@ -315,6 +344,24 @@ void log_set_level_for(const std::string& name, LogLevel level)
 {
     auto logger = log_get_logger(name);
     logger->set_level(to_spd_level(level));
+    std::lock_guard<std::mutex> lock(log_levels_mutex);
+    configured_logger_levels[name] = level;
+}
+
+LogLevel log_get_level_for(const std::string& name)
+{
+    ensure_logger();
+    if (auto logger = spdlog::get(name)) {
+        return from_spd_level(logger->level());
+    }
+    {
+        std::lock_guard<std::mutex> lock(log_levels_mutex);
+        auto found = configured_logger_levels.find(name);
+        if (found != configured_logger_levels.end()) {
+            return found->second;
+        }
+    }
+    return LOG_CONFIG.reporting_level;
 }
 
 bool log_should_log(const std::string& name, LogLevel level)

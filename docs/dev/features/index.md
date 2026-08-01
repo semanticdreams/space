@@ -4,6 +4,7 @@ Detailed design and implementation notes for major feature systems.
 
 - [Agent Runner System](./agent-runner-system)
 - [Agent Tools](./agent-tools)
+- [Weekly Agent Workflow Automation](./weekly-agent-workflow-automation)
 - [Activities Architecture](./activities)
 - [Board Canvas Mode](./board-canvas-mode) (legacy, migrated to [Activities Architecture](./activities))
 - [Canvas Mode System](./canvas-mode-system) (legacy, migrated to [Activities Architecture](./activities))

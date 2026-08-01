@@ -39,16 +39,16 @@
     (set app.themes {:get-active-theme (fn [] {:font icons-stub.font
                                                  :text {:scale 1.0}})})
     (local intersector (Intersectables))
-    (local clickables (Clickables {:intersectables intersector}))
-    (local hoverables (Hoverables {:intersectables intersector}))
+    (local clickables (assert (Clickables {:intersectables intersector}) "combo-box test context requires clickables"))
+    (local hoverables (assert (Hoverables {:intersectables intersector}) "combo-box test context requires hoverables"))
     (BuildContext {:clickables clickables
                    :hoverables hoverables
                    :icons icons-stub}))
 
 (fn make-focus-ctx []
     (local intersector (Intersectables))
-    (local clickables (Clickables {:intersectables intersector}))
-    (local hoverables (Hoverables {:intersectables intersector}))
+    (local clickables (assert (Clickables {:intersectables intersector}) "combo-box focus test context requires clickables"))
+    (local hoverables (assert (Hoverables {:intersectables intersector}) "combo-box focus test context requires hoverables"))
     (local manager (FocusManager {:root-name "combo-box-test"}))
     (local root (manager:get-root-scope))
     (local scope (manager:create-scope {:name "combo-box-scope"}))

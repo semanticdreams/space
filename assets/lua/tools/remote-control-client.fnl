@@ -62,8 +62,16 @@
           (print (reply:to-string))))
       (error (.. "remote-control-client timed out after "
                  (tostring timeout-ms)
-                 "ms waiting for reply from "
-                 endpoint))))
+                  "ms waiting for reply from "
+                  endpoint))))
+
+(fn cleanup-zmq [socket ctx endpoint connected?]
+  (when (and socket connected?)
+    (socket:disconnect endpoint))
+  (when socket
+    (socket:close))
+  (when ctx
+    (ctx:close)))
 
 (fn main []
   (local args (parse-args _G.arg))
@@ -75,19 +83,22 @@
   (local socket-types (. zmq :socket-types))
   (local poll-events (. zmq :poll-events))
   (local ctx (zmq.Context 1))
-  (local socket (ctx:socket socket-types.REQ))
-  (socket:set-option-int "linger" 0)
-  (socket:set-option-int "rcvtimeo" args.timeout-ms)
-  (socket:set-option-int "sndtimeo" args.timeout-ms)
-  (socket:connect args.endpoint)
+  (var socket nil)
+  (var connected? false)
   (local (ok err)
     (pcall
       (fn []
+        (set socket (ctx:socket socket-types.REQ))
+        (socket:set-option-int "linger" 0)
+        (socket:set-option-int "rcvtimeo" args.timeout-ms)
+        (socket:set-option-int "sndtimeo" args.timeout-ms)
+        (socket:connect args.endpoint)
+        (set connected? true)
         (request-reply socket poll-events source args.timeout-ms args.endpoint))))
-  (socket:close)
-  (ctx:close)
-  (when (not ok)
-    (io.stderr:write (tostring err) "\n")
+  (local (cleanup-ok cleanup-err)
+    (pcall cleanup-zmq socket ctx args.endpoint connected?))
+  (when (or (not ok) (not cleanup-ok))
+    (io.stderr:write (tostring (if ok cleanup-err err)) "\n")
     (os.exit 1)))
 
 {:main main}

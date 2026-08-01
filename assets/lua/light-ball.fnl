@@ -691,12 +691,12 @@
   {:skip-cuboid true
    :skip-physics true
    :persistence {:kind "light-ball"
-                 :restorer-module "light-ball"}})
+                 :restorer-module "light-ball"}}) (fn light-ball-clickables [] (assert app.clickables "light-ball scene context requires app.clickables"))
 
 (fn light-ball-scene-on-added [_self scene element]
   (element:ensure-runtime-light)
   (element:sync-runtime-light-transform)
-  (when (and app.clickables element.intersect)
+  (when element.intersect (local interaction-clickables (light-ball-clickables))
     (local right-click-target
       {:pointer-target app.scene
        :intersect (fn [_target ray]
@@ -717,13 +717,13 @@
                           :position (resolve-menu-position event)
                           :open-button (and event event.button)}))
          true)})
-    (app.clickables:register-right-click right-click-target)
+    (interaction-clickables:register-right-click right-click-target)
     (set element.__context-menu-target right-click-target)
     (set element.unregister-context-menu-target
          (fn [self]
            (when self.__context-menu-target
-             (app.clickables:unregister-right-click self.__context-menu-target)
-             (set self.__context-menu-target nil)))))
+              (interaction-clickables:unregister-right-click self.__context-menu-target)
+              (set self.__context-menu-target nil)))))
   (scene:register-scene-object
    {:owner element
     :element element

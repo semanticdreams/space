@@ -77,9 +77,10 @@
   {:object obj :state state})
 
 (fn hoverables-dispatch-enter-exit []
+  (local hoverables (Hoverables))
+  (assert hoverables "hoverables test requires hoverables router")
   (with-ray-stub
     (fn []
-      (local hoverables (Hoverables))
       (local target (make-hoverable 10))
       (hoverables:register target.object)
       (hoverables:on-mouse-motion {:x 10 :y 0})
@@ -88,9 +89,10 @@
       (assert (not target.state.hovered)))))
 
 (fn hoverables-reenter-after-leave []
+  (local hoverables (Hoverables))
+  (assert hoverables "hoverables test requires hoverables router")
   (with-ray-stub
     (fn []
-      (local hoverables (Hoverables))
       (local target (make-hoverable 12))
       (hoverables:register target.object)
       (hoverables:on-mouse-motion {:x 12 :y 0})
@@ -111,9 +113,10 @@
       (assert (= hoverables.active-entry nil)))))
 
 (fn hoverables-dont-repeat-enter []
+  (local hoverables (Hoverables))
+  (assert hoverables "hoverables test requires hoverables router")
   (with-ray-stub
     (fn []
-      (local hoverables (Hoverables))
       (local target (make-hoverable 5))
       (hoverables:register target.object)
       (hoverables:on-mouse-motion {:x 5 :y 0})
@@ -126,9 +129,10 @@
       (assert (not target.state.hovered)))))
 
 (fn hoverables-prefer-hud-intersection []
+  (local hoverables (Hoverables))
+  (assert hoverables "hoverables test requires hoverables router")
   (with-pointer-target-rays
     (fn []
-      (local hoverables (Hoverables))
       (local hud (make-pointer-target-hoverable app.hud 10))
       (local scene (make-pointer-target-hoverable app.scene 1))
       (hoverables:register hud.object)

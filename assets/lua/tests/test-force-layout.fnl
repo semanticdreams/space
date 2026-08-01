@@ -35,10 +35,17 @@
   (layout:add-node (glm.vec3 0 0 0))
   (layout:start)
   (var fired false)
-  (layout.stabilized:connect (fn [] (set fired true)))
-  (layout:update 1)
-  (assert fired)
-  (assert (not layout.active)))
+  (local stabilized-handler (layout.stabilized:connect (fn [] (set fired true))))
+  (local (ok result)
+    (pcall
+      (fn []
+        (layout:update 1)
+        (assert fired)
+        (assert (not layout.active)))))
+  (layout.stabilized:disconnect stabilized-handler true)
+  (when (not ok)
+    (error result))
+  result)
 
 (fn clamps-to-bounds []
   (local layout (ForceLayout))

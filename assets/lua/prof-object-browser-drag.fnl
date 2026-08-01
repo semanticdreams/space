@@ -110,7 +110,7 @@
 
 (fn make-object-browser-builder []
   (local browser
-    (ObjectBrowser {:target (or app.engine {})
+    (ObjectBrowser {:target (assert app.engine "prof-object-browser-drag requires app.engine")
                     :name "space-browser"
                     :items-per-page 8
                     :item-padding [0.5 0.45]

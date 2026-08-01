@@ -128,6 +128,21 @@
   (assert (approx pos.x 4))
   (assert (approx pos.y 7)))
 
+(fn next-layout-node-drop-clears-owned-children []
+  (local root (NextLayout.Node.new {:name "drop-root-v2"}))
+  (local child-a (NextLayout.Node.new {:name "drop-child-a-v2"}))
+  (local child-b (NextLayout.Node.new {:name "drop-child-b-v2"}))
+  (root:add-child child-a)
+  (root:add-child child-b)
+
+  (root:drop)
+
+  (assert (= (length root.children) 0) "root drop should clear child list")
+  (assert (= child-a.parent nil) "first child parent should be detached")
+  (assert (= child-b.parent nil) "second child parent should be detached")
+  (assert (= child-a.root child-a) "first child root should reset to itself")
+  (assert (= child-b.root child-b) "second child root should reset to itself"))
+
 (table.insert tests {:name "NextLayout transform pass multiplies local matrices"
                      :fn next-layout-transform-pass-multiplies-local-matrices})
 (table.insert tests {:name "NextFlex distributes grow and cross stretch"
@@ -135,7 +150,9 @@
 (table.insert tests {:name "NextLayout dirt tracking skips clean phases"
                      :fn next-layout-dirt-tracking-skips-clean-phases})
 (table.insert tests {:name "NextLayout profile captures pass stats"
-                     :fn next-layout-profile-captures-pass-stats})
+                      :fn next-layout-profile-captures-pass-stats})
+(table.insert tests {:name "NextLayout Node drop clears owned children"
+                     :fn next-layout-node-drop-clears-owned-children})
 
 (local main
   (fn []

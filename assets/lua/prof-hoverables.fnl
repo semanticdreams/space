@@ -123,8 +123,6 @@
   (logging.info "SPACE_FENNEL_FLAMEGRAPH disabled; not recording hoverables profile.")
   (os.exit 0))
 
-(when (not textures)
-  (set textures {}))
 (local stub-texture
   (fn [name path]
     {:id (tonumber (tostring (string.byte name 1) 10))

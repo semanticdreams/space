@@ -3,10 +3,12 @@
 
 (local HoverLifecycle
   {:enter (fn [ctx]
-            (local hoverables ((. Common :hoverables-from) ctx))
+             (local hoverables (assert ((. Common :hoverables-from) ctx)
+                                       "hover state enter requires hoverables"))
             (hoverables:on-enter))
    :leave (fn [ctx]
-            (local hoverables ((. Common :hoverables-from) ctx))
+             (local hoverables (assert ((. Common :hoverables-from) ctx)
+                                       "hover state leave requires hoverables"))
             (hoverables:on-leave))})
 
 (local HoverAfterMouseButtonUp
@@ -22,7 +24,8 @@
 (local HoverUpdated
   {:updated
    (fn [ctx _delta]
-     (local hoverables ((. Common :hoverables-from) ctx))
+      (local hoverables (assert ((. Common :hoverables-from) ctx)
+                                "hover state update requires hoverables"))
      (local update-fn hoverables.update-from-input)
      (when update-fn
        (update-fn hoverables)))})

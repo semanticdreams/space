@@ -36,8 +36,8 @@
 
 (fn make-widget-ctx []
   (local intersector (Intersectables))
-  (local clickables (Clickables {:intersectables intersector}))
-  (local hoverables (Hoverables {:intersectables intersector}))
+  (local clickables (assert (Clickables {:intersectables intersector}) "HUD extended sidebar test context requires clickables"))
+  (local hoverables (assert (Hoverables {:intersectables intersector}) "HUD extended sidebar test context requires hoverables"))
   (BuildContext {:clickables clickables
                  :hoverables hoverables
                  :icons (make-icons-stub)
