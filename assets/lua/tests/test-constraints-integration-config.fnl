@@ -4,11 +4,11 @@
 (local fs (require :fs))
 
 (fn repo-root-or-nil []
-  (local has-makefile (or (fs.exists "Makefile") (fs.exists "CMakeLists.txt")))
-  (local has-makefile-parent (or (fs.exists "../Makefile") (fs.exists "../CMakeLists.txt")))
-  (if has-makefile
+  (local has-cmake (fs.exists "CMakeLists.txt"))
+  (local has-cmake-parent (or (fs.exists "../Makefile") (fs.exists "../CMakeLists.txt")))
+  (if has-cmake
       "."
-      (if has-makefile-parent
+      (if has-cmake-parent
           ".."
           nil)))
 
