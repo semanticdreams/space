@@ -126,7 +126,10 @@
       (tset seen path true)
       (table.insert deduped path)))
   ;; Parse each file
-  (local module-roots (or target.module-roots target.roots []))
+  (local raw-roots (or target.module-roots target.roots []))
+  (local module-roots [])
+  (each [_ root (ipairs raw-roots)]
+    (table.insert module-roots (fs.absolute root)))
   (local records [])
   (each [_ path (ipairs deduped)]
     (let [source (fs.read-file path)

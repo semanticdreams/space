@@ -450,6 +450,35 @@
     (assert (string.find (tostring err) missing-root 1 true)
             (.. "error should mention the missing root path, got: " (tostring err))))))
 
+;; --- Noncanonical module root regression test (R1-4) ---
+
+(fn source-module-root-is-canonicalized []
+  "When a module root is a noncanonical path (e.g. with .. segments),
+  it should be canonicalized through fs.absolute before computing module names
+  and relative paths, so that it matches discovered file paths which are always
+  absolute.  Regression test for root-prefix matching failure on Windows/Wine."
+  (with-temp-dir (fn [dir]
+    (local sub (fs.join-path dir "mod"))
+    (fs.create-dirs sub)
+    (make-file sub "helper.fnl" "(+ 1 2)")
+    ;; Build a noncanonical root by inserting ../ to create a path that
+    ;; refers to the same directory but differs lexically from its
+    ;; fs.absolute form.
+    (local noncanonical-root (dir:gsub "/([^/]+)/([^/]+)$" "/%1/../%1/%2"))
+    (local target {:kind :unit
+                   :name "canonicalize-test"
+                   :roots [dir]
+                   :module-roots [noncanonical-root]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (= r.module "mod.helper")
+            (.. "expected module 'mod.helper', got '" (tostring r.module) "'"))
+    (assert (= r.relative-path "mod/helper.fnl")
+            (.. "expected relative-path 'mod/helper.fnl', got '"
+                (tostring r.relative-path) "'")))))
+
 ;; --- Repeated --file tests ---
 
 (fn targets-resolve-repeated-file []
@@ -511,6 +540,8 @@
                       :fn source-normalize-path-separators-handles-backslashes})
 (table.insert tests {:name "source path-under-root accepts backslash (R1-2)"
                       :fn source-path-under-root-accepts-backslash})
+(table.insert tests {:name "source canonicalizes noncanonical module root (R1-4)"
+                     :fn source-module-root-is-canonicalized})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"
