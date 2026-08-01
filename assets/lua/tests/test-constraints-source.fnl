@@ -137,8 +137,8 @@
     (local paths {})
     (each [_ r (ipairs records)]
       (tset paths r.path true))
-    (assert (. paths (fs.join-path dir "alpha.fnl")) "alpha.fnl should be discovered")
-    (assert (. paths (fs.join-path subdir "beta.fnl")) "sub/beta.fnl should be discovered")
+    (assert (. paths (fs.absolute (fs.join-path dir "alpha.fnl"))) "alpha.fnl should be discovered")
+    (assert (. paths (fs.absolute (fs.join-path subdir "beta.fnl"))) "sub/beta.fnl should be discovered")
     (assert (not (. paths (fs.join-path dir "readme.txt"))) "readme.txt should be excluded")
     (assert (= (# records) 2) (.. "expected 2 records, got " (# records))))))
 
@@ -177,7 +177,7 @@
     (local records (Source.discover target))
     (assert (= (# records) 1) "should discover the external file")
     (local r (. records 1))
-    (assert (= r.path file-path) "path should match the original file")
+    (assert (= r.path (fs.absolute file-path)) "path should match the absolute original file")
     (assert r.target "record should retain target")
     (assert (= r.target.kind :files) "target kind should be :files")
     (assert (= r.target.name "external-files") "target name should be preserved")
@@ -317,6 +317,42 @@
             (.. "expected relative-path to equal path when no module root matches, got "
                 (tostring r.relative-path) " vs " (tostring r.path))))))
 
+(fn source-relative-path-uses-forward-slashes []
+  "Relative paths produced by source discovery must always use forward slashes,
+  regardless of the platform's native path separator."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "nested"))
+    (fs.create-dirs subdir)
+    (make-file subdir "deep.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "slash-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (not (string.find r.relative-path "\\" 1 true))
+            (.. "relative-path must not contain backslash, got: " (tostring r.relative-path)))
+    (assert (not (string.find r.module "\\" 1 true))
+            (.. "module must not contain backslash, got: " (tostring r.module))))))
+
+(fn source-module-uses-dots-not-slashes []
+  "Module names derived from file paths must use dots as separators
+  and must never contain forward slashes or backslashes."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "core"))
+    (fs.create-dirs subdir)
+    (make-file subdir "utils.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "module-slash-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (= r.module "core.utils")
+            (.. "expected module 'core.utils', got '" (tostring r.module) "'"))
+    (assert (not (string.find r.module "/" 1 true))
+            (.. "module must not contain forward slash, got: " (tostring r.module)))
+    (assert (not (string.find r.module "\\" 1 true))
+            (.. "module must not contain backslash, got: " (tostring r.module))))))
+
 ;; --- Non-Fennel explicit file tests (R1-2) ---
 
 (fn source-files-target-rejects-non-fennel-paths []
@@ -415,6 +451,10 @@
                       :fn source-computes-relative-path-from-module-root})
 (table.insert tests {:name "source relative path falls back to absolute (R1-1)"
                       :fn source-relative-path-falls-back-to-absolute})
+(table.insert tests {:name "source relative path uses forward slashes"
+                      :fn source-relative-path-uses-forward-slashes})
+(table.insert tests {:name "source module uses dots not slashes"
+                      :fn source-module-uses-dots-not-slashes})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"
