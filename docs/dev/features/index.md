@@ -17,6 +17,7 @@ Detailed design and implementation notes for major feature systems.
 - [Graph Notebooks](./graph-notebooks)
 - [Hot Reload Units](./hot-reload-units)
 - [Kernel System](./kernel-system)
+- [OpenCode Agent Workflow](./opencode-agent-workflow)
 - [Layout Widget Engine](./layout-widget-engine)
 - [Panel Transfer System](./panel-transfer-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
