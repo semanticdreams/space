@@ -128,11 +128,23 @@ During final review preparation, triage repeated `constraint obstructed/noisy` n
 
 ## Finish
 
-When final review is clean, use the finishing-a-development-branch skill.
-If finishing validation fails, stay in coordination mode: follow the finishing
-skill's validation-failure loop, invoke `systematic-debugging`, route fixes
-through `implementer` → `reviewer` → pass, rerun validation, and only finish or
-PR when the required suite is green.
+When final review is clean, use the finishing-a-development-branch skill. Do
+not report implementation complete merely because final review passed.
+
+If finishing validation fails, or if the branch is behind current `origin/main`,
+stay in coordination mode. Follow the finishing skill's current-base and
+validation-failure loops: fetch `origin`, safe-merge `origin/main` when
+permitted, invoke `systematic-debugging` for required validation failures,
+continue investigating even when failures appear unrelated, flaky,
+timing-dependent, or environmental, route conflicts and repository fixes
+through `implementer` → `reviewer` → pass, commit reviewed fixes, rerun
+validation, and only finish or create a PR when the required suite is green.
+
+Report BLOCKED or HUMAN_DECISION_REQUIRED only when systematic debugging
+establishes that progress requires credentials, inaccessible infrastructure,
+unsafe git history decisions, unreproducible behavior after reasonable evidence
+gathering, or a product/API/data/architecture choice. Do not rebase or
+force-push unless the human explicitly requests it.
 
 ## Common Rationalizations
 
