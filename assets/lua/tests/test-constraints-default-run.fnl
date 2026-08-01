@@ -5,7 +5,8 @@
 (local fs (require :fs))
 (fn asset-lua-root []
   (local env (os.getenv "SPACE_ASSETS_PATH"))
-  (local assets-path (if env env (. (require :runtime) :assets-path) "assets"))
+  (local rt (require :runtime))
+  (local assets-path (if env env rt.assets-path rt.assets-path "assets"))
   (fs.join-path assets-path "lua"))
 
 (var temp-counter 0)

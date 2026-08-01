@@ -4,7 +4,7 @@
 (local make-file-fact H.make-file-fact)
 (local make-ctx H.make-ctx)
 (local find-rule-by-id H.find-rule-by-id)
-(local fs (require :fs)) (local env (os.getenv "SPACE_ASSETS_PATH")) (local lua-root (fs.join-path (if env env (. (require :runtime) :assets-path) "assets") "lua"))
+(local fs (require :fs)) (local env (os.getenv "SPACE_ASSETS_PATH")) (local rt (require :runtime)) (local lua-root (fs.join-path (if env env rt.assets-path rt.assets-path "assets") "lua"))
 (local tests [])
 ;; ==== precision fix V12: scope-safe closure-helper bypass ====
 
