@@ -66,6 +66,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Graph Notebooks](/dev/features/graph-notebooks)
 - [Hot Reload Units](/dev/features/hot-reload-units)
 - [Kernel System](/dev/features/kernel-system)
+- [OpenCode Agent Workflow](/dev/features/opencode-agent-workflow)
 - [Layout Widget Engine](/dev/features/layout-widget-engine)
 - [Panel Transfer System](/dev/features/panel-transfer-system)
 - [Stylus Drawing Input](/dev/features/stylus-drawing-input)
