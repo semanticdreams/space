@@ -6,6 +6,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def dry_run(target: str, extra_env: dict[str, str] | None = None) -> str:
     env = {**subprocess.os.environ}
+    # Strip ambient BUILD_JOBS so default-j1 tests are deterministic
+    # regardless of the caller's environment.
+    env.pop("BUILD_JOBS", None)
     if extra_env:
         env.update(extra_env)
     result = subprocess.run(
