@@ -37,9 +37,15 @@ The UI prompt is intentionally short because `.opencode/skills/daily-devlog-auto
 - Direct pushes to `origin/main` are not the default path.
 - Daily runs skip entry creation when no meaningful changes exist.
 
+## Landing-date attribution
+
+`origin/main` is the source of truth for deciding what recent work belongs in a daily entry. The automation attributes work to the date it lands or merges into `origin/main`, regardless of the original author date or feature-branch commit date. Older feature-branch commits merged today are eligible for today's entry; author or original commit dates must not cause landed work to be skipped or backdated into an already-published entry.
+
+Agents should inspect mainline/first-parent history, merge commits, PR merges, or equivalent landed ranges on `origin/main` since the latest relevant journal entry or recent day boundary. If `origin/main` cannot be fetched or inspected, or if the mainline/merge evidence is ambiguous, the run fails closed with a BLOCKED summary instead of guessing from local branch history.
+
 ## Safety model
 
-The automation fails closed when credentials, `gh` authentication, branch protection (classic protection or GitHub rulesets/effective branch rules), required status checks, pull-request protection, or a clean checkout are unavailable. The auto-merge method is selected from the effective branch rules (`--merge`, `--squash`, or `--rebase`) rather than hard-coded. Daily entries contain only frontmatter, a date heading, and one short narrative paragraph connecting concrete work to current project goals or milestones — no commit hashes, author lists, raw file lists, or bullet-point summaries.
+The automation fails closed when credentials, `gh` authentication, branch protection (classic protection or GitHub rulesets/effective branch rules), required status checks, pull-request protection, or a clean checkout are unavailable. The auto-merge method is selected from the effective branch rules (`--merge`, `--squash`, or `--rebase`) rather than hard-coded. Daily entries contain only frontmatter, a date heading, and one short narrative paragraph connecting concrete landed work to current project goals or milestones. Inline Markdown links are allowed when they point to relevant docs, notes, plans, specs, or feature pages and improve reader context, but separate link lists, bullet-point summaries, section headings, commit hashes, author lists, and raw file lists are forbidden.
 
 ## Validation and recovery
 

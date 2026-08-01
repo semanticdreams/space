@@ -114,3 +114,43 @@ test('daily devlog skill attributes work by origin/main landing date, not author
         /Inspect recent journal entries, docs notes, plans\/specs, and commits since the latest journal entry or recent day boundary\./,
         'SKILL.md should not keep the ambiguous commits-since workflow wording')
 })
+
+test('daily devlog skill preserves one-paragraph inline-link and compression style policy', async () => {
+    await loadFiles()
+
+    const oneLineSkill = skillContent.replace(/\s+/g, ' ')
+
+    assert.match(oneLineSkill, /single narrative paragraph|One short narrative paragraph/i,
+        'SKILL.md should keep the one-paragraph journal contract')
+    assert.match(oneLineSkill, /inline Markdown links/i,
+        'SKILL.md should explicitly permit inline Markdown links')
+    assert.match(oneLineSkill, /relevant docs, notes, plans, specs, or feature pages/i,
+        'SKILL.md should limit inline links to relevant project context')
+    assert.match(oneLineSkill, /forbid.{0,180}link lists/i,
+        'SKILL.md should forbid separate link lists')
+    assert.match(oneLineSkill, /compression\/style pass|compression pass/i,
+        'SKILL.md should require a compression/style pass')
+    assert.match(oneLineSkill, /denser/i,
+        'SKILL.md should say compression makes prose denser')
+    assert.match(oneLineSkill, /preserv.{0,160}(?:important context|main landed changes|why they matter)/i,
+        'SKILL.md should say compression preserves important context')
+})
+
+test('daily devlog developer note documents landing-date and inline-link policies', async () => {
+    await loadFiles()
+
+    assert.ok(notesContent.length > 0,
+        'daily devlog developer note should be present for human-facing policy')
+    const oneLineNotes = notesContent.replace(/\s+/g, ' ')
+
+    assert.match(oneLineNotes, /origin\/main/i,
+        'developer note should name origin/main')
+    assert.match(oneLineNotes, /land(?:ed|ing)|merge(?:d|s)?/i,
+        'developer note should document landing or merge attribution')
+    assert.match(oneLineNotes, /author|original commit/i,
+        'developer note should say author/original commit dates do not drive attribution')
+    assert.match(oneLineNotes, /inline Markdown links/i,
+        'developer note should document inline Markdown links')
+    assert.match(oneLineNotes, /link lists/i,
+        'developer note should forbid separate link lists')
+})

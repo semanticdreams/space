@@ -56,7 +56,7 @@ created: YYYY-MM-DD
 One short narrative paragraph.
 ```
 
-The paragraph connects concrete work to current project goals, milestones, or recent momentum. Before writing or committing, perform a compression/style pass. Forbid section headings, bullet lists, commit hashes, author lists, raw file lists, and commit-summary prose.
+The paragraph connects concrete work to current project goals, milestones, or recent momentum. Inline Markdown links are allowed when they point to relevant docs, notes, plans, specs, or feature pages and improve reader context. Before writing or committing, perform a compression/style pass that makes the final paragraph denser than the full report while preserving the main landed changes, why they matter, and useful inline references. Forbid section headings, bullet lists, separate link lists, commit hashes, author lists, raw file lists, and commit-summary prose.
 
 ## Validation
 
