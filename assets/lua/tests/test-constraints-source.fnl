@@ -353,6 +353,58 @@
     (assert (not (string.find r.module "\\" 1 true))
             (.. "module must not contain backslash, got: " (tostring r.module))))))
 
+;; --- Windows-separator regression tests (R1-2) ---
+
+(fn source-normalize-path-separators-handles-backslashes []
+  "The normalize-path-separators helper must map \\\\ to / in any path string."
+  (local Source (require :constraints.source))
+  (local nps Source._normalize-path-separators)
+  (assert nps "helper should be exported")
+  (assert (= (nps "C:\\tmp\\space\\unit\\foo\\bar.fnl")
+             "C:/tmp/space/unit/foo/bar.fnl")
+          "backslash path should be normalized to forward slashes")
+  (assert (= (nps "C:\\tmp\\space\\unit")
+             "C:/tmp/space/unit")
+          "backslash root should be normalized")
+  (assert (= (nps "already/forward/slashes.fnl")
+             "already/forward/slashes.fnl")
+          "forward-slash path should be unchanged")
+  (assert (= (nps nil) "")
+          "nil should produce empty string")
+  (assert (= (nps "") "")
+          "empty string should stay empty"))
+
+(fn source-path-under-root-accepts-backslash []
+  "path-under-root? must correctly compare backslash paths against backslash roots
+  after normalization."
+  (local Source (require :constraints.source))
+  (local pur? Source._path-under-root?)
+  (assert pur? "helper should be exported")
+  ;; File under root with backslashes on both sides.
+  (assert (pur? "C:\\tmp\\space\\unit\\foo\\bar.fnl"
+                "C:\\tmp\\space\\unit")
+          "file under backslash root should match")
+  ;; File equals root.
+  (assert (pur? "C:\\tmp\\space\\unit\\bar.fnl"
+                "C:\\tmp\\space\\unit\\bar.fnl")
+          "file equal to backslash root should match")
+  ;; Different root — should not match.
+  (assert (not (pur? "C:\\tmp\\space\\unit\\foo\\bar.fnl"
+                     "C:\\tmp\\other"))
+          "file under different backslash root should not match")
+  ;; File not a direct child (no trailing separator boundary).
+  (assert (not (pur? "C:\\tmp\\space\\unit-other\\bar.fnl"
+                     "C:\\tmp\\space\\unit"))
+          "file with similar prefix should not match")
+  ;; Mixed separators: file with /, root with \\.
+  (assert (pur? "C:/tmp/space/unit/foo/bar.fnl"
+                "C:\\tmp\\space\\unit")
+          "forward-slash file should match backslash root after normalization")
+  ;; Case-insensitive match.
+  (assert (pur? "c:\\TMP\\Space\\Unit\\foo\\bar.fnl"
+                "C:\\tmp\\SPACE\\unit")
+          "case-insensitive backslash match should work"))
+
 ;; --- Non-Fennel explicit file tests (R1-2) ---
 
 (fn source-files-target-rejects-non-fennel-paths []
@@ -455,6 +507,10 @@
                       :fn source-relative-path-uses-forward-slashes})
 (table.insert tests {:name "source module uses dots not slashes"
                       :fn source-module-uses-dots-not-slashes})
+(table.insert tests {:name "source normalize-path-separators handles backslashes (R1-2)"
+                      :fn source-normalize-path-separators-handles-backslashes})
+(table.insert tests {:name "source path-under-root accepts backslash (R1-2)"
+                      :fn source-path-under-root-accepts-backslash})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"
