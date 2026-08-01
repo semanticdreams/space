@@ -727,7 +727,7 @@ add_test(NAME ${PROJECT_NAME}_fnl_tests
 )
 set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    FIXTURES_REQUIRED space_experimental_constraints
+    FIXTURES_REQUIRED space_constraints
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
@@ -736,16 +736,16 @@ add_test(NAME ${PROJECT_NAME}_fnl_tests_integration
 )
 set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    FIXTURES_REQUIRED space_experimental_constraints
+    FIXTURES_REQUIRED space_constraints
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 
-add_test(NAME ${PROJECT_NAME}_experimental_constraints
-    COMMAND space -m constraints.runner:main -- --target repo
+add_test(NAME ${PROJECT_NAME}_constraints
+    COMMAND space -m constraints.runner:main -- --output summary --target repo
 )
-set_tests_properties(${PROJECT_NAME}_experimental_constraints PROPERTIES
+set_tests_properties(${PROJECT_NAME}_constraints PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    FIXTURES_SETUP space_experimental_constraints
+    FIXTURES_SETUP space_constraints
     ENVIRONMENT "SKIP_KEYRING_TESTS=1;XDG_DATA_HOME=/tmp/space/tests/xdg-data;SPACE_DISABLE_AUDIO=1;SPACE_LOG_DIR=/tmp/space/tests/log;SPACE_ASSETS_PATH=${CMAKE_SOURCE_DIR}/assets;FENNEL_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl;FENNEL_MACRO_PATH=${CMAKE_SOURCE_DIR}/assets/lua/?.fnl\;${CMAKE_SOURCE_DIR}/assets/lua/?/init.fnl"
 )
 

@@ -34,7 +34,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
 - [Lifecycle Centralization](/dev/lifecycle-centralization)
 - [E2E Snapshot Tests](/dev/e2e-testing)
-- [Experimental Fennel Constraints](/dev/experimental-constraints) — experimental constraints workflow
+- [Fennel Constraints](/dev/constraints) — constraints workflow
 - [Profiling](/dev/profiling)
 - [Reloadable Units And Hot Reload](/dev/reloadable-units)
 - [Remote Control (Debugging)](/dev/remote-control)

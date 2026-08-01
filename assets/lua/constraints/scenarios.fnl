@@ -1,4 +1,4 @@
-;; Scenario helpers for experimental Fennel constraints.
+;; Scenario helpers for Fennel constraints.
 ;; Provides with-test-app for scenario rules that need a real app environment.
 
 (local M {})

@@ -1,4 +1,4 @@
-;; Target resolution for experimental Fennel constraints.
+;; Target resolution for Fennel constraints.
 ;; Resolves repo, unit, app, and explicit-file analysis targets.
 
 (local fs (require :fs))

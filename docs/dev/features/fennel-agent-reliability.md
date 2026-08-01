@@ -38,6 +38,13 @@ earlier stages for faster diagnosis when feasible.
   checks explicit `.fnl` files only and rejects non-`.fnl` targets.
 - `make constraints` depends on `make fennel-check`, so structural constraints
   run only after the compile oracle succeeds.
+- `make fennel-check` and `make constraints` use concise summary output by
+  default. Add `VERBOSE=1` to either Make command when debugging needs the raw
+  JSON result.
+- Direct `./build/space -m tools.fennel-check:main -- ...` and
+  `./build/space -m constraints.runner:main -- ...` commands remain JSON by
+  default for tooling compatibility; pass `--output summary` for concise direct
+  CLI output.
 
 Do not use system `fennel`, system `lua`, `fennel-ls`, `fnlfmt`,
 `./build/space --compile`, or `./build/space -e` as validation oracles for

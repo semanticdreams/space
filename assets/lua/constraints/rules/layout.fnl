@@ -1,4 +1,4 @@
-;; Layout/Rendering constraint rules for experimental Fennel constraints.
+;; Layout/Rendering constraint rules for Fennel constraints.
 ;; Three rules: no-setters-in-layouters, owned-child-drop, interactive-context-assertion.
 
 (local Diagnostics (require :constraints.diagnostics))

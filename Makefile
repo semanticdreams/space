@@ -3,6 +3,7 @@
 SPACE_TEST_ENV = SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(CURDIR)/assets
 SPACE_FENNEL_ENV = FENNEL_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl FENNEL_MACRO_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl
 SPACE_RUNTIME_ENV = $(SPACE_TEST_ENV) $(SPACE_FENNEL_ENV)
+VALIDATION_OUTPUT = $(if $(VERBOSE),json,summary)
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -65,10 +66,10 @@ clean:
 	rm -rf build/*
 
 fennel-check: build
-	@$(SPACE_RUNTIME_ENV) ./build/space -m tools.fennel-check:main -- --target repo
+	@$(SPACE_RUNTIME_ENV) ./build/space -m tools.fennel-check:main -- --output $(VALIDATION_OUTPUT) --target repo
 
 constraints: fennel-check
-	@$(SPACE_RUNTIME_ENV) ./build/space -m constraints.runner:main -- --target repo
+	@$(SPACE_RUNTIME_ENV) ./build/space -m constraints.runner:main -- --output $(VALIDATION_OUTPUT) --target repo
 
 test: constraints
 	@$(SPACE_RUNTIME_ENV) xvfb-run -a python3 scripts/ctest-summary.py --test-dir build --output-on-failure -E "^space_fnl_tests_integration$$"

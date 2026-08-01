@@ -1,5 +1,6 @@
 (local json (require :json))
 (local ServiceModule (require :llm/fennel-validation/service))
+(local Output (require :tools/validation-output))
 
 (fn failure-result [message]
   {:ok false
@@ -75,8 +76,15 @@
   (local options (main-options opts-or-argv))
   (local print-fn (if options.print options.print print))
   (local exit-fn (if options.exit options.exit os.exit))
-  (local result (run options.argv options.opts))
-  (print-fn (json.dumps result))
+  (local parsed (Output.split-output-argv options.argv :json))
+  (local result (if parsed.error
+                    (failure-result parsed.error)
+                    (run parsed.argv options.opts)))
+  (print-fn (if parsed.error
+                (Output.fennel-check-summary result)
+                (= parsed.output :summary)
+                (Output.fennel-check-summary result)
+                (json.dumps result)))
   (if result.ok
       (exit-fn 0)
       (exit-fn 1)))

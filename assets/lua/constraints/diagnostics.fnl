@@ -1,4 +1,4 @@
-;; Diagnostics module for experimental Fennel constraints.
+;; Diagnostics module for Fennel constraints.
 ;; Provides diagnostic normalization and summary counting.
 
 (local M {})

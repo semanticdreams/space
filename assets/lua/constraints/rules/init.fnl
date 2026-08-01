@@ -1,4 +1,4 @@
-;; Rule registry for experimental Fennel constraints.
+;; Rule registry for Fennel constraints.
 ;; Aggregates all rule modules in deterministic order and exposes
 ;; a combined rule list for the runner to iterate over.
 

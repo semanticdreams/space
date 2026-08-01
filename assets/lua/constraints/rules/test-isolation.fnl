@@ -1,4 +1,4 @@
-;; Test-Isolation constraint rules for experimental Fennel constraints.
+;; Test-Isolation constraint rules for Fennel constraints.
 (local Diagnostics (require :constraints.diagnostics))
 (local M {})
 (local sensitive ["app.renderers" "app.lights" "app.engine" "app.activity-registry" "app.physics-containment-config" "package.loaded"])

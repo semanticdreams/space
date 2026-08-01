@@ -240,6 +240,71 @@
   (assert exit-code "expected exit to be called")
   (assert (not= exit-code 0) (.. "violations should exit non-zero, got " (tostring exit-code))))
 
+(fn run-runner-main-capturing [opts]
+  (local Runner (require :constraints.runner))
+  (var printed nil)
+  (var exit-code nil)
+  (local merged opts)
+  (tset merged :print (fn [msg] (set printed msg)))
+  (tset merged :exit (fn [code] (set exit-code code)))
+  (Runner.main merged)
+  {:printed printed :exit-code exit-code})
+
+(fn runner-main-summary-pass-is-concise []
+  (local captured
+    (run-runner-main-capturing {:rules [(fn [_target] nil)]
+                                :target {:kind :files :name "test"}
+                                :output :summary
+                                :baseline-data false}))
+  (assert (= captured.exit-code 0))
+  (assert (= captured.printed "constraints: pass (0 diagnostics)")))
+
+(fn runner-main-summary-violations-include-diagnostic-and-rerun []
+  (local Diagnostics (require :constraints.diagnostics))
+  (local captured
+    (run-runner-main-capturing {:rules [(fn [_target]
+                                          (Diagnostics.violation
+                                            {:constraint-id "test"
+                                             :family "style"
+                                             :file "assets/lua/example.fnl"
+                                             :line 3
+                                             :column 4
+                                             :message "bad"
+                                             :hint "fix"}))]
+                                :target {:kind :files :name "test"}
+                                :output :summary
+                                :baseline-data false}))
+  (assert (not= captured.exit-code 0))
+  (assert (string.find captured.printed "constraints: violations (1 diagnostic)" 1 true))
+  (assert (string.find captured.printed "assets/lua/example.fnl:3:4" 1 true))
+  (assert (string.find captured.printed "bad" 1 true))
+  (assert (string.find captured.printed "hint: fix" 1 true))
+  (assert (string.find captured.printed "rerun with --output json" 1 true)))
+
+(fn runner-main-global-argv-summary-parses-output-flag []
+  (local Runner (require :constraints.runner))
+  (local previous-arg _G.arg)
+  (local previous-print print)
+  (local previous-exit os.exit)
+  (local previous-run-target Runner.run-target)
+  (var printed nil)
+  (var exit-code nil)
+  (set _G.arg ["--" "--output" "summary" "--target" "repo"])
+  (tset _G :print (fn [msg] (set printed msg)))
+  (tset os :exit (fn [code] (set exit-code code)))
+  (tset Runner :run-target (fn [_target _opts]
+                             {:status :pass
+                              :counts {:total 0 :by-family {} :by-severity {}}
+                              :diagnostics []}))
+  (local (ok err) (pcall #(Runner.main)))
+  (set _G.arg previous-arg)
+  (tset _G :print previous-print)
+  (tset os :exit previous-exit)
+  (tset Runner :run-target previous-run-target)
+  (assert ok (.. "Runner.main global argv summary should not crash, got: " (tostring err)))
+  (assert (= exit-code 0))
+  (assert (= printed "constraints: pass (0 diagnostics)")))
+
 ;; R1-1: Runner.main tolerates nil opts (runtime zero-arg entry point)
 (fn runner-main-handles-nil-opts []
   (local Runner (require :constraints.runner))
@@ -247,11 +312,16 @@
   ;; Verify Runner.main does not crash when opts is nil.
   ;; We stub os.exit because the real one would terminate the test process.
   (var exit-code nil)
+  (var printed nil)
   (local orig-exit os.exit)
+  (local orig-print print)
   (tset os :exit (fn [code] (set exit-code code)))
+  (tset _G :print (fn [msg] (set printed msg)))
   (local (ok err) (pcall #(Runner.main)))  ;; nil opts
   (tset os :exit orig-exit)
+  (tset _G :print orig-print)
   (assert ok (.. "Runner.main(nil) must not crash, got: " (tostring err)))
+  (assert printed "print should have been called")
   (assert exit-code "exit should have been called"))
 
 ;; R1-3: timeout produces :interrupted status
@@ -327,7 +397,13 @@
 (table.insert tests {:name "runner main prints JSON and exits zero on pass"
                      :fn runner-main-prints-json-and-exits-zero-on-pass})
 (table.insert tests {:name "runner main prints JSON and exits nonzero on violations"
-                     :fn runner-main-prints-json-and-exits-nonzero-on-violations})
+                      :fn runner-main-prints-json-and-exits-nonzero-on-violations})
+(table.insert tests {:name "runner main summary pass is concise"
+                     :fn runner-main-summary-pass-is-concise})
+(table.insert tests {:name "runner main summary violations include diagnostic and rerun"
+                     :fn runner-main-summary-violations-include-diagnostic-and-rerun})
+(table.insert tests {:name "runner main global argv summary parses output flag"
+                     :fn runner-main-global-argv-summary-parses-output-flag})
 (table.insert tests {:name "runner main handles nil opts (runtime convention)"
                      :fn runner-main-handles-nil-opts})
 (table.insert tests {:name "runner timeout produces interrupted status"

@@ -1,4 +1,4 @@
-;; Runner module for experimental Fennel constraints.
+;; Runner module for Fennel constraints.
 ;; Aggregates rule execution, status precedence, and JSON output.
 
 (local Baseline (require :constraints.baseline))
@@ -262,6 +262,18 @@
            :counts counts
            :diagnostics all-diagnostics}))))
 
+(local Output (require :tools/validation-output))
+
+(fn normalized-global-argv []
+  (local source (if _G.arg _G.arg []))
+  (local start (if (= (. source 1) "--") 2 1))
+  (local result [])
+  (var index start)
+  (while (<= index (# source))
+    (table.insert result (. source index))
+    (set index (+ index 1)))
+  result)
+
 (fn M.main [opts-or-argv]
   "Entry point for the constraints runner.
   Supports two calling conventions:
@@ -272,30 +284,47 @@
   (local arg (or opts-or-argv {}))
   (if (and (= (type arg) :table) (. arg :rules))
       ;; Old interface: {:rules [] :target ... :print fn :exit fn :baseline-data tbl}
-      (do
-        (local o arg)
-        (local print-fn (or o.print print))
-        (local exit-fn (or o.exit os.exit))
-        (local rules (or o.rules []))
-        (local target (or o.target {:kind :repo :name "default"}))
-        (local result (M.run {:rules rules
-                              :target target
-                              :baseline-data o.baseline-data}))
-        (print-fn (json.dumps result))
-        (if (= result.status :pass)
-            (exit-fn 0)
-            (exit-fn 1)))
+       (do
+         (local o arg)
+         (local print-fn (or o.print print))
+         (local exit-fn (or o.exit os.exit))
+         (local output (if o.output o.output :json))
+         (local rules (or o.rules []))
+         (local target (or o.target {:kind :repo :name "default"}))
+         (local result (M.run {:rules rules
+                               :target target
+                               :baseline-data o.baseline-data}))
+         (print-fn (if (= output :summary)
+                       (Output.constraints-summary result)
+                       (json.dumps result)))
+         (if (= result.status :pass)
+             (exit-fn 0)
+             (exit-fn 1)))
       ;; New interface: argv (sequential table) or nil → full pipeline
-      (do
-        (local argv (if (= (type arg) :table) arg []))
-        (local target (Targets.resolve argv {}))
-        ;; Check if old-style injected print/exit are present
-        (local print-fn (or (. arg :print) print))
-        (local exit-fn (or (. arg :exit) os.exit))
-        (local result (M.run-target target {}))
-        (print-fn (json.dumps result))
-        (if (= result.status :pass)
-            (exit-fn 0)
-            (exit-fn 1)))))
+       (do
+         (local argv (if opts-or-argv
+                         (if (= (type arg) :table) arg [])
+                         (normalized-global-argv)))
+         ;; Check if old-style injected print/exit are present
+         (local print-fn (or (. arg :print) print))
+         (local exit-fn (or (. arg :exit) os.exit))
+         (local parsed (Output.split-output-argv argv :json))
+         (local result (if parsed.error
+                           {:status :fail
+                            :counts {:total 1 :by-family {:input 1} :by-severity {:error 1}}
+                            :diagnostics [{:constraint-id "constraints.runner/output"
+                                           :family "input"
+                                           :severity :error
+                                           :message parsed.error
+                                           :hint "Use --output json or --output summary."}]}
+                           (do
+                             (local target (Targets.resolve parsed.argv {}))
+                             (M.run-target target {}))))
+         (print-fn (if (= parsed.output :summary)
+                       (Output.constraints-summary result)
+                       (json.dumps result)))
+         (if (= result.status :pass)
+             (exit-fn 0)
+             (exit-fn 1)))))
 
 M

@@ -1,4 +1,4 @@
-;; Source discovery and parsing for experimental Fennel constraints.
+;; Source discovery and parsing for Fennel constraints.
 ;; Provides file discovery, tree-sitter parsing, traversal, and text extraction.
 
 (local ts (require :tree-sitter))

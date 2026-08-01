@@ -1,4 +1,4 @@
-;; Lifecycle constraint rules for experimental Fennel constraints.
+;; Lifecycle constraint rules for Fennel constraints.
 ;; Two rules: event-registration-cleanup and required-runtime-fails-loudly.
 
 (local Diagnostics (require :constraints.diagnostics))

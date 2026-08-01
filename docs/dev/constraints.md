@@ -1,8 +1,8 @@
-# Experimental Fennel Constraints
+# Fennel Constraints
 
-The experimental constraints gate checks repository Fennel code before normal Fennel tests run. It combines source facts from the Fennel parser with executable scenario checks so structural, lifecycle, layout, rendering, Scene, and Sandbox mistakes are caught early.
+The constraints gate checks repository Fennel code before normal Fennel tests run. It combines source facts from the Fennel parser with executable scenario checks so structural, lifecycle, layout, rendering, Scene, and Sandbox mistakes are caught early.
 
-The gate is still explicitly experimental, but it is blocking. If a constraint is noisy or wrong, fix or remove that constraint through normal reviewed code. Do not bypass the gate.
+The gate is blocking. If a constraint is noisy or wrong, fix or remove that constraint through normal reviewed code. Do not bypass the gate.
 
 ## Daily Workflow
 
@@ -21,7 +21,7 @@ make constraints
 
 `make constraints` runs the default repository target over `assets/lua/` with the runtime environment configured for the Space asset tree and Fennel module paths. A clean repository run exits successfully with status `pass` and 0 diagnostics.
 
-`make test` already depends on `make constraints`, so full test runs execute the experimental constraints gate first. You do not need to run `make constraints` separately immediately before `make test`, but running it before narrowed Fennel tests gives faster feedback and keeps focused runs honest.
+`make test` already depends on `make constraints`, so full test runs execute the constraints gate first. You do not need to run `make constraints` separately immediately before `make test`, but running it before narrowed Fennel tests gives faster feedback and keeps focused runs honest.
 
 ## Relationship to Fennel Compile Check
 
@@ -37,19 +37,19 @@ layout, rendering, Scene, Sandbox, and structure rules.
 
 ## CI Workflow
 
-GitHub Actions `test.yml` runs `make constraints` explicitly after the Linux build. This gives constraint failures a fast, named `Run experimental constraints` step in CI logs.
+GitHub Actions `test.yml` runs `make constraints` explicitly after the Linux build. This gives constraint failures a fast, named `Run constraints` step in CI logs.
 
-The broader CTest suite still keeps its `space_experimental_constraints` fixture dependency, so normal test execution remains structurally gated as defense in depth. The explicit GitHub Actions step improves failure visibility; the CTest fixture remains the blocking integration gate.
+The broader CTest suite still keeps its `space_constraints` fixture dependency, so normal test execution remains structurally gated as defense in depth. The explicit GitHub Actions step improves failure visibility; the CTest fixture remains the blocking integration gate.
 
 ## Agent Workflow
 
-Treat experimental constraints as early feedback that reduces review and fix cycles, not as a ritual to satisfy after the fact. For Fennel-facing implementation work, run `make constraints` before narrowed Fennel test commands when feasible, then run the focused test with the usual runtime environment. If the final validation is the full `make test`, that command already gates constraints; do not duplicate the same gate unless earlier feedback would save time.
+Treat constraints as early feedback that reduces review and fix cycles, not as a ritual to satisfy after the fact. For Fennel-facing implementation work, run `make constraints` before narrowed Fennel test commands when feasible, then run the focused test with the usual runtime environment. If the final validation is the full `make test`, that command already gates constraints; do not duplicate the same gate unless earlier feedback would save time.
 
 Handoffs for Fennel-facing feature or bugfix work should include a lightweight constraint-impact note: `helped catch`, `obstructed/noisy`, `changed constraint`, or `not applicable`. Reviewers should verify that constraint validation was reported, or that the report explains why it does not apply. Unresolved `violations`, `fail`, or `interrupted` statuses are validation failures.
 
 When an intentional architecture transition conflicts with a constraint that encodes the old contract, update the production code and the constraint contract together through reviewed changes. Do not contort production code around a stale rule, skip the gate, or add broad baselines/allowlists just to make the gate green. If the new contract is ambiguous, pause for clarification before changing constraints.
 
-Runner output verbosity remains a deferred follow-up.
+`make constraints` prints concise summaries by default to keep local and agent logs readable. Use `make constraints VERBOSE=1` for the full JSON payload from both `fennel-check` and the constraints runner, or call `./build/space -m constraints.runner:main -- --output json --target repo` directly when debugging parser/constraint details.
 
 ## Runner Statuses
 
@@ -77,7 +77,7 @@ Use neutral absolute paths for external unit, app, or file targets. Production m
 
 ## Constraint Families
 
-The current experimental constraints are grouped into four families:
+The current constraints are grouped into four families:
 
 - **Scene/Sandbox** — protects scene ownership and sandbox boundaries.
 - **Lifecycle** — catches stale callback, teardown, drop, and ownership mistakes.
