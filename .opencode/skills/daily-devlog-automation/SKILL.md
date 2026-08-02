@@ -62,7 +62,20 @@ The paragraph connects concrete work to current project goals, milestones, or re
 
 ## Validation
 
-Run `cd docs && npm run devlog:indices && npm run docs:build`. Inspect the final diff and require only expected journal/devlog/docs automation files.
+Before running the docs build, ensure locked docs dependencies are installed:
+
+```bash
+cd docs
+if [ ! -d node_modules ] || [ ! -x node_modules/.bin/vitepress ]; then npm ci; fi
+```
+
+Then run the full validation:
+
+```bash
+cd docs && npm run devlog:indices && npm run docs:build
+```
+
+Inspect the final diff and require only expected journal/devlog/docs automation files.
 
 ## Validation Failure Recovery
 

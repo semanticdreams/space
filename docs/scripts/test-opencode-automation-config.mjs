@@ -199,3 +199,37 @@ test('supervisor permissions allow workflow-debug final PR branch integration on
     assert.ok(!supervisorContent.includes('"git push origin main": allow'),
         'direct main push must not be allowed')
 })
+
+test('daily devlog skill preconditions mention installing locked docs dependencies when node_modules or vitepress is missing', async () => {
+    await loadFiles()
+    // Validation/preconditions area must mention npm ci for docs dependency install
+    const oneLineSkill = skillContent.replace(/\s+/g, ' ')
+    assert.match(oneLineSkill, /npm\s+ci/i,
+        'SKILL.md should mention npm ci for installing locked docs dependencies')
+    assert.ok(
+        oneLineSkill.includes('node_modules') || oneLineSkill.includes('vitepress'),
+        'SKILL.md should reference checking for docs/node_modules or vitepress'
+    )
+})
+
+test('daily devlog developer note documents fresh-checkout docs dependency install before docs build', async () => {
+    await loadFiles()
+    assert.ok(notesContent.length > 0,
+        'daily devlog developer note should be present for human-facing policy')
+    const oneLineNotes = notesContent.replace(/\s+/g, ' ')
+    assert.match(oneLineNotes, /npm\s+ci/i,
+        'developer note should document npm ci for installing locked docs dependencies')
+    assert.match(oneLineNotes, /npm run docs:build/i,
+        'developer note should retain npm run docs:build in dependency flow')
+})
+
+test('daily devlog developer note documents Orca/OpenCode project-config caveat', async () => {
+    await loadFiles()
+    assert.ok(notesContent.length > 0,
+        'daily devlog developer note should be present for human-facing policy')
+    const oneLineNotes = notesContent.replace(/\s+/g, ' ')
+    assert.match(oneLineNotes, /OPENCODE_DISABLE_PROJECT_CONFIG|project.config/i,
+        'developer note should document OPENCODE_DISABLE_PROJECT_CONFIG or project-config caveat')
+    assert.match(oneLineNotes, /synchroniz|sync.*(?:global|config)|restart/i,
+        'developer note should mention syncing global config or restarting after .opencode changes')
+})
