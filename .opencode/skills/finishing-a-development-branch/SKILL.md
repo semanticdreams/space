@@ -61,9 +61,24 @@ restart this finishing skill from Step 0. If the merge requires a human
 permission or unsafe git-history decision, report HUMAN_DECISION_REQUIRED with
 the exact command and branch state.
 
-Run the project's full test suite. Consult AGENTS.md for the correct test command.
+Run the required final validation from `AGENTS.md` for the changed surface:
 
-**If tests fail**, integration is forbidden but the branch is not finished.
+- **Docs/prompt-only changes:** focused text checks plus `git diff --check` are
+  sufficient locally unless the reviewer or risk surface requires more.
+- **Fennel/UI/layout behavior:** compile check first, then constraints, then
+  focused Fennel tests.
+- **C++ behind Fennel bindings:** build first, then focused Fennel tests through
+  the binding surface.
+- **Pure C++ utility behavior:** build the relevant target and/or focused CTest.
+- **Build, package, startup, runtime initialization, broad binding/API, or other
+  high-risk changes:** run broader local validation such as the standard `make
+  test` command (`SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data
+  SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`).
+- **`make build`** is the runtime/freshness prerequisite when `./build/space`
+  may be missing or stale, or when C++, CMake, runtime initialization,
+  bindings, or host scaffolding changed.
+
+**If validation fails**, integration is forbidden but the branch is not finished.
 Do all of the following:
 
 1. Capture the exact failing command, failing tests, relevant error output,
@@ -80,16 +95,19 @@ Do all of the following:
    other non-allowlisted files directly.
 6. After reviewed fixes are committed and the tree is clean, rerun this
    finishing skill from Step 0.
-7. Only continue to Step 2 when the required validation suite passes on a
+7. Only continue to Step 2 when the required validation passes on a
    clean tree that has accounted for current `origin/main`.
 
 Report `BLOCKED` or `HUMAN_DECISION_REQUIRED` only when systematic debugging
 establishes that progress requires human input: credentials, inaccessible
 infrastructure, unsafe git history decisions, unreproducible behavior after
 reasonable evidence gathering, or a product/API/data/architecture choice.
-Do not push, PR, merge, or clean up while required validation is red.
+Do not push, PR, merge, clean up, or claim ready-to-merge while required
+local validation is red.
 
-**If tests pass:** continue to Step 2.
+Do not claim ready-to-merge until the applicable **PR CI** gate is green.
+
+**If validation passes:** continue to Step 2.
 
 ## Step 2: Consult Project Policy
 
