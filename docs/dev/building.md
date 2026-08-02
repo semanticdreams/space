@@ -159,6 +159,11 @@ The full profile configures with `-DSPACE_BUILD_PROFILE=full -DSPACE_ENABLE_CEF=
 To run the app directly, use `./build/space -m main`.
 By default, `./build/space` also starts the main app; use `./build/space --repl` for the embedded Fennel REPL.
 
+If you create fresh `git worktree`s for agent-driven development, you can
+warm the build directory from a cached main-checkout build to skip the
+initial full compile. See [OpenCode Agent Workflow](features/opencode-agent-workflow.md#optional-warm-new-worktrees-from-the-main-build)
+for the setup script and caveats.
+
 ### Runtime asset discovery
 
 Direct binary execution is supported from arbitrary working directories. After a normal build, assets are copied next to the executable at `build/assets`, so commands such as this work even outside the repository root:

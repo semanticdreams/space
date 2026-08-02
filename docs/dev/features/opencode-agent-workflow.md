@@ -32,6 +32,124 @@ If you choose the local-Orca-plus-remote-SSH setup, work through these points:
 7. **Rely on the checked-out repository.** Once the checkout is opened, the agent reads `AGENTS.md` and `.opencode/**` from the repository itself — no external configuration repository is needed.
 8. **Final checks.** Run `command -v git node npm clangd opencode` on the remote VM to confirm the expected tools are available, then verify SSH connectivity with `ssh -T git@github.com`.
 
+### Optional: warm new worktrees from the main build
+
+When creating a fresh `git worktree` for agent-driven work, you can warm the
+new worktree from a cached main-checkout build instead of running a full
+`make build` from scratch. This is a cache warm-start, not a substitute for
+validation; agents must still run the normal Space validation ladder.
+
+**When to use:** Run only on a freshly created, clean worktree before any
+agent edits begin. The script assumes the same machine and toolchain as the
+main checkout and a valid, up-to-date main-checkout build directory.
+
+**When not to use:** Skip this on worktrees that already contain divergent
+changes, or when the main-checkout build may be stale relative to the target
+branch. If anything behaves unexpectedly after warming, delete the copied
+build directory and run `make build`.
+
+The script copies build artifacts from the main checkout's `build/` directory
+into the new worktree, then rewrites CMake-generated absolute paths (source and
+build directories) to point at the new worktree. After repathing, it re-runs
+`cmake` so generated files are refreshed for the new location, then builds the
+main target. It preserves the build profile and CEF settings from the main
+checkout's cache.
+
+**Safety notes:**
+- Run only for a freshly created, clean worktree before agent work begins.
+- Assumes the same machine/toolchain and a valid main-checkout `build/`.
+- Does not copy credentials. Repaths only generated text files; binary
+  artifacts are skipped (detected by the presence of null bytes).
+- Re-runs `cmake` after rewriting the cache so CMake refreshes generated
+  files for the new worktree.
+- Copies build files with fresh mtimes (`rsync --no-times`) so copied
+  artifacts appear newer than checkout files. On a divergent branch this
+  can hide needed rebuilds, which is why the clean-worktree caveat matters.
+  As a safety measure, the script compares source/destination HEAD and
+  touches tracked files that differ.
+
+Paste the script below into Orca's per-project or per-worktree setup step.
+Adjust the `SPACE_MAIN_CHECKOUT` and `ORCA_WORKTREE` environment variables
+(or the script's default paths) to match your environment.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+main_checkout="${SPACE_MAIN_CHECKOUT:-$HOME/space/space}"
+worktree="${ORCA_WORKTREE:-$PWD}"
+main_checkout="$(cd "$main_checkout" && pwd)"
+worktree="$(cd "$worktree" && pwd)"
+
+if [ "$main_checkout" = "$worktree" ]; then
+  echo "Refusing to seed the main checkout from itself: $worktree" >&2
+  exit 1
+fi
+
+src_build="$main_checkout/build"
+dst_build="$worktree/build"
+
+if [ ! -f "$src_build/CMakeCache.txt" ]; then
+  echo "No reusable build cache at $src_build; run make build in $main_checkout first." >&2
+  exit 1
+fi
+
+if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
+  echo "Worktree is not clean; run this only before agent edits begin." >&2
+  exit 1
+fi
+
+mkdir -p "$dst_build"
+rsync -a --delete --no-times \
+  --exclude '/logs/' \
+  --exclude '/Testing/Temporary/' \
+  "$src_build/" "$dst_build/"
+
+python3 - "$main_checkout" "$worktree" <<'PY'
+import sys
+from pathlib import Path
+
+old_src = Path(sys.argv[1]).resolve()
+new_src = Path(sys.argv[2]).resolve()
+old_build = old_src / "build"
+new_build = new_src / "build"
+replacements = [
+    (str(old_build).encode(), str(new_build).encode()),
+    (str(old_src).encode(), str(new_src).encode()),
+]
+
+for path in new_build.rglob("*"):
+    if not path.is_file() or path.is_symlink():
+        continue
+    try:
+        data = path.read_bytes()
+    except OSError:
+        continue
+    if b"\0" in data:
+        continue
+    updated = data
+    for old, new in replacements:
+        updated = updated.replace(old, new)
+    if updated != data:
+        path.write_bytes(updated)
+PY
+
+profile="$(awk -F= '/^SPACE_BUILD_PROFILE:STRING=/{print $2}' "$dst_build/CMakeCache.txt" || true)"
+cef="$(awk -F= '/^SPACE_ENABLE_CEF:BOOL=/{print $2}' "$dst_build/CMakeCache.txt" || true)"
+cmake_args=(-S "$worktree" -B "$dst_build" -DCMAKE_BUILD_TYPE=Release)
+[ -n "$profile" ] && cmake_args+=("-DSPACE_BUILD_PROFILE=$profile")
+[ -n "$cef" ] && cmake_args+=("-DSPACE_ENABLE_CEF=$cef")
+cmake "${cmake_args[@]}"
+
+src_head="$(git -C "$main_checkout" rev-parse HEAD)"
+if git -C "$worktree" cat-file -e "$src_head^{commit}" 2>/dev/null; then
+  git -C "$worktree" diff --name-only -z "$src_head"...HEAD -- \
+    | xargs -0 -r -I{} touch "$worktree/{}"
+fi
+
+cmake --build "$dst_build" --target space -- -j"${BUILD_JOBS:-1}"
+```
+
 ## Remote-VM Orca alternative
 
 When running Orca entirely on the remote VM fits your environment better, install Orca on that host and launch your agent sessions there. Use your local Orca session only as a viewer or connector — some collaborators keep a local Orca window open that connects to the remote instance.
