@@ -128,7 +128,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/semanticdreams/space' },
+      { icon: 'github', link: 'https://github.com/semanticdreams/space2' },
       {
         icon: {
           // Source: docs/node_modules/@iconify-json/simple-icons/icons.json
