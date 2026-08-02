@@ -9,6 +9,8 @@ const repoRoot = join(__dirname, '..', '..')
 
 let skillContent = ''
 let supervisorContent = ''
+let finishingContent = ''
+let weeklySkillContent = ''
 let notesContent = ''
 let workflowDebugContent = ''
 let testWorkflowContent = ''
@@ -19,6 +21,8 @@ async function loadFiles() {
     if (skillContent) return
     skillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'daily-devlog-automation', 'SKILL.md'), 'utf8')
     supervisorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'supervisor.md'), 'utf8')
+    finishingContent = await readFile(join(repoRoot, '.opencode', 'skills', 'finishing-a-development-branch', 'SKILL.md'), 'utf8')
+    weeklySkillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'weekly-agent-workflow-automation', 'SKILL.md'), 'utf8')
     workflowDebugContent = await readFile(join(repoRoot, '.opencode', 'skills', 'github-workflow-debug', 'SKILL.md'), 'utf8')
     testWorkflowContent = await readFile(join(repoRoot, '.github', 'workflows', 'test.yml'), 'utf8')
     agentsContent = await readFile(join(repoRoot, 'AGENTS.md'), 'utf8')
@@ -263,4 +267,36 @@ test('repository policy requires agents to poll merge queue until PR merge', asy
         'policy should not treat merge-queue handoff as the terminal success state')
     assert.match(oneLine, /push.{0,160}requeue/i,
         'policy should require pushing the repaired branch before requeuing')
+})
+
+test('opencode workflows monitor queued PRs until merged', async () => {
+    await loadFiles()
+    const files = [
+        ['supervisor', supervisorContent],
+        ['finishing', finishingContent],
+        ['daily', skillContent],
+        ['weekly', weeklySkillContent],
+    ]
+
+    for (const [name, content] of files) {
+        const oneLine = content.replace(/\s+/g, ' ')
+        assert.match(oneLine, /poll.{0,180}(?:mergedAt|merged)/i,
+            `${name} should poll until mergedAt or merged state`)
+        assert.match(content, /gh pr view/i,
+            `${name} should mention gh pr view polling`)
+        assert.match(oneLine, /do not (?:safe-merge|update).{0,220}origin\/main advanced/i,
+            `${name} should preserve stale-branch loop prohibition`)
+        assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
+            `${name} should not stop after queue handoff`)
+    }
+})
+
+test('supervisor permissions allow merge queue polling commands', async () => {
+    await loadFiles()
+    assert.ok(supervisorContent.includes('gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url'),
+        'supervisor should allow gh pr view merge-queue polling')
+    assert.ok(supervisorContent.includes('gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt'),
+        'supervisor should allow merge_group run listing')
+    assert.ok(supervisorContent.includes('gh run watch * --exit-status --interval 100'),
+        'supervisor should allow watching merge_group runs')
 })

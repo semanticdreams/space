@@ -51,6 +51,10 @@ permission:
     "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
     "gh pr merge --auto --merge automation/daily-devlog/????-??-??": allow
     "gh pr merge --auto --squash automation/weekly-agent-workflow/????-W??": allow
+    "gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url": allow
+    "gh pr checks * --watch": allow
+    "gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt": allow
+    "gh run watch * --exit-status --interval 100": allow
     "git push origin --delete *": ask
     "git push *--force*": deny
     "git push * -f*": deny
@@ -205,9 +209,10 @@ choice.
 **Post-PR merge-queue discipline:**
 
 After a PR is open and auto-merge is enabled or the PR enters GitHub merge
-queue, the supervisor must not safe-merge `origin/main` solely because
-`origin/main` advanced. Merge queue handles post-PR freshness. The supervisor
-waits for queue results and resumes only for actionable blockers: merge queue
+queue, do not safe-merge origin/main solely because
+origin/main advanced. Merge queue handles post-PR freshness. The supervisor
+polls with `gh pr view --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged)
+and resumes only for actionable blockers: merge queue
 conflicts, required-check failures (including merge-group `test` failures),
 missing merge queue protection, or permission blockers.
 
