@@ -118,10 +118,23 @@ from Step 0 so validation runs on the updated branch. If push is rejected
 because the remote/base moved, do not force-push; fetch, update by safe merge
 when permitted, and restart from Step 0.
 
-  3. If both checks pass: execute the default action automatically (push the
-     current branch and create a pull request targeting the base branch).
-     Keep the worktree for PR feedback and iteration — do not clean up.
-     Skip the integration menu and end the skill.
+  3. If both checks pass: execute the default action automatically:
+     - Push the current branch.
+     - Create a pull request targeting the base branch.
+     - Enable auto-merge (or queue the PR) when branch protection allows it.
+     - Stop after successful merge-queue handoff. Keep the worktree for PR
+       feedback and iteration — do not clean up. Skip the integration menu
+       and end the skill.
+
+     Do not continue polling the base branch or updating the PR branch
+     solely because `origin/main` advanced after PR creation. Merge queue
+     handles post-PR freshness. Resume only for actionable queue blockers:
+     merge queue conflicts, required-check failures (including merge-group
+     `test` failures), missing merge queue protection, or permission
+     blockers. Each fix follows: invoke `systematic-debugging`, route any
+     repository fix through `implementer` → `reviewer` → pass, commit
+     reviewed fixes, current-base validation, and requeue. Do not rebase or
+     force-push unless the human explicitly requests it.
   4. If the user explicitly requested a different integration action: execute
      that action instead.
   5. If the branch cannot be integrated safely (e.g., unresolved merge conflicts

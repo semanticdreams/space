@@ -200,6 +200,24 @@ inaccessible infrastructure, unsafe git history decisions, unreproducible
 behavior after reasonable evidence gathering, or a product/API/data/architecture
 choice.
 
+**Post-PR merge-queue discipline:**
+
+After a PR is open and auto-merge is enabled or the PR enters GitHub merge
+queue, the supervisor must not safe-merge `origin/main` solely because
+`origin/main` advanced. Merge queue handles post-PR freshness. The supervisor
+waits for queue results and resumes only for actionable blockers: merge queue
+conflicts, required-check failures (including merge-group `test` failures),
+missing merge queue protection, or permission blockers.
+
+Each resumption follows the fix loop: invoke `systematic-debugging`, route any
+repository fix through `implementer` → `reviewer` → pass, commit reviewed
+fixes, revalidate the current base, and requeue. Do not rebase or force-push
+unless the human explicitly requests it. If the queue reports a state the
+supervisor cannot resolve without human input (missing queue protection, a
+permission gate, or a failure that cannot be diagnosed with available access),
+report HUMAN_DECISION_REQUIRED with the queue state, blocking check, and
+available evidence.
+
 ## Your Subagents
 
 | Subagent | Use for | Model |
