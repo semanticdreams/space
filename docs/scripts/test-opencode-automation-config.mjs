@@ -181,7 +181,7 @@ test('github workflow debug lands through a PR branch instead of local main', as
 
     assert.doesNotMatch(workflowDebugContent, /## Final landing on main/,
         'workflow-debug skill must not title the landing path as local main')
-    assert.doesNotMatch(oneLineSkill, /Check out `main`|Fast-forward `main`|Final commit on main|Ready to push|git checkout main|checkout main|check out main|commit (?:on|to|onto) (?:`?main`?|main)|squash[- ]merge\s+(?:onto|into)\s+(?:`?main`?|main)|squash\s+(?:onto|into)\s+(?:`?main`?|main)/i,
+    assert.doesNotMatch(oneLineSkill, /Check out `main`|Fast-forward `main`|Final commit on main|Ready to push|git checkout main|checkout main|check out main|commit (?:on|to|onto) (?:`?main`?|main)|squash[- ]merge[\s\S]*?(?:onto|into)\s+(?:`?main`?|main)|squash\s+(?:onto|into)\s+(?:`?main`?|main)/i,
         'workflow-debug skill must not reference local main checkout, commit-on-main, or ready-to-push-main output')
     assert.doesNotMatch(workflowDebugContent, /git push origin main/,
         'workflow-debug skill must not tell agents to push main directly')
