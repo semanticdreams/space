@@ -372,18 +372,25 @@
             (.. "baseline-data requires \"" required-id
                 "\" but it is not in the rule registry"))))
 
+(fn bounded-str [v]
+  "Return tostring(v) truncated to 120 chars with ellipsis if longer."
+  (local raw (tostring v))
+  (if (> (length raw) 120)
+      (.. (string.sub raw 1 120) "...")
+      raw))
+
 (fn format-diag-entry [i d]
   "Format a single diagnostic table entry as a bounded string."
-  (local msg-str (if (. d :message) (.. " msg=" (tostring (. d :message))) ""))
-  (local hint-str (if (. d :hint) (.. " hint=" (tostring (. d :hint))) ""))
-  (local fam (if (. d :family) (. d :family) "?"))
-  (local sev (if (. d :severity) (. d :severity) "?"))
-  (local fil (if (. d :file) (. d :file) "?"))
-  (.. "  [" i "] "
-      (tostring (. d :constraint-id))
-      " family=" (tostring fam)
-      " severity=" (tostring sev)
-      " file=" (tostring fil)
+  (local msg-str (if (. d :message) (.. " msg=" (bounded-str (. d :message))) ""))
+  (local hint-str (if (. d :hint) (.. " hint=" (bounded-str (. d :hint))) ""))
+  (local fam (bounded-str (if (. d :family) (. d :family) "?")))
+  (local sev (bounded-str (if (. d :severity) (. d :severity) "?")))
+  (local fil (bounded-str (if (. d :file) (. d :file) "?")))
+  (local cid (bounded-str (. d :constraint-id)))
+  (.. "  [" i "] " cid
+      " family=" fam
+      " severity=" sev
+      " file=" fil
       msg-str hint-str))
 
 (fn diag-first5-impl [diags]
@@ -394,7 +401,7 @@
     (set i (+ i 1))
     (if (= (type d) :table)
         (table.insert lines (format-diag-entry i d))
-        (table.insert lines (.. "  [" i "] (malformed: " (tostring d) ")"))))
+        (table.insert lines (.. "  [" i "] (malformed: " (bounded-str d) ")"))))
   (table.concat lines "\n"))
 
 (fn diag-sample-first-5 [diags]
