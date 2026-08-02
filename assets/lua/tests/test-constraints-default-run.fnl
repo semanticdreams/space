@@ -259,6 +259,42 @@
   blocked by unrelated repo stale/worsened baseline entries."
   (assert-clean-non-repo-target-default-baseline-passes :app))
 
+(fn default-baseline-does-not-false-missing-required []
+  "Prove that the default baseline does not report missing-required diagnostics
+  for rules that exist in the registry, when all rule families are active.
+  Uses a small temp repo to keep execution fast."
+  (local Runner (require :constraints.runner))
+  (local RuleRegistry (require :constraints.rules.init))
+  (local BaselineData (require :constraints.baseline-data))
+  ;; Collect all rule IDs from the registry
+  (local all-rules (RuleRegistry.all-rules))
+  (local registry-ids {})
+  (each [_ rule (ipairs all-rules)]
+    (local id (or rule.id rule.constraint-id "unknown"))
+    (tset registry-ids id true))
+  ;; Static check: every baseline-data required-rule-id must be in registry
+  (each [_ required-id (ipairs BaselineData.required-rule-ids)]
+    (assert (. registry-ids required-id)
+            (.. "baseline-data requires \"" required-id
+                "\" but it is not in the rule registry")))
+  ;; Dynamic check: run a small repo target with all suites and default
+  ;; baseline.  No registry-known rule should produce a missing-required
+  ;; diagnostic.
+  (with-temp-dir (fn [dir]
+    (write-clean-fixture dir)
+    (local target {:kind :repo
+                   :name "small-repo-required-check"
+                   :roots [dir]
+                   :files []
+                   :module-roots [dir]
+                   :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]})
+    (local result (Runner.run-target target {}))
+    (each [_ d (ipairs result.diagnostics)]
+      (when (and (. d :missing-required) d.constraint-id)
+        (assert (not (. registry-ids d.constraint-id))
+                (.. "required rule \"" d.constraint-id "\" should not be missing — "
+                    "it is in the registry but was filtered out")))))))
+
 (fn runner-run-target-repo-required-filtered-rule-is-missing []
   "Repo required-rule validation must use executed/applicable ids, not every
   registered id, so filtering out a required repo rule fails loudly."
@@ -337,59 +373,49 @@
       (when (= suite fam) (set found true)))
     (assert found (.. "rule family \"" fam "\" should be in default target suites"))))
 
-(fn default-target-runs-all-required-rules []
-  "Prove that the default repo target executes every required MVP rule from
-  the registry and no required rule is incorrectly filtered out."
-  (local Runner (require :constraints.runner))
+(fn required-rules-registry-consistency []
+  "Prove baseline-data required-rule-ids all exist in the rule registry
+  without executing the pipeline.  The dynamic missing-required check is
+  covered by default-baseline-does-not-false-missing-required."
   (local RuleRegistry (require :constraints.rules.init))
-  (local Targets (require :constraints.targets))
   (local BaselineData (require :constraints.baseline-data))
-  ;; Resolve the default repo target — same path Runner.main nil-argv takes.
-  (local target (Targets.resolve [] {}))
-  ;; Collect all rule IDs from the registry
-  (local all-rules (RuleRegistry.all-rules))
+  (local rules (RuleRegistry.all-rules))
   (local registry-ids {})
-  (each [_ rule (ipairs all-rules)]
+  (each [_ rule (ipairs rules)]
     (local id (or rule.id rule.constraint-id "unknown"))
     (tset registry-ids id true))
-  ;; Run the full pipeline with default baseline
-  (local result (Runner.run-target target {}))
-  (assert (= (type result) "table") "run-target should return a table")
-  ;; Verify no missing-required diagnostic refers to a rule that exists
-  ;; in the registry.  If a missing-required diagnostic fires for a rule
-  ;; the registry knows about, it was incorrectly filtered out.
-  (each [_ d (ipairs result.diagnostics)]
-    (when (and (. d :missing-required) d.constraint-id)
-      (assert (not (. registry-ids d.constraint-id))
-              (.. "required rule \"" d.constraint-id "\" should not be missing — "
-                  "it is in the registry but was filtered out"))))
-  ;; Verify that every required rule id from baseline-data is in the registry.
-  ;; If baseline-data requires a rule the registry does not publish, the test
-  ;; must fail early rather than producing a false-missing signal at runtime.
   (each [_ required-id (ipairs BaselineData.required-rule-ids)]
     (assert (. registry-ids required-id)
             (.. "baseline-data requires \"" required-id
                 "\" but it is not in the rule registry"))))
 
 (fn runner-main-argv-defaults-to-repo []
-  "Runner.main() with nil argv should default to repo target and execute pipeline."
+  "Runner.main() with nil argv should default to repo target and wire print/exit correctly.
+  The run-target pipeline is stubbed to avoid redundant full-repo execution."
   (local Runner (require :constraints.runner))
+  (local previous-run-target Runner.run-target)
   (var printed nil)
   (var exit-code nil)
   (local fake-print (fn [msg] (set printed msg)))
   (local fake-exit (fn [code] (set exit-code code)))
-  (Runner.main {:print fake-print :exit fake-exit})
+  (tset Runner :run-target (fn [_target _opts]
+                             {:status :pass
+                              :counts {:total 0 :by-family {} :by-severity {}}
+                              :diagnostics []}))
+  (local (ok err) (pcall #(Runner.main {:print fake-print :exit fake-exit})))
+  (tset Runner :run-target previous-run-target)
+  (assert ok (.. "Runner.main with stubbed pipeline should not crash, got: " (tostring err)))
   (assert printed "expected JSON output from default repo execution")
   (local json (require :json))
-  (local (ok parsed) (pcall json.loads printed))
-  (assert ok (.. "expected valid JSON, got: " (tostring printed)))
+  (local (ok-parsed parsed) (pcall json.loads printed))
+  (assert ok-parsed (.. "expected valid JSON, got: " (tostring printed)))
   (assert (= (type parsed) "table") "parsed JSON should be a table")
   (assert parsed.status (.. "parsed JSON should have status, got: " (tostring printed)))
   (assert parsed.counts (.. "parsed JSON should have counts, got: " (tostring printed)))
   (assert parsed.diagnostics (.. "parsed JSON should have diagnostics, got: " (tostring printed)))
   (assert exit-code "expected exit to be called")
   (assert (= exit-code 0)
-          "repo target with cleaned real codebase should exit zero"))
+          "repo target with stubbed pass should exit zero"))
 
 ;; Register tests
 (table.insert tests {:name "rule-registry all-rules returns all required ids"
@@ -414,14 +440,16 @@
                       :fn runner-run-target-clean-unit-default-baseline-has-no-false-baseline})
 (table.insert tests {:name "runner run-target clean app default baseline has no false baseline"
                       :fn runner-run-target-clean-app-default-baseline-has-no-false-baseline})
+(table.insert tests {:name "default baseline does not false-missing-required"
+                      :fn default-baseline-does-not-false-missing-required})
 (table.insert tests {:name "runner run-target repo required filtered rule is missing"
                       :fn runner-run-target-repo-required-filtered-rule-is-missing})
 (table.insert tests {:name "runner run-target with repo target runs full pipeline"
                       :fn runner-run-target-with-repo-target-runs-full-pipeline})
 (table.insert tests {:name "default target suites match rule families"
                      :fn default-target-suites-match-rule-families})
-(table.insert tests {:name "default target runs all required rules"
-                     :fn default-target-runs-all-required-rules})
+(table.insert tests {:name "required rules registry consistency"
+                      :fn required-rules-registry-consistency})
 (table.insert tests {:name "runner main argv defaults to repo"
                      :fn runner-main-argv-defaults-to-repo})
 

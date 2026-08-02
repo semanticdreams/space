@@ -20,7 +20,7 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 
 1. Fetch `origin/main`.
 2. Create or switch to `automation/daily-devlog/YYYY-MM-DD` from `origin/main`.
-3. Inspect recent journal entries, docs notes, plans/specs, and commits since the latest journal entry or recent day boundary.
+3. Inspect the latest relevant journal entry or recent day boundary, docs notes, plans/specs, and `origin/main` mainline/first-parent history to identify work that landed since that boundary.
 4. Apply the meaningful-change filter.
 5. If no entry is warranted, stop without edits, commits, pushes, or PRs.
 6. If an entry is warranted, dispatch `implementer` to write/update the journal entry and regenerate indexes.
@@ -31,6 +31,12 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 11. Re-fetch `origin` and recheck current `origin/main` before push or PR creation. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
 12. Push only the dated automation branch.
 13. Open a PR and attempt auto-merge when allowed.
+
+## Landing-Date Attribution
+
+Treat `origin/main` as the source of truth for recent work. Attribute work to the daily entry for the date it lands or merges into `origin/main`, regardless of the original author date or feature-branch commit date. Older feature-branch commits merged today are eligible for today's entry; author or original commit dates must not cause landed work to be skipped or backdated into an already-published journal entry.
+
+Use mainline/first-parent history, merge commits, PR merges, or equivalent landed ranges on `origin/main` to decide what changed since the latest relevant journal entry or recent day boundary. Do not guess from local branch history when the `origin/main` landing evidence is unavailable.
 
 ## Meaningful Change Filter
 
@@ -52,7 +58,7 @@ created: YYYY-MM-DD
 One short narrative paragraph.
 ```
 
-The paragraph connects concrete work to current project goals, milestones, or recent momentum. Before writing or committing, perform a compression/style pass. Forbid section headings, bullet lists, commit hashes, author lists, raw file lists, and commit-summary prose.
+The paragraph connects concrete work to current project goals, milestones, or recent momentum. Inline Markdown links are allowed when they point to relevant docs, notes, plans, specs, or feature pages and improve reader context. Before writing or committing, perform a compression/style pass that makes the final paragraph denser than the full report while preserving the main landed changes, why they matter, and useful inline references. Forbid section headings, bullet lists, separate link lists, commit hashes, author lists, raw file lists, and commit-summary prose.
 
 ## Validation
 
@@ -83,10 +89,13 @@ Commit after review. Push using `git push origin HEAD:refs/heads/automation/dail
 ## Fail-Closed Cases
 
 Stop with a clear BLOCKED or HUMAN_DECISION_REQUIRED summary when the checkout
-is dirty, credentials are missing, `gh` is unavailable, branch protection or
-required status checks are unavailable or cannot be verified, auto-merge cannot
-proceed safely, the diff includes unexpected files, or validation remains red
-after systematic debugging establishes a true human-input blocker.
+is dirty, credentials are missing, `gh` is unavailable,
+`origin/main` cannot be fetched or inspected, mainline/merge evidence is
+ambiguous, branch protection or required status checks are unavailable or
+cannot be verified (via classic protection or rulesets/effective branch rules),
+auto-merge cannot proceed safely, the diff includes unexpected files, or
+validation remains red after systematic debugging establishes a true
+human-input blocker.
 
 ## Red Flags
 
