@@ -40,9 +40,9 @@ Rules:
 6. State invariants and compatibility requirements.
 7. Define observable acceptance criteria.
 8. Define a validation ladder:
-   a. focused tests used during implementation,
-   b. the complete relevant suite,
-   c. broader final checks justified by risk.
+   a. focused checks the implementer should use during implementation,
+   b. the complete relevant local suite (only when justified by behavioral surface and risk; not required for every task),
+   c. broader final checks justified by risk, with **PR CI** named as the full integration gate.
 9. State what is explicitly out of scope.
 10. Mark unresolved product, API, data, or architecture choices as
     HUMAN_DECISION_REQUIRED instead of guessing.
@@ -68,10 +68,12 @@ Rules:
       remain canonical, the plan must state why no additional docs/dev page is
       needed.
 18. For plans that touch `.fnl` files, Fennel tests, Fennel constraints, or
-    Fennel CLI/MCP tooling, name the validation ladder explicitly: compile
-    check first (`make fennel-check` or touched-file `tools.fennel-check`),
-    constraints second, focused Fennel tests third, and the broader relevant
-    suite last. Include enclosing form repair guidance when delimiter or parse
+    Fennel CLI/MCP tooling, name the validation ladder explicitly: `make build`
+    as runtime/freshness prerequisite when `./build/space` may be missing or
+    stale, then compile check first (`make fennel-check` or touched-file
+    `tools.fennel-check`), constraints second, focused Fennel tests third, and
+    the broader relevant suite only when justified by behavioral surface and
+    risk. Include enclosing form repair guidance when delimiter or parse
     errors are in scope.
 
 Return only raw Markdown suitable for PLAN.md — do NOT wrap the output in a
