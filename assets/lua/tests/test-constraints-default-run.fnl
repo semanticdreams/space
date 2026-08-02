@@ -372,24 +372,29 @@
             (.. "baseline-data requires \"" required-id
                 "\" but it is not in the rule registry"))))
 
+(fn format-diag-entry [i d]
+  "Format a single diagnostic table entry as a bounded string."
+  (local msg-str (if (. d :message) (.. " msg=" (tostring (. d :message))) ""))
+  (local hint-str (if (. d :hint) (.. " hint=" (tostring (. d :hint))) ""))
+  (local fam (if (. d :family) (. d :family) "?"))
+  (local sev (if (. d :severity) (. d :severity) "?"))
+  (local fil (if (. d :file) (. d :file) "?"))
+  (.. "  [" i "] "
+      (tostring (. d :constraint-id))
+      " family=" (tostring fam)
+      " severity=" (tostring sev)
+      " file=" (tostring fil)
+      msg-str hint-str))
+
 (fn diag-first5-impl [diags]
   "Collect first 5 diagnostic entries into a string, bounded."
   (local lines [])
   (var i 0)
-  (each [_ d (ipairs diags) &until (> i 5)]
+  (each [_ d (ipairs diags) &until (>= i 5)]
     (set i (+ i 1))
-    (local msg-str (if (. d :message) (.. " msg=" (tostring (. d :message))) ""))
-    (local hint-str (if (. d :hint) (.. " hint=" (tostring (. d :hint))) ""))
-    (local fam (if (. d :family) (. d :family) "?"))
-    (local sev (if (. d :severity) (. d :severity) "?"))
-    (local fil (if (. d :file) (. d :file) "?"))
-    (table.insert lines
-      (.. "  [" i "] "
-          (tostring (. d :constraint-id))
-          " family=" (tostring fam)
-          " severity=" (tostring sev)
-          " file=" (tostring fil)
-          msg-str hint-str)))
+    (if (= (type d) :table)
+        (table.insert lines (format-diag-entry i d))
+        (table.insert lines (.. "  [" i "] (malformed: " (tostring d) ")"))))
   (table.concat lines "\n"))
 
 (fn diag-sample-first-5 [diags]
