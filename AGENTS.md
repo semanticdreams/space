@@ -41,6 +41,25 @@ with available access. Route any repository fix through `implementer` →
 `origin/main` base, and only proceed with the default integration action when
 the required suite is green.
 
+### Post-PR merge queue
+
+After a pull request is open and queued by GitHub merge queue, agents follow
+these rules:
+
+- Do not update the PR branch solely because `origin/main` advanced. The merge
+  queue's merge-group checks are the post-PR integration freshness gate.
+- Queue conflicts, missing merge-queue protection, or merge-group `test`
+  failures are actionable blockers.
+- For actionable blockers, invoke `systematic-debugging` to identify root cause
+  or establish the limits of available evidence. Route any repository fix
+  through `implementer` → `reviewer` → pass, commit reviewed fixes, and rerun
+  validation from a clean tree before requeuing.
+- Rebase and force-push remain forbidden unless the human explicitly requests
+  them.
+- If merge queue is not enabled or cannot be verified, report
+  `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed instead of
+  entering a stale-branch polling loop.
+
 ## Project Structure & Modules
 
 - `src/` holds the C++17 engine modules (rendering, physics, audio, bindings). Add new systems as matching `.cpp`/`.h` pairs. Engine Lua bindings live in `src/lua_engine.cpp`.
