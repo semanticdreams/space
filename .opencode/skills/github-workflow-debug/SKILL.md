@@ -78,7 +78,7 @@ Common shapes in this repo:
 - `push.branches: [main]`:
   - expand it to a multi-line list and add the throwaway branch alongside `main`
 
-The throwaway-branch trigger change is temporary and must not survive the final squash onto `main`.
+The throwaway-branch trigger change is temporary and must not survive the final squash onto the PR branch.
 
 ## Main loop
 
