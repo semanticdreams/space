@@ -372,6 +372,32 @@
             (.. "baseline-data requires \"" required-id
                 "\" but it is not in the rule registry"))))
 
+(fn diag-first5-impl [diags]
+  "Collect first 5 diagnostic entries into a string, bounded."
+  (local lines [])
+  (var i 0)
+  (each [_ d (ipairs diags) &until (> i 5)]
+    (set i (+ i 1))
+    (local msg-str (if (. d :message) (.. " msg=" (tostring (. d :message))) ""))
+    (local hint-str (if (. d :hint) (.. " hint=" (tostring (. d :hint))) ""))
+    (local fam (if (. d :family) (. d :family) "?"))
+    (local sev (if (. d :severity) (. d :severity) "?"))
+    (local fil (if (. d :file) (. d :file) "?"))
+    (table.insert lines
+      (.. "  [" i "] "
+          (tostring (. d :constraint-id))
+          " family=" (tostring fam)
+          " severity=" (tostring sev)
+          " file=" (tostring fil)
+          msg-str hint-str)))
+  (table.concat lines "\n"))
+
+(fn diag-sample-first-5 [diags]
+  "Return a bounded string from the first 5 diagnostic entries, or tostring if not a table."
+  (if (= (type diags) :table)
+      (diag-first5-impl diags)
+      (tostring diags)))
+
 (fn runner-main-argv-defaults-to-repo []
   "Runner.main() with nil argv should default to repo target and execute pipeline."
   (local Runner (require :constraints.runner))
@@ -389,8 +415,15 @@
   (assert parsed.counts (.. "parsed JSON should have counts, got: " (tostring printed)))
   (assert parsed.diagnostics (.. "parsed JSON should have diagnostics, got: " (tostring printed)))
   (assert exit-code "expected exit to be called")
+  ;; Build diagnostic summary when assertion fails.
+  (local diag-header (.. "exit-code=" (tostring exit-code)
+                         " status=" (tostring parsed.status)))
+  (local count-tbl (if (= (type parsed.counts) :table) parsed.counts nil))
+  (local diag-total (.. " total=" (tostring (or (and count-tbl count-tbl.total) "?"))))
+  (local diag-sample (diag-sample-first-5 parsed.diagnostics))
   (assert (= exit-code 0)
-          "repo target with cleaned real codebase should exit zero"))
+    (.. "repo target with cleaned real codebase should exit zero\n"
+        diag-header diag-total "\n" diag-sample)))
 
 ;; Register tests
 (table.insert tests {:name "rule-registry all-rules returns all required ids"
