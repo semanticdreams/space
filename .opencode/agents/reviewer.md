@@ -81,6 +81,13 @@ a package-wide suite. If you cannot run commands in this environment, name the
 test you would run. Warnings or other noise in the implementer's reported test
 output are findings — test output should be pristine.
 
+**Validation review criteria:**
+- Verify that the implementer's reported validation is appropriate for the behavioral surface and risk of the change.
+- Do not require full `make test` by default for every task checkpoint. Focused local validation is the expected norm.
+- Flag under-covered validation when the task touches high-risk surfaces (build, package, startup, runtime initialization, broad binding/API changes).
+- Continue requiring Fennel compile-check and constraints evidence for Fennel-facing diffs.
+- Treat **PR CI** as the full integration gate, not as a substitute for missing focused local validation. The implementer should not claim ready-to-merge until the applicable PR CI gate is green.
+
 For Fennel-facing diffs, verify that the implementer reported compile-check evidence before constraints and tests, or explained why it is not applicable. Missing `make fennel-check` or touched-file `tools.fennel-check` evidence is a validation gap unless the reported command clearly included the compile gate (for example `make constraints` or `make test` after the new gate). Also verify constraint validation, or an explanation of why it is not applicable. Do not require separate `make constraints` evidence when the reported validation is `make test`, because `make test` already gates constraints. Treat unresolved `make constraints` statuses (`violations`, `fail`, or `interrupted`) as validation findings. Treat broad baselines/allowlists or production-code contortions made only to satisfy stale constraints as design-integrity findings. For delimiter/parser fixes, expect evidence that the agent used project-native diagnostics or enclosing form repair rather than `fennel-ls`/`fnlfmt` as validation oracles.
 
 ## Scope Rules
