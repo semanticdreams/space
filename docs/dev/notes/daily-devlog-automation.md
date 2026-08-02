@@ -49,12 +49,22 @@ The automation fails closed when credentials, `gh` authentication, branch protec
 
 ## Validation and recovery
 
-Regenerate docs indexes and validate the build:
+Fresh checkouts may lack `docs/node_modules` or `vitepress`. Install locked docs dependencies before building:
 
 ```bash
 cd docs
+if [ ! -d node_modules ] || [ ! -x node_modules/.bin/vitepress ]; then npm ci; fi
+```
+
+Then regenerate docs indexes and validate the build:
+
+```bash
 npm run devlog:indices
 npm run docs:build
 ```
 
 Generated indexes are kept up to date by the automation workflow. If a run produces a stale or malformed entry, discard the branch and re-run from a clean state.
+
+## Orca / OpenCode project-config caveat
+
+Orca-launched OpenCode may set `OPENCODE_DISABLE_PROJECT_CONFIG=1`, which prevents the runner from loading repo-local `.opencode/**` configuration (skills, agents, opencode.json). After any changes to `.opencode/**`, the scheduled runner must either be configured to allow repo-local config or the operator must synchronize the updated skill/agent definitions into the global OpenCode configuration and restart the OpenCode session. Without this, stale skill definitions may cause unexpected behavior or miss critical repo-owned policy updates.
