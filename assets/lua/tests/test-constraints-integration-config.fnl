@@ -5,7 +5,7 @@
 
 (fn repo-root-or-nil []
   (local has-cmake (fs.exists "CMakeLists.txt"))
-  (local has-cmake-parent (or (fs.exists "../Makefile") (fs.exists "../CMakeLists.txt")))
+  (local has-cmake-parent (fs.exists "../CMakeLists.txt"))
   (if has-cmake
       "."
       (if has-cmake-parent
@@ -125,6 +125,16 @@
   (assert (not (string.find integration-block "SDL_VIDEODRIVER=dummy" 1 true))
           "space_fnl_tests_integration should not force SDL_VIDEODRIVER=dummy"))
 
+(fn test-repo-root-detection-uses-cmake-not-makefile []
+  ;; repo-root-or-nil must base detection on CMakeLists.txt only,
+  ;; not on a generated ../Makefile that may exist in artifact-only layouts.
+  (local root (repo-root-or-nil))
+  (when root
+    (assert (fs.exists (.. root "/CMakeLists.txt"))
+            (.. "repo-root-or-nil returned " root " but " root "/CMakeLists.txt does not exist"))))
+
+(table.insert tests {:name "repo-root detection uses CMakeLists.txt not Makefile"
+                     :fn test-repo-root-detection-uses-cmake-not-makefile})
 (table.insert tests {:name "Makefile wires blocking constraints target"
                      :fn test-makefile-wires-constraints-target})
 (table.insert tests {:name "Makefile constraints target recipe is isolated"
