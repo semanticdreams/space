@@ -1165,30 +1165,25 @@
     (when (= d.evidence.function-name "configure")
       (set flagged true)))
   (assert flagged "local construction with dotted access should still be flagged"))
-
+;; ==== Windows-path normalization regression ====
+(fn interactive-assertion-allows-local-adapter-windows-path [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule) (local form "(fn make-interaction-adapters [router]\n  (local clickables\n    {:register (fn [_self node] (router:register-clickable node))\n     :unregister (fn [_self node] (router:unregister-clickable node))})\n  {:clickables clickables})") (local ff (make-file-fact {:path "D:\\repo\\next-app\\renderers.fnl" :module "next-app.renderers" :definitions [{:kind :fn :name "make-interaction-adapters" :top-level? true :line 269 :column 1 :length (length form) :form form}] :calls [] :accesses []})) (local result (rule.run (make-ctx [ff]))) (var flagged false) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "make-interaction-adapters") (set flagged true))) (assert (not flagged) "locally constructed clickables adapter on Windows path should not be flagged"))
+(fn interactive-assertion-flags-unrelated-local-adapter-windows-path [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule) (local form "(fn make-interaction-adapters [router]\n  (local clickables\n    {:register (fn [_self node] (router:register-clickable node))\n     :unregister (fn [_self node] (router:unregister-clickable node))})\n  {:clickables clickables})") (local ff (make-file-fact {:path "D:\\src\\other-module.fnl" :module "other-module" :definitions [{:kind :fn :name "make-interaction-adapters" :top-level? true :line 269 :column 1 :length (length form) :form form}] :calls [] :accesses []})) (local result (rule.run (make-ctx [ff]))) (var flagged false) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "make-interaction-adapters") (set flagged true))) (assert flagged "unrelated module on Windows path should still be flagged"))
 (table.insert tests {:name "interactive-assertion allows local clickables adapter construction"
                      :fn interactive-assertion-allows-local-clickables-adapter-construction})
 (table.insert tests {:name "interactive-assertion allows local hoverables adapter construction"
                      :fn interactive-assertion-allows-local-hoverables-adapter-construction})
 (table.insert tests {:name "interactive-assertion allows local both adapters construction"
                      :fn interactive-assertion-allows-local-both-adapters-construction})
+(table.insert tests {:name "interactive-assertion allows local adapter Windows path"
+                     :fn interactive-assertion-allows-local-adapter-windows-path})
+(table.insert tests {:name "interactive-assertion flags unrelated local adapter Windows path"
+                     :fn interactive-assertion-flags-unrelated-local-adapter-windows-path})
 (table.insert tests {:name "interactive-assertion flags external hoverables despite local clickables"
                      :fn interactive-assertion-flags-external-hoverables-despite-local-clickables})
 (table.insert tests {:name "interactive-assertion flags local construction with dotted access"
                      :fn interactive-assertion-flags-local-construction-with-dotted-access})
 
-(fn interactive-assertion-allows-named-fn-assert-form-text [] ; Task 11: form-text fallback
-  (local Layout (require :constraints.rules.layout))
-  (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion"))
-  (assert rule "rule should be in rules list")
-  (local form "(fn app.init [] (assert app.clickables \"missing\") (when app.clickables (app.clickables:register nil)))")
-  (local ff (make-file-fact {:path "/s/main.fnl" :module "main"
-                              :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length form) :form form}]
-                              :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 1 :column 50 :form "app.clickables"}]}))
-  (local result (rule.run (make-ctx [ff])))
-  (each [_ d (ipairs (or result []))]
-    (when (= d.evidence.function-name "app.init")
-      (assert false "should not flag app.init — form-text fallback should detect assert"))))
+(fn interactive-assertion-allows-named-fn-assert-form-text [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule) (local form "(fn app.init [] (assert app.clickables \"missing\") (when app.clickables (app.clickables:register nil)))") (local ff (make-file-fact {:path "/s/main.fnl" :module "main" :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length form) :form form}] :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 1 :column 50 :form "app.clickables"}]})) (local result (rule.run (make-ctx [ff]))) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "app.init") (assert false "should not flag app.init — form-text fallback should detect assert"))))
 (table.insert tests {:name "interactive-assertion named fn assert form-text fallback" :fn interactive-assertion-allows-named-fn-assert-form-text})
 (fn r1-1-flags-outer-when-assert-in-nested-def [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule "rule should be in rules list") (local nested "(fn init-subsystems [] (assert app.clickables \"ok\"))") (local outer (.. "(fn app.init [] (AppBootstrap.init-inputs) " nested " (when app.clickables (app.clickables:register nil)))")) (local ff (make-file-fact {:path "/s/m.fnl" :module "m" :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length outer) :form outer} {:kind :fn :name "init-subsystems" :top-level? false :line 2 :column 3 :length (length nested) :form nested}] :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 2 :column 60 :form "app.clickables"}]})) (local result (rule.run (make-ctx [ff]))) (var flagged false) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "app.init") (set flagged true))) (assert flagged "should flag — nested-def assert must not suppress outer")) (table.insert tests {:name "interactive-assertion flags outer with assert in nested def" :fn r1-1-flags-outer-when-assert-in-nested-def})
 (fn r1-2-flags-unrelated-assert [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule "rule should be in rules list") (local form "(fn app.init [] (assert app.theme \"theme\") (when app.clickables (app.clickables:register nil)))") (local ff (make-file-fact {:path "/s/m.fnl" :module "m" :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length form) :form form}] :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 1 :column 50 :form "app.clickables"}]})) (local result (rule.run (make-ctx [ff]))) (var flagged false) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "app.init") (set flagged true))) (assert flagged "unrelated assert must not suppress")) (table.insert tests {:name "interactive-assertion flags unrelated assert" :fn r1-2-flags-unrelated-assert})
