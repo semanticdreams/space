@@ -2,21 +2,21 @@
 
 ## Install from Latest GitHub Release
 
-[Latest release page](https://github.com/semanticdreams/space/releases/latest)
+[Latest release page](https://github.com/semanticdreams/space2/releases/latest)
 
 Use prebuilt packages from the latest release.
 
 Direct downloads:
-- Windows installer (.exe): [space-windows-setup.exe](https://github.com/semanticdreams/space/releases/latest/download/space-windows-setup.exe)
-- Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space/releases/latest/download/space-windows.zip)
-- AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage)
-- Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb)
-- Fedora/openSUSE Tumbleweed (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm)
-- Tarball (.tar.gz): [space-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64-bin.tar.gz)
-- Minimal AppImage: [space-minimal-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.AppImage)
-- Minimal Debian/Ubuntu (.deb): [space-minimal-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-amd64.deb)
-- Minimal Fedora/openSUSE Tumbleweed (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm)
-- Minimal Tarball (.tar.gz): [space-minimal-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64-bin.tar.gz)
+- Windows installer (.exe): [space-windows-setup.exe](https://github.com/semanticdreams/space2/releases/latest/download/space-windows-setup.exe)
+- Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space2/releases/latest/download/space-windows.zip)
+- AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64.AppImage)
+- Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-amd64.deb)
+- Fedora/openSUSE Tumbleweed (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64.rpm)
+- Tarball (.tar.gz): [space-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-linux-x86_64-bin.tar.gz)
+- Minimal AppImage: [space-minimal-linux-x86_64.AppImage](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64.AppImage)
+- Minimal Debian/Ubuntu (.deb): [space-minimal-linux-amd64.deb](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-amd64.deb)
+- Minimal Fedora/openSUSE Tumbleweed (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64.rpm)
+- Minimal Tarball (.tar.gz): [space-minimal-linux-x86_64-bin.tar.gz](https://github.com/semanticdreams/space2/releases/latest/download/space-minimal-linux-x86_64-bin.tar.gz)
 
 Install guidance:
 - Windows installer: run `space-windows-setup.exe` and follow the installer.
