@@ -34,6 +34,14 @@
             (table.insert lines line))))
     (table.concat lines "\n")))
 
+;; Normalize Windows backslash path separators to forward slashes for
+;; portable path matching (string.find, str-ends-with?, etc.).
+;; Return s unchanged when s is nil.
+(fn normalize-path [s]
+  (if (not= s nil)
+      (s:gsub "\\" "/")
+      s))
+
 ;; ---------------------------------------------------------------------------
 ;; Rule 1: layout.no-setters-in-layouters
 ;; ---------------------------------------------------------------------------
@@ -538,7 +546,7 @@
       (local has-cleanup (has-child-cleanup-evidence? ff))
       (local all-defs (if (= ff.definitions nil) [] ff.definitions))
       (local module-name (if (= ff.module nil) ff.path ff.module))
-      (local public-drop-satisfied (if (has-global-drop-path? ff) true (if has-cleanup (if (and ff.path (string.find ff.path "/tests/" 1 true)) true (= (string.sub (if (= ff.module nil) "" ff.module) 1 6) "tests.")) false)))
+      (local public-drop-satisfied (if (has-global-drop-path? ff) true (if has-cleanup (if (and ff.path (string.find (normalize-path ff.path) "/tests/" 1 true)) true (= (string.sub (if (= ff.module nil) "" ff.module) 1 6) "tests.")) false)))
       (local all-covered (if public-drop-satisfied true (all-owned-child-evidence-covered? ff all-defs)))
       (when (not all-covered)
         (table.insert diagnostics
@@ -817,7 +825,7 @@
              (not def.enclosing-fn)
              ff.module (= ff.module "next-app.renderers")
              def.name (= def.name "make-interaction-adapters")
-             (if (ff.path:find "next-app/renderers.fnl" 1 true) true false))
+             (if (string.find (normalize-path ff.path) "next-app/renderers.fnl" 1 true) true false))
     (local no-strings (strip-strings def.form))
     (local clean (strip-comments no-strings))
     (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]+%{"))
@@ -980,8 +988,8 @@
     ;; not external routing services that need assertion.
     (var is-interaction-router false)
     (when (if (= (or ff.module "") "next-app.interaction-router")
-            true
-            (and ff.path (str-ends-with? ff.path "next-app/interaction-router.fnl")))
+             true
+             (and ff.path (str-ends-with? (normalize-path ff.path) "next-app/interaction-router.fnl")))
       (set is-interaction-router true))
     (each [_ access (ipairs (or ff.accesses []))]
       (when (access-is-interactive? access)

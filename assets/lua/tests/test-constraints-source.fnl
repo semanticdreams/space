@@ -88,8 +88,8 @@
   (assert (= result.kind :files) (.. "expected :files, got " (tostring result.kind)))
   (assert result.files "files target should have files list")
   (assert (> (# result.files) 0) "files list should not be empty")
-  (assert (= (. result.files 1) "/tmp/space/constraints-one.fnl")
-          "files list should contain the specified file"))
+  (assert (= (. result.files 1) (fs.absolute "/tmp/space/constraints-one.fnl"))
+          "files list should contain the absolute specified file"))
 
 (fn targets-resolve-refuses-unsupported-target []
   (local Targets (require :constraints.targets))
@@ -137,8 +137,8 @@
     (local paths {})
     (each [_ r (ipairs records)]
       (tset paths r.path true))
-    (assert (. paths (fs.join-path dir "alpha.fnl")) "alpha.fnl should be discovered")
-    (assert (. paths (fs.join-path subdir "beta.fnl")) "sub/beta.fnl should be discovered")
+    (assert (. paths (fs.absolute (fs.join-path dir "alpha.fnl"))) "alpha.fnl should be discovered")
+    (assert (. paths (fs.absolute (fs.join-path subdir "beta.fnl"))) "sub/beta.fnl should be discovered")
     (assert (not (. paths (fs.join-path dir "readme.txt"))) "readme.txt should be excluded")
     (assert (= (# records) 2) (.. "expected 2 records, got " (# records))))))
 
@@ -151,7 +151,7 @@
     (local Source (require :constraints.source))
     (local records (Source.discover target))
     (assert (= (# records) 1) (.. "expected 1 fennel record, got " (# records)))
-    (assert (= (fs.parent (. records 1 :path)) dir)))))
+    (assert (= (fs.parent (. records 1 :path)) (fs.absolute dir))))))
 
 (fn source-parses-files-with-tree-sitter []
   (with-temp-dir (fn [dir]
@@ -177,7 +177,7 @@
     (local records (Source.discover target))
     (assert (= (# records) 1) "should discover the external file")
     (local r (. records 1))
-    (assert (= r.path file-path) "path should match the original file")
+    (assert (= r.path (fs.absolute file-path)) "path should match the absolute original file")
     (assert r.target "record should retain target")
     (assert (= r.target.kind :files) "target kind should be :files")
     (assert (= r.target.name "external-files") "target name should be preserved")
@@ -317,6 +317,94 @@
             (.. "expected relative-path to equal path when no module root matches, got "
                 (tostring r.relative-path) " vs " (tostring r.path))))))
 
+(fn source-relative-path-uses-forward-slashes []
+  "Relative paths produced by source discovery must always use forward slashes,
+  regardless of the platform's native path separator."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "nested"))
+    (fs.create-dirs subdir)
+    (make-file subdir "deep.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "slash-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (not (string.find r.relative-path "\\" 1 true))
+            (.. "relative-path must not contain backslash, got: " (tostring r.relative-path)))
+    (assert (not (string.find r.module "\\" 1 true))
+            (.. "module must not contain backslash, got: " (tostring r.module))))))
+
+(fn source-module-uses-dots-not-slashes []
+  "Module names derived from file paths must use dots as separators
+  and must never contain forward slashes or backslashes."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "core"))
+    (fs.create-dirs subdir)
+    (make-file subdir "utils.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "module-slash-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (= r.module "core.utils")
+            (.. "expected module 'core.utils', got '" (tostring r.module) "'"))
+    (assert (not (string.find r.module "/" 1 true))
+            (.. "module must not contain forward slash, got: " (tostring r.module)))
+    (assert (not (string.find r.module "\\" 1 true))
+            (.. "module must not contain backslash, got: " (tostring r.module))))))
+
+;; --- Windows-separator regression tests (R1-2) ---
+
+(fn source-normalize-path-separators-handles-backslashes []
+  "The normalize-path-separators helper must map \\\\ to / in any path string."
+  (local Source (require :constraints.source))
+  (local nps Source._normalize-path-separators)
+  (assert nps "helper should be exported")
+  (assert (= (nps "C:\\tmp\\space\\unit\\foo\\bar.fnl")
+             "C:/tmp/space/unit/foo/bar.fnl")
+          "backslash path should be normalized to forward slashes")
+  (assert (= (nps "C:\\tmp\\space\\unit")
+             "C:/tmp/space/unit")
+          "backslash root should be normalized")
+  (assert (= (nps "already/forward/slashes.fnl")
+             "already/forward/slashes.fnl")
+          "forward-slash path should be unchanged")
+  (assert (= (nps nil) "")
+          "nil should produce empty string")
+  (assert (= (nps "") "")
+          "empty string should stay empty"))
+
+(fn source-path-under-root-accepts-backslash []
+  "path-under-root? must correctly compare backslash paths against backslash roots
+  after normalization."
+  (local Source (require :constraints.source))
+  (local pur? Source._path-under-root?)
+  (assert pur? "helper should be exported")
+  ;; File under root with backslashes on both sides.
+  (assert (pur? "C:\\tmp\\space\\unit\\foo\\bar.fnl"
+                "C:\\tmp\\space\\unit")
+          "file under backslash root should match")
+  ;; File equals root.
+  (assert (pur? "C:\\tmp\\space\\unit\\bar.fnl"
+                "C:\\tmp\\space\\unit\\bar.fnl")
+          "file equal to backslash root should match")
+  ;; Different root — should not match.
+  (assert (not (pur? "C:\\tmp\\space\\unit\\foo\\bar.fnl"
+                     "C:\\tmp\\other"))
+          "file under different backslash root should not match")
+  ;; File not a direct child (no trailing separator boundary).
+  (assert (not (pur? "C:\\tmp\\space\\unit-other\\bar.fnl"
+                     "C:\\tmp\\space\\unit"))
+          "file with similar prefix should not match")
+  ;; Mixed separators: file with /, root with \\.
+  (assert (pur? "C:/tmp/space/unit/foo/bar.fnl"
+                "C:\\tmp\\space\\unit")
+          "forward-slash file should match backslash root after normalization")
+  ;; Case-insensitive match.
+  (assert (pur? "c:\\TMP\\Space\\Unit\\foo\\bar.fnl"
+                "C:\\tmp\\SPACE\\unit")
+          "case-insensitive backslash match should work"))
+
 ;; --- Non-Fennel explicit file tests (R1-2) ---
 
 (fn source-files-target-rejects-non-fennel-paths []
@@ -346,7 +434,7 @@
     (assert (= (# records) 1)
             (.. "expected 1 fennel record, got " (# records)))
     (local r (. records 1))
-    (assert (= r.path fnl-path) "only .fnl file should be discovered"))))
+    (assert (= r.path (fs.absolute fnl-path)) "only .fnl file should be discovered"))))
 
 ;; --- Missing/unreadable root tests (R1-3) ---
 
@@ -361,6 +449,35 @@
             "discover should fail for missing root, not silently skip")
     (assert (string.find (tostring err) missing-root 1 true)
             (.. "error should mention the missing root path, got: " (tostring err))))))
+
+;; --- Noncanonical module root regression test (R1-4) ---
+
+(fn source-module-root-is-canonicalized []
+  "When a module root is a noncanonical path (e.g. with .. segments),
+  it should be canonicalized through fs.absolute before computing module names
+  and relative paths, so that it matches discovered file paths which are always
+  absolute.  Regression test for root-prefix matching failure on Windows/Wine."
+  (with-temp-dir (fn [dir]
+    (local sub (fs.join-path dir "mod"))
+    (fs.create-dirs sub)
+    (make-file sub "helper.fnl" "(+ 1 2)")
+    ;; Build a noncanonical root by inserting ../ to create a path that
+    ;; refers to the same directory but differs lexically from its
+    ;; fs.absolute form.
+    (local noncanonical-root (dir:gsub "/([^/]+)/([^/]+)$" "/%1/../%1/%2"))
+    (local target {:kind :unit
+                   :name "canonicalize-test"
+                   :roots [dir]
+                   :module-roots [noncanonical-root]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert (= r.module "mod.helper")
+            (.. "expected module 'mod.helper', got '" (tostring r.module) "'"))
+    (assert (= r.relative-path "mod/helper.fnl")
+            (.. "expected relative-path 'mod/helper.fnl', got '"
+                (tostring r.relative-path) "'")))))
 
 ;; --- Repeated --file tests ---
 
@@ -415,6 +532,16 @@
                       :fn source-computes-relative-path-from-module-root})
 (table.insert tests {:name "source relative path falls back to absolute (R1-1)"
                       :fn source-relative-path-falls-back-to-absolute})
+(table.insert tests {:name "source relative path uses forward slashes"
+                      :fn source-relative-path-uses-forward-slashes})
+(table.insert tests {:name "source module uses dots not slashes"
+                      :fn source-module-uses-dots-not-slashes})
+(table.insert tests {:name "source normalize-path-separators handles backslashes (R1-2)"
+                      :fn source-normalize-path-separators-handles-backslashes})
+(table.insert tests {:name "source path-under-root accepts backslash (R1-2)"
+                      :fn source-path-under-root-accepts-backslash})
+(table.insert tests {:name "source canonicalizes noncanonical module root (R1-4)"
+                     :fn source-module-root-is-canonicalized})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"

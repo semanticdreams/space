@@ -10,18 +10,22 @@
 ;; Helpers
 ;; ---------------------------------------------------------------------------
 
+(fn normalize-path [path]
+  "Replace backslash path separators with forward slashes for portable matching."
+  (path:gsub "\\" "/"))
+
 (fn file-path-basename [path]
   "Return the basename of a file path, stripping the .fnl extension if present."
-  (var result path)
-  (each [part (path:gmatch "[^/]+")]
+  (var result (normalize-path path))
+  (each [part (result:gmatch "[^/]+")]
     (set result part))
   ;; Strip .fnl extension
   (result:gsub "%.fnl$" ""))
 
 (fn path-contains? [path fragment]
   "Check if path contains the given fragment (literal match)."
-  (let [(start _end) (string.find path fragment 1 true)]
-    (not (not start))))
+  (local normalized (normalize-path path))
+  (not (not (string.find normalized fragment 1 true))))
 
 (fn extract-string-arg-from-form [form]
   "Extract a string or keyword argument from a Fennel form string.
