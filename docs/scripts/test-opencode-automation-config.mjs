@@ -341,6 +341,8 @@ test('opencode command examples match canonical merge-queue inspection forms', a
     for (const [name, content] of runtimeFiles) {
         assert.match(content, /gh pr view [-<][a-z]+[->].*--json state,mergedAt/i,
             `${name} should use canonical gh pr view <pr-or-branch> form`)
+        assert.doesNotMatch(content, /--json state,mergedAt,\.\.\./,
+            `${name} should not use abbreviated --json state,mergedAt,... form`)
         assert.match(content, /--exit-status --interval 100/,
             `${name} should use canonical gh run watch form`)
     }
