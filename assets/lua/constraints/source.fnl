@@ -27,9 +27,22 @@
     (table.sort files)
     files))
 
-(fn str-escape-pattern [s]
-  "Escape Lua pattern magic characters in string s for use in string.match patterns."
-  (s:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1"))
+(fn normalize-path-separators [path]
+  "Replace backslashes with forward slashes so that Windows and Linux
+  paths can be compared and split with a single delimiter."
+  (local s (if path path ""))
+  (select 1 (string.gsub s "\\" "/")))
+
+(fn path-under-root? [file-path root]
+  "Return true when file-path is equal to root or inside root (case-insensitive),
+  regardless of path separator style.  Both arguments are normalized to / first."
+  (local file (normalize-path-separators file-path))
+  (local root-path (normalize-path-separators root))
+  (local file-lower (file:lower))
+  (local root-lower (root-path:lower))
+  (or (= file-lower root-lower)
+      (= (string.sub file-lower 1 (+ (# root-lower) 1))
+         (.. root-lower "/"))))
 
 (fn compute-module [file-path module-roots]
   "Compute a module name from file-path by removing .fnl and replacing / with .,
@@ -39,17 +52,15 @@
   (var found false)
   (each [_ root (ipairs module-roots)]
     (when (not found)
-      ;; Check if file is under this root (case-insensitive)
-      (let [root-lower (root:lower)
-            file-lower (file-path:lower)]
-        (when (or (= file-lower root-lower)
-                  (file-lower:match (.. "^" (str-escape-pattern root-lower) "/")))
-          (let [relative (if (= (# file-path) (# root))
-                            file-path
-                            (file-path:sub (+ (# root) 2)))]
-            (let [no-ext (relative:gsub "%.fnl$" "")]
-              (set module-name (no-ext:gsub "/" "."))
-              (set found true)))))))
+      (when (path-under-root? file-path root)
+        (let [file (normalize-path-separators file-path)
+              root-path (normalize-path-separators root)
+              relative (if (= (# file) (# root-path))
+                          file
+                          (file:sub (+ (# root-path) 2)))]
+          (let [no-ext (relative:gsub "%.fnl$" "")]
+            (set module-name (no-ext:gsub "/" "."))
+            (set found true))))))
   module-name)
 
 (fn compute-relative-path [file-path module-roots]
@@ -60,13 +71,12 @@
   (var found false)
   (each [_ root (ipairs module-roots)]
     (when (not found)
-      (let [root-lower (root:lower)
-            file-lower (file-path:lower)]
-        (when (or (= file-lower root-lower)
-                  (file-lower:match (.. "^" (str-escape-pattern root-lower) "/")))
-          (set rel-path (if (= (# file-path) (# root))
-                           file-path
-                           (file-path:sub (+ (# root) 2))))
+      (when (path-under-root? file-path root)
+        (let [file (normalize-path-separators file-path)
+              root-path (normalize-path-separators root)]
+          (set rel-path (if (= (# file) (# root-path))
+                           file
+                           (file:sub (+ (# root-path) 2))))
           (set found true)))))
   rel-path)
 
@@ -116,7 +126,10 @@
       (tset seen path true)
       (table.insert deduped path)))
   ;; Parse each file
-  (local module-roots (or target.module-roots target.roots []))
+  (local raw-roots (or target.module-roots target.roots []))
+  (local module-roots [])
+  (each [_ root (ipairs raw-roots)]
+    (table.insert module-roots (fs.absolute root)))
   (local records [])
   (each [_ path (ipairs deduped)]
     (let [source (fs.read-file path)
@@ -133,5 +146,9 @@
          :tree tree
          :root root})))
   records)
+
+;; Test/support helpers exported for focused regression coverage.
+(set M._normalize-path-separators normalize-path-separators)
+(set M._path-under-root? path-under-root?)
 
 M

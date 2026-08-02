@@ -962,12 +962,13 @@
    The production file test-scene-activity-slots.fnl should produce zero
    lifecycle.global-mutation-restoration diagnostics after wrapper precision fix."
   (local fs (require :fs))
+  (local assets-path (if (os.getenv "SPACE_ASSETS_PATH") (os.getenv "SPACE_ASSETS_PATH") "assets"))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
-  (local scene-path (fs.absolute "assets/lua/tests/test-scene-activity-slots.fnl"))
+  (local scene-path (fs.absolute (fs.join-path (fs.join-path assets-path "lua") "tests" "test-scene-activity-slots.fnl")))
   (local target {:kind :files
                  :files [scene-path]
-                 :module-roots [(fs.absolute "assets/lua")]})
+                 :module-roots [(fs.absolute (fs.join-path assets-path "lua"))]})
   (local source-records (Source.discover target))
   (local fact-db (Facts.extract source-records))
   (local rule (get-test-isolation-rule))
@@ -1192,8 +1193,7 @@
 (local cleanup-tests (require :tests.test-constraints-rules-test-isolation-cleanup))
 (each [_ t (ipairs cleanup-tests.tests)]
   (table.insert tests t))
-(local main
-  (fn []
+(local main (fn []
     (local runner (require :tests/runner))
     (runner.run-tests {:name "constraints-rules-test-isolation-precision" :tests tests})))
 {:name "constraints-rules-test-isolation-precision" :tests tests :main main}

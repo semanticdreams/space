@@ -299,12 +299,14 @@
    produce ZERO lifecycle.global-mutation-restoration diagnostics after
    with-restored-app wrapper recognition is implemented."
   (local fs (require :fs))
+  (local assets-path (if (os.getenv "SPACE_ASSETS_PATH") (os.getenv "SPACE_ASSETS_PATH") "assets"))
+  (local lua-root (fs.join-path assets-path "lua"))
   (local Source (require :constraints.source))
   (local Facts (require :constraints.facts))
-  (local sandbox-path (fs.absolute "assets/lua/tests/test-sandbox-activity.fnl"))
+  (local sandbox-path (fs.absolute (fs.join-path lua-root "tests" "test-sandbox-activity.fnl")))
   (local target {:kind :files
                  :files [sandbox-path]
-                 :module-roots [(fs.absolute "assets/lua")]})
+                 :module-roots [(fs.absolute lua-root)]})
   (local source-records (Source.discover target))
   (local fact-db (Facts.extract source-records))
   (local rule (get-test-isolation-rule))

@@ -274,6 +274,27 @@
 (table.insert tests {:name "external-unit-mcp: asserts missing unit-manager"
                      :fn test-service-asserts-missing-unit-manager})
 
+(fn test-normalize-logical-path-handles-single-backslash-separators []
+  (local norm ExternalUnitService._normalize_logical_path)
+  (assert norm "normalize-logical-path test helper must be exported")
+  ;; Single backslash separators (Windows native paths)
+  (assert (= (norm "C:\\repo\\unit\\components\\view.fnl")
+             "C:/repo/unit/components/view.fnl")
+          "should convert single backslashes to forward slashes")
+  ;; Mixed separators
+  (assert (= (norm "C:\\repo\\unit/components/view.fnl")
+             "C:/repo/unit/components/view.fnl")
+          "should normalize mixed separators")
+  ;; Already normalized path is unchanged
+  (assert (= (norm "components/view.fnl") "components/view.fnl")
+          "already-normalized path should be unchanged")
+  ;; Empty/nil
+  (assert (= (norm "") "") "empty string should return empty")
+  (assert (= (norm nil) "") "nil should return empty"))
+
+(table.insert tests {:name "external-unit-mcp: normalize-logical-path handles single backslash separators"
+                     :fn test-normalize-logical-path-handles-single-backslash-separators})
+
 (fn test-list-returns-deterministic-ordering []
   (with-temp-dir
     (fn [dir]
@@ -757,11 +778,15 @@
       (local Process (require :process))
       (local symlink-result (Process.run {:args ["ln" "-s" outside-dir symlink-path]
                                          :merge-stderr true}))
-      (assert (= symlink-result.exit-code 0)
-              (.. "symlink creation failed: " (or symlink-result.stderr symlink-result.stdout)))
-      ;; Verify the symlink was created
-      (local symlink-stat (fs.stat symlink-path))
-      (assert symlink-stat.is-symlink "expected symlink")
+      (if (not= symlink-result.exit-code 0)
+          (do
+            (print (.. "Skipping symlink ancestor test: ln -s unavailable: "
+                       (or symlink-result.stderr symlink-result.stdout "")))
+            (lua "return true"))
+          (let [symlink-stat (fs.stat symlink-path)]
+            (when (not symlink-stat.is-symlink)
+              (print "Skipping symlink ancestor test: symlink not reported by fs.stat")
+              (lua "return true"))))
       (with-service dir
         (fn [mgr _dir]
           (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;" dir "/?.fnl;" dir "/?/init.fnl"))
@@ -882,6 +907,12 @@
           (local ids {})
           (each [_ art (ipairs info.source-artifacts)]
             (tset ids art.source-id true))
+          ;; Verify no source-id contains OS-absolute-path markers or backslashes
+          (each [sid _ (pairs ids)]
+            (assert (not (string.find sid ":" 1 true))
+                    (.. "source-id must not contain ':': " sid))
+            (assert (not (string.find sid "\\" 1 true))
+                    (.. "source-id must not contain backslash: " sid)))
           ;; The nested file must be addressable by its relative path
           (assert (. ids "components/view.fnl")
                   (.. "expected components/view.fnl in source artifacts, got keys: "
