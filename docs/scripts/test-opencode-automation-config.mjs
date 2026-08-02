@@ -11,12 +11,14 @@ let skillContent = ''
 let supervisorContent = ''
 let notesContent = ''
 let workflowDebugContent = ''
+let testWorkflowContent = ''
 
 async function loadFiles() {
     if (skillContent) return
     skillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'daily-devlog-automation', 'SKILL.md'), 'utf8')
     supervisorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'supervisor.md'), 'utf8')
     workflowDebugContent = await readFile(join(repoRoot, '.opencode', 'skills', 'github-workflow-debug', 'SKILL.md'), 'utf8')
+    testWorkflowContent = await readFile(join(repoRoot, '.github', 'workflows', 'test.yml'), 'utf8')
     try {
         notesContent = await readFile(join(repoRoot, 'docs', 'dev', 'notes', 'daily-devlog-automation.md'), 'utf8')
     } catch { /* optional */ }
@@ -221,6 +223,12 @@ test('daily devlog developer note documents fresh-checkout docs dependency insta
         'developer note should document npm ci for installing locked docs dependencies')
     assert.match(oneLineNotes, /npm run docs:build/i,
         'developer note should retain npm run docs:build in dependency flow')
+})
+
+test('required test workflow runs for merge queue merge_group events', async () => {
+    await loadFiles()
+    assert.match(testWorkflowContent, /^\s*merge_group:\s*$/m,
+        'test.yml should include an on.merge_group trigger so required checks run for merge queue candidates')
 })
 
 test('daily devlog developer note documents Orca/OpenCode project-config caveat', async () => {
