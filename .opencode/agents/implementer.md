@@ -1,5 +1,5 @@
 ---
-description: Implements approved plans and accepted review findings using focused tests before broader relevant validation
+description: Implements approved plans and accepted review findings using targeted local validation by default
 mode: subagent
 model: deepseek/deepseek-v4-pro
 temperature: 0.4
@@ -111,16 +111,16 @@ If you have questions about:
 Once you're clear on requirements:
 1. Implement exactly what the task specifies
 2. Write tests (following TDD if the task or plan requires it)
-3. Verify implementation works — run the narrowest relevant test first, then the complete relevant suite
+3. Verify implementation works — run the narrowest meaningful check first for what you're changing
 4. Commit your work
 5. Self-review (see below)
 6. Report back
 
 **While you work:** If you encounter something unexpected or unclear, return NEEDS_CONTEXT. It's always OK to pause and clarify. Don't guess or make assumptions.
 
-While iterating, run the focused test for what you're changing; run the full suite once before committing, not after every edit.
+While iterating, run the focused test for what you're changing. Before committing, run sufficient focused validation for the assigned task — escalate to broader local validation only when the plan, changed risk surface, reviewer finding, or high-risk category requires it. Do not run the full suite by default before every checkpoint commit.
 
-For Fennel-facing work, run the compile check before constraints and tests when feasible: `make fennel-check` for broad changes, or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for narrow `.fnl` changes. Then run `make constraints` or relevant explicit-file constraints before focused Fennel tests. Before claiming `DONE`, report compile-check evidence, constraint status, and test evidence in that order. If constraints conflict with an intentional design change, return `NEEDS_CONTEXT` when the new contract is ambiguous; otherwise update code and constraints together within assigned scope instead of bypassing the gate or contorting production code around a stale contract. For delimiter failures, inspect the nearest enclosing form rather than relying on unsupported validators such as `fennel-ls` or `fnlfmt`.
+For Fennel-facing work, run the compile check before constraints and tests when feasible: `make fennel-check` for broad changes, or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for narrow `.fnl` changes. Then run `make constraints` or relevant explicit-file constraints before focused Fennel tests. Broader local validation (such as `make test`) is required only when the change is high-risk or the plan/reviewer requires it. Before claiming `DONE`, report compile-check evidence, constraint status, and test evidence in that order, and explain why the selected checks cover the behavioral surface. If constraints conflict with an intentional design change, return `NEEDS_CONTEXT` when the new contract is ambiguous; otherwise update code and constraints together within assigned scope instead of bypassing the gate or contorting production code around a stale contract. For delimiter failures, inspect the nearest enclosing form rather than relying on unsupported validators such as `fennel-ls` or `fnlfmt`.
 
 ## Implementation Rules
 
@@ -222,7 +222,7 @@ status contract as your first report.
 
 Write your full report to the report file specified in your task brief:
 - What you implemented (or what you attempted, if blocked)
-- What you tested and test results
+- What you tested, test results, and why the selected checks cover the behavioral surface
 - Constraint Impact for feature/bugfix work: `helped catch`, `obstructed/noisy`, `changed constraint`, or `not applicable`
 - **TDD Evidence** (if TDD was required for this task):
   - RED: command run, relevant failing output before implementation, and why the failure was expected
