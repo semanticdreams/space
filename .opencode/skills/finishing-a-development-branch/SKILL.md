@@ -139,20 +139,22 @@ when permitted, and restart from Step 0.
   3. If both checks pass: execute the default action automatically:
      - Push the current branch.
      - Create a pull request targeting the base branch.
-      - Enable auto-merge (or queue the PR) when branch protection allows it.
-      - Poll with `gh pr view --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged).\
-        Inspect merge_group runs with `gh run list --workflow test.yml --event merge_group --limit 10 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`\
-        and `gh run watch <run-id> --exit-status --interval 100` when needed.
+       - Enable auto-merge (or queue the PR) when branch protection allows it.
+       - Poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged).\
+         Inspect merge_group runs with `gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`\
+         and `gh run watch <run-id> --exit-status --interval 100` when needed.
 
-     Do not update the PR branch
-     solely because origin/main advanced after PR creation. Merge queue
-     handles post-PR freshness. Resume only for actionable queue blockers:
-     merge queue conflicts, required-check failures (including merge-group
-     `test` failures), missing merge queue protection, or permission
-     blockers. Each fix follows: invoke `systematic-debugging`, route any
-     repository fix through `implementer` → `reviewer` → pass, commit
-     reviewed fixes, current-base validation, and requeue. Do not rebase or
-     force-push unless the human explicitly requests it.
+      Do not update the PR branch
+      solely because origin/main advanced after PR creation. Merge queue
+      handles post-PR freshness. Resume only for actionable queue blockers:
+      merge queue conflicts, required-check failures (including merge-group
+      `test` failures), missing merge queue protection, permission
+      failures, closed-unmerged PRs, and queue timeouts.
+      Each fix follows: invoke `systematic-debugging`, route any
+      repository fix through `implementer` → `reviewer` → pass, commit
+      reviewed fixes, validate from current `origin/main`, push, and
+      requeue. Do not rebase or
+      force-push unless the human explicitly requests it.
   4. If the user explicitly requested a different integration action: execute
      that action instead.
   5. If the branch cannot be integrated safely (e.g., unresolved merge conflicts

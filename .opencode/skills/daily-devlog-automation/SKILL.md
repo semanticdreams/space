@@ -32,18 +32,20 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 12. Push only the dated automation branch.
 13. Open a PR, enable auto-merge (or queue the PR) when branch protection
     allows it. After the PR enters merge queue, poll with
-    `gh pr view --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url`
+    `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url`
     until `mergedAt` is present (PR merged). Inspect merge_group runs with
-    `gh run list --workflow test.yml --event merge_group --limit 10 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`
+    `gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`
     and `gh run watch <run-id> --exit-status --interval 100` when queue checks
     are failing. Do not update
     the PR branch solely because origin/main advanced after PR creation —
     merge queue handles post-PR freshness. Resume only for actionable
     queue blockers: merge queue conflicts, merge-group `test` failures,
-    missing merge queue protection, or permission blockers. For queue
+    missing merge queue protection, permission blockers, closed-unmerged
+    PRs, and queue timeouts. For queue
     failures, invoke `systematic-debugging`, route any repository fix
     through `implementer` → `reviewer` → pass, commit reviewed fixes,
-    revalidate, and requeue. Do not rebase or force-push unless the human
+    validate from current `origin/main`, push, and requeue. Do not rebase
+    or force-push unless the human
     explicitly requests it.
 
 ## Landing-Date Attribution
@@ -111,7 +113,7 @@ gathering, or a product/API/data/architecture choice.
 
 ## Commit, Push, and PR
 
-Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, pull-request protection, and merge queue requirement are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo) or `gh pr merge --auto --squash ...` when rules require squash. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`. After auto-merge is enabled, poll with `gh pr view --json state,mergedAt,...` until `mergedAt` is present — later `origin/main` movement is handled by merge queue. Resume only for actionable queue blockers: merge queue conflicts, merge-group `test` failures, missing merge queue protection, or permission blockers. Invoke `systematic-debugging` for any queue failure and route repository fixes through `implementer` → `reviewer` → pass before requeuing.
+Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, pull-request protection, and merge queue requirement are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo) or `gh pr merge --auto --squash ...` when rules require squash. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`. After auto-merge is enabled, poll with `gh pr view <pr-or-branch> --json state,mergedAt,...` until `mergedAt` is present — later `origin/main` movement is handled by merge queue. Resume only for actionable queue blockers: merge queue conflicts, merge-group `test` failures, missing merge queue protection, permission blockers, closed-unmerged PRs, and queue timeouts. Invoke `systematic-debugging` for any queue failure and route repository fixes through `implementer` → `reviewer` → pass, commit reviewed fixes, validate from current `origin/main`, push, and requeue.
 
 ## Fail-Closed Cases
 
