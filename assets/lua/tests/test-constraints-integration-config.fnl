@@ -3,16 +3,20 @@
 (local tests [])
 (local fs (require :fs))
 
-(fn repo-root []
-  (if (fs.exists "CMakeLists.txt")
+(fn repo-root-or-nil []
+  (local has-cmake (fs.exists "CMakeLists.txt"))
+  (local has-cmake-parent (fs.exists "../CMakeLists.txt"))
+  (if has-cmake
       "."
-      (do
-        (assert (fs.exists "../CMakeLists.txt")
-                "expected to run from the repository root or build directory")
-        "..")))
+      (if has-cmake-parent
+          ".."
+          nil)))
 
 (fn read-repo-file [path]
-  (fs.read-file (.. (repo-root) "/" path)))
+  (local root (repo-root-or-nil))
+  (when (not root)
+    (error "read-repo-file called without repository checkout"))
+  (fs.read-file (.. root "/" path)))
 
 (fn assert-contains [contents needle message]
   (assert (string.find contents needle 1 true)
@@ -46,6 +50,10 @@
           "constraints recipe slice should not include later make targets"))
 
 (fn test-makefile-wires-constraints-target []
+  (local root (repo-root-or-nil))
+  (when (not root)
+    (print "Skipping constraints integration config test: repository checkout not available")
+    (lua "return true"))
   (local makefile (read-repo-file "Makefile"))
   (local fennel-recipe (make-target-recipe makefile "fennel-check"))
   (local recipe (constraints-target-recipe makefile))
@@ -88,6 +96,10 @@
       (string.sub cmake start)))
 
 (fn test-cmake-wires-constraints-fixture []
+  (local root (repo-root-or-nil))
+  (when (not root)
+    (print "Skipping constraints integration config test: repository checkout not available")
+    (lua "return true"))
   (local cmake (read-repo-file "CMakeLists.txt"))
   (assert-contains cmake "add_test(NAME ${PROJECT_NAME}_constraints"
                    "CMake should declare the constraints test")
@@ -101,6 +113,10 @@
           "space_fnl_tests_integration should require the constraints fixture"))
 
 (fn test-cmake-preserves-fennel-test-display-backend []
+  (local root (repo-root-or-nil))
+  (when (not root)
+    (print "Skipping constraints integration config test: repository checkout not available")
+    (lua "return true"))
   (local cmake (read-repo-file "CMakeLists.txt"))
   (local fast-block (ctest-test-block cmake "${PROJECT_NAME}_fnl_tests"))
   (local integration-block (ctest-test-block cmake "${PROJECT_NAME}_fnl_tests_integration"))
@@ -109,6 +125,16 @@
   (assert (not (string.find integration-block "SDL_VIDEODRIVER=dummy" 1 true))
           "space_fnl_tests_integration should not force SDL_VIDEODRIVER=dummy"))
 
+(fn test-repo-root-detection-uses-cmake-not-makefile []
+  ;; repo-root-or-nil must base detection on CMakeLists.txt only,
+  ;; not on a generated ../Makefile that may exist in artifact-only layouts.
+  (local root (repo-root-or-nil))
+  (when root
+    (assert (fs.exists (.. root "/CMakeLists.txt"))
+            (.. "repo-root-or-nil returned " root " but " root "/CMakeLists.txt does not exist"))))
+
+(table.insert tests {:name "repo-root detection uses CMakeLists.txt not Makefile"
+                     :fn test-repo-root-detection-uses-cmake-not-makefile})
 (table.insert tests {:name "Makefile wires blocking constraints target"
                      :fn test-makefile-wires-constraints-target})
 (table.insert tests {:name "Makefile constraints target recipe is isolated"

@@ -76,13 +76,18 @@ OpenCode users: restart after `.opencode/**` changes.
 - `make run` executes `space` with `SPACE_ASSETS_PATH=../assets` (via `./space -m main`).
 - When running Lua/Fennel tests from the CLI, always set `SPACE_ASSETS_PATH` to the absolute `assets` path (e.g. ``SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main``) so path-sensitive suites like `FsView` can resolve fixtures correctly.
 - Fennel macros live under `assets/lua`; when invoking tests directly with `./build/space -m ...` set `FENNEL_PATH` and `FENNEL_MACRO_PATH` to `$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl` to ensure `(import-macros ...)` resolves.
-- For Fennel-facing work, run the validation ladder in order: compile check first (`make fennel-check` or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for touched `.fnl` files), constraints second (`make constraints` or explicit-file constraints when appropriate), focused Fennel tests third, and the broader relevant suite such as `make test` last. Compile/constraints/test evidence should be reported in handoffs.
+- **Targeted local validation by default:** Agents run the narrowest meaningful checks for the changed behavioral surface:
+  - **Fennel/UI/layout behavior:** compile check first (`make fennel-check` or `./build/space -m tools.fennel-check:main -- --target files --file <path>` for touched `.fnl` files), then constraints (`make constraints` or explicit-file constraints), then focused Fennel tests. Compile/constraints/test evidence should be reported in handoffs.
+  - **C++ behind Fennel bindings:** build first, then focused Fennel tests through the binding surface.
+  - **Pure C++ utility behavior:** build the relevant target and/or focused CTest.
+  - **Docs/prompt-only changes:** focused text searches, diff review, and formatting checks.
+  - **Build, package, startup, runtime initialization, broad binding/API, or other high-risk changes:** broaden local validation, including `make test` when that is the relevant local gate.
+- `make build` is the normal **runtime/freshness prerequisite** when `./build/space` may be missing or stale, or when C++, CMake, runtime initialization, bindings, or host scaffolding changed.
 - Do not use system `fennel`, system `lua`, `fennel-ls`, `fnlfmt`, `./build/space --compile`, or `./build/space -e` as validation oracles for Space Fennel. Use the project-native `tools.fennel-check` command and constraints/tests instead.
 - For Fennel-facing work, `make constraints` runs after `make fennel-check` so constraint violations surface before slower debugging loops. The constraints gate is blocking; every result other than `pass` (`violations`, `fail`, or `interrupted`) exits nonzero and should be diagnosed and fixed through reviewed code or reviewed baseline data, not bypassed. See [Fennel Constraints](docs/dev/constraints.md).
-- Default test invocation is `make test` (or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure`) after a build; prefer this unless you specifically need a narrowed `./build/space -m tests.test-...` run. Use `ctest -V` or `TEST_VERBOSE=1` only when debugging test output.
 - `make test` already depends on `make constraints`, so full-suite runs execute the constraints gate before normal Fennel tests; do not duplicate `make constraints` immediately before `make test` unless the early, faster feedback is useful.
 - Disable audio for CLI test runs by default to avoid sandbox/PortAudio warnings: prefix commands with `SPACE_DISABLE_AUDIO=1` (e.g. `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main`).
-- When running tests, point `XDG_DATA_HOME` outside the repo to avoid littering the workspace (use `XDG_DATA_HOME=/tmp/space/tests/xdg-data` unless otherwise specified). Agents should always skip keyring-backed tests (`SKIP_KEYRING_TESTS=1`). Standard full-suite command: `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
+- When running tests, point `XDG_DATA_HOME` outside the repo to avoid littering the workspace (use `XDG_DATA_HOME=/tmp/space/tests/xdg-data` unless otherwise specified). Agents should always skip keyring-backed tests (`SKIP_KEYRING_TESTS=1`). Standard full-suite command (use when full local validation is justified by risk or plan/reviewer requirement, not as a default before every checkpoint commit): `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`.
 - `make debug` configures `build/debug/` and launches `gdb ./space`.
 - `make test` or `python3 scripts/ctest-summary.py --test-dir build --output-on-failure` runs all registered tests once the build is up to date.
 - When Lua/Fennel work needs additional bindings or host scaffolding, update the relevant C++ (e.g. `apps/space/main.cpp`, `src/` modules) yourself and rerun `make build` to confirm the harness still compiles before handing the change back.
@@ -115,8 +120,9 @@ OpenCode users: restart after `.opencode/**` changes.
 - Use the `type(scope)` format as described by the `git-commit` skill.
 - Scopes (when useful): `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
 - For Fennel-facing feature or bugfix handoffs, include a lightweight constraint-impact line when relevant: helped, obstructed/noisy, changed, or not applicable.
-- Before committing, run the full test suite:
-  `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
+- Before checkpoint commits, run sufficient focused validation for the changed behavioral surface and record a short coverage rationale in your report.
+- Escalate to broader local validation when the changed surface is high risk or the plan/reviewer requires it.
+- Do not claim ready-to-merge until the applicable PR CI integration gate is green.
 
 ## Assets & Configuration Tips
 

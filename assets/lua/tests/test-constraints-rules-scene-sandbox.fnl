@@ -3,6 +3,13 @@
 
 (local tests [])
 
+;; --- Helper for portable path normalization ---
+;; Used by the module's internal file-path-basename and path-contains? helpers.
+;; These tests verify the module handles Windows-style backslash paths correctly
+;; when both forward-slash and backslash path separators are in play.
+;; The module itself is expected to normalize internally; these tests exercise
+;; the exported rule.run functions with backslash paths to prove the fix.
+
 ;; --- Helpers for constructing synthetic fact DBs ---
 
 (fn make-file-fact [opts]
@@ -101,6 +108,126 @@
                                          :form "world.state.scene.panels"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "allowlisted migration file should pass"))
+
+;; Windows-style path tests for allowlist matching
+;; Regression: backslash paths (e.g. D:\a\space\space\build\...\home-world.fnl)
+;; must match the slash-only allowlist fragments "/home-world.fnl", "/tests/", "/e2e/".
+
+(fn no-legacy-allows-home-world-windows-path []
+  "home-world.fnl with Windows-style backslash path should be allowlisted."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.no-legacy-world-state-scene"))
+  (assert rule "rule should be in rules list")
+  ;; Windows-style path with backslashes — must be recognized as allowlisted
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\build\\dist\\windows\\assets\\lua\\home-world.fnl"
+                             :module "home-world"
+                             :accesses [{:path ["world" "state" "scene" "panels"]
+                                         :text "world.state.scene.panels"
+                                         :line 10
+                                         :column 1
+                                         :form "world.state.scene.panels"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) (.. "home-world.fnl with backslash path should pass, got "
+                             (if result (length result) 0) " diagnostics")))
+
+(fn no-legacy-allows-tests-dir-windows-path []
+  "A file under \\tests\\ with Windows-style backslash path should pass."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.no-legacy-world-state-scene"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\build\\dist\\windows\\assets\\lua\\tests\\legacy-migration.fnl"
+                             :module "legacy-migration"
+                             :accesses [{:path ["world" "state" "scene" "panels"]
+                                         :text "world.state.scene.panels"
+                                         :line 10
+                                         :column 1
+                                         :form "world.state.scene.panels"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) (.. "tests/ with backslash path should pass, got "
+                             (if result (length result) 0) " diagnostics")))
+
+(fn no-legacy-allows-e2e-dir-windows-path []
+  "A file under \\e2e\\ with Windows-style backslash path should pass."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.no-legacy-world-state-scene"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\e2e\\sandbox-test.fnl"
+                             :module "sandbox-test"
+                             :accesses [{:path ["world" "state" "scene" "panels"]
+                                         :text "world.state.scene.panels"
+                                         :line 10
+                                         :column 1
+                                         :form "world.state.scene.panels"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) (.. "e2e/ with backslash path should pass, got "
+                             (if result (length result) 0) " diagnostics")))
+
+(fn no-legacy-flags-non-allowlisted-windows-path []
+  "A non-allowlisted file with Windows-style backslash path should still be flagged."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.no-legacy-world-state-scene"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\src\\new-module.fnl"
+                             :module "new-module"
+                             :accesses [{:path ["world" "state" "scene" "panels"]
+                                         :text "world.state.scene.panels"
+                                         :line 42
+                                         :column 5
+                                         :form "world.state.scene.panels"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for non-allowlisted backslash path")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "scene.no-legacy-world-state-scene")
+          "diagnostic should have correct constraint-id"))
+
+;; Activity-slot-ownership with Windows-style paths (tests file-path-basename)
+(fn slot-ownership-allows-correct-graph-slot-windows-path []
+  "graph-activity-unit with Windows-style backslash path should match basename correctly."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.activity-slot-ownership"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\build\\dist\\windows\\assets\\lua\\graph-activity-unit.fnl"
+                             :module "graph-activity-unit"
+                             :calls [{:callee "scene:ensure-activity-slot"
+                                       :receiver nil
+                                       :method nil
+                                       :line 10 :column 1
+                                       :form "(scene:ensure-activity-slot \"graph\")"}
+                                      {:callee "scene:activate-activity-slot"
+                                       :receiver nil
+                                       :method nil
+                                       :line 11 :column 1
+                                       :form "(scene:activate-activity-slot \"graph\")"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "correct slot ownership with backslash path should pass"))
+
+(fn slot-ownership-flags-wrong-id-windows-path []
+  "graph-activity-unit with backslash path using wrong slot id should be flagged."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.activity-slot-ownership"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "D:\\a\\space\\space\\build\\dist\\windows\\assets\\lua\\graph-activity-unit.fnl"
+                             :module "graph-activity-unit"
+                             :calls [{:callee "scene:ensure-activity-slot"
+                                       :receiver nil
+                                       :method nil
+                                       :line 10 :column 1
+                                       :form "(scene:ensure-activity-slot \"sandbox\")"}
+                                      {:callee "scene:activate-activity-slot"
+                                       :receiver nil
+                                       :method nil
+                                       :line 11 :column 1
+                                       :form "(scene:activate-activity-slot \"sandbox\")"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for wrong slot with backslash path")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
 
 ;; --- Rule 2: scene.activity-slot-ownership ---
 
@@ -947,6 +1074,18 @@
                      :fn no-legacy-flags-world-state-scene-access})
 (table.insert tests {:name "no-legacy-world-state-scene allows allowlisted migration files"
                      :fn no-legacy-allows-allowlisted-migration-files})
+(table.insert tests {:name "no-legacy-world-state-scene allows home-world with Windows backslash path"
+                     :fn no-legacy-allows-home-world-windows-path})
+(table.insert tests {:name "no-legacy-world-state-scene allows tests/ with Windows backslash path"
+                     :fn no-legacy-allows-tests-dir-windows-path})
+(table.insert tests {:name "no-legacy-world-state-scene allows e2e/ with Windows backslash path"
+                     :fn no-legacy-allows-e2e-dir-windows-path})
+(table.insert tests {:name "no-legacy-world-state-scene flags non-allowlisted Windows backslash path"
+                     :fn no-legacy-flags-non-allowlisted-windows-path})
+(table.insert tests {:name "activity-slot-ownership allows correct graph slot with Windows backslash path"
+                     :fn slot-ownership-allows-correct-graph-slot-windows-path})
+(table.insert tests {:name "activity-slot-ownership flags wrong id with Windows backslash path"
+                     :fn slot-ownership-flags-wrong-id-windows-path})
 (table.insert tests {:name "activity-slot-ownership allows correct graph slot"
                      :fn slot-ownership-allows-correct-graph-slot})
 (table.insert tests {:name "activity-slot-ownership flags graph using sandbox"

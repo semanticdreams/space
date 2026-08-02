@@ -3,6 +3,11 @@
 (local tests [])
 
 (local fs (require :fs))
+(fn asset-lua-root []
+  (local env (os.getenv "SPACE_ASSETS_PATH"))
+  (local rt (require :runtime))
+  (local assets-path (if env env rt.assets-path rt.assets-path "assets"))
+  (fs.join-path assets-path "lua"))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/opencode" "constraints-default-run-test"))
@@ -163,9 +168,8 @@
 (fn runner-run-target-returns-structured-result []
   "Prove run-target returns a proper result with status, counts, and diagnostics."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
   ;; Build a files target pointing to the minimal test fixture
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "constraint-fixture"
                  :roots []
@@ -187,9 +191,8 @@
 (fn runner-run-target-diagnostics-include-target-metadata []
   "Prove that every diagnostic from run-target includes target.kind and target.name."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
   ;; Use a minimal files target — any diagnostics produced must carry target metadata
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "metadata-test-target"
                  :roots []
@@ -210,8 +213,7 @@
 (fn runner-run-target-explicit-files-target-works []
   "Prove that a non-repo files target can run through the same pipeline."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
-  (local fixture-path (fs.absolute "assets/lua/tests/data/constraint-fixture.fnl"))
+  (local fixture-path (fs.absolute (fs.join-path (asset-lua-root) "tests" "data" "constraint-fixture.fnl")))
   (local target {:kind :files
                  :name "explicit-files-test"
                  :roots []
@@ -322,8 +324,7 @@
   "Prove that run-target with a repo target discovers files, extracts facts,
   runs rules, and applies baseline — returns a structured, non-empty result."
   (local Runner (require :constraints.runner))
-  (local fs (require :fs))
-  (local lua-dir (fs.absolute "assets/lua"))
+  (local lua-dir (fs.absolute (asset-lua-root)))
   (local target {:kind :repo
                  :name "repo"
                  :roots [lua-dir]
@@ -389,6 +390,44 @@
             (.. "baseline-data requires \"" required-id
                 "\" but it is not in the rule registry"))))
 
+(fn bounded-str [v]
+  "Return tostring(v) truncated to 120 chars with ellipsis if longer."
+  (local raw (tostring v))
+  (if (> (length raw) 120)
+      (.. (string.sub raw 1 120) "...")
+      raw))
+
+(fn format-diag-entry [i d]
+  "Format a single diagnostic table entry as a bounded string."
+  (local msg-str (if (. d :message) (.. " msg=" (bounded-str (. d :message))) ""))
+  (local hint-str (if (. d :hint) (.. " hint=" (bounded-str (. d :hint))) ""))
+  (local fam (bounded-str (if (. d :family) (. d :family) "?")))
+  (local sev (bounded-str (if (. d :severity) (. d :severity) "?")))
+  (local fil (bounded-str (if (. d :file) (. d :file) "?")))
+  (local cid (bounded-str (. d :constraint-id)))
+  (.. "  [" i "] " cid
+      " family=" fam
+      " severity=" sev
+      " file=" fil
+      msg-str hint-str))
+
+(fn diag-first5-impl [diags]
+  "Collect first 5 diagnostic entries into a string, bounded."
+  (local lines [])
+  (var i 0)
+  (each [_ d (ipairs diags) &until (>= i 5)]
+    (set i (+ i 1))
+    (if (= (type d) :table)
+        (table.insert lines (format-diag-entry i d))
+        (table.insert lines (.. "  [" i "] (malformed: " (bounded-str d) ")"))))
+  (table.concat lines "\n"))
+
+(fn diag-sample-first-5 [diags]
+  "Return a bounded string from the first 5 diagnostic entries, or tostring if not a table."
+  (if (= (type diags) :table)
+      (diag-first5-impl diags)
+      (tostring diags)))
+
 (fn runner-main-argv-defaults-to-repo []
   "Runner.main() with nil argv should default to repo target and wire print/exit correctly.
   The run-target pipeline is stubbed to avoid redundant full-repo execution."
@@ -414,8 +453,15 @@
   (assert parsed.counts (.. "parsed JSON should have counts, got: " (tostring printed)))
   (assert parsed.diagnostics (.. "parsed JSON should have diagnostics, got: " (tostring printed)))
   (assert exit-code "expected exit to be called")
-  (assert (= exit-code 0)
-          "repo target with stubbed pass should exit zero"))
+  ;; Build diagnostic summary when assertion fails.
+  (local diag-header (.. "exit-code=" (tostring exit-code)
+                         " status=" (tostring parsed.status)))
+  (local count-tbl (if (= (type parsed.counts) :table) parsed.counts nil))
+  (local diag-total (.. " total=" (tostring (or (and count-tbl count-tbl.total) "?"))))
+  (local diag-sample (diag-sample-first-5 parsed.diagnostics))
+   (assert (= exit-code 0)
+           (.. "repo target with stubbed pass should exit zero\n"
+               diag-header diag-total "\n" diag-sample)))
 
 ;; Register tests
 (table.insert tests {:name "rule-registry all-rules returns all required ids"

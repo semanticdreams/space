@@ -11,6 +11,7 @@ tags:
 
 Chronological log of development work and decisions. Each entry records what was built, problems encountered, and ideas surfaced on a given day.
 
+- [2026-08-02](./2026-08-02)
 - [2026-08-01](./2026-08-01)
 - [2026-07-31](./2026-07-31)
 - [2026-07-30](./2026-07-30)
