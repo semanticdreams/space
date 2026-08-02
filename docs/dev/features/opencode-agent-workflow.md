@@ -24,7 +24,7 @@ The local Orca plus remote SSH checklist below is one possible path; it is not a
 If you choose the local-Orca-plus-remote-SSH setup, work through these points:
 
 1. **Remote VM reachable.** Confirm you can SSH into the remote VM from your local machine.
-2. **Build and dev tools.** Install common tooling on the remote VM: `git`, `nodejs` and `npm`, `python3`, `make`, `g++`, `curl`, and `clangd`. These are typically available through the system package manager.
+2. **Build and dev tools.** Install common tooling on the remote VM: `git`, `nodejs` and `npm`, `python3`, `make`, `g++`, `curl`, `clangd`, and `rsync`. These are typically available through the system package manager.
 3. **OpenCode on the remote VM.** Install OpenCode and make sure it is on `PATH` for non-interactive SSH sessions so that Orca can invoke it automatically.
 4. **GitHub SSH access.** Configure SSH key access for GitHub on the remote VM so the agent can push branches and create pull requests. Test with `ssh -T git@github.com`.
 5. **Clone Space on the remote VM.** Clone the repository into a working directory the SSH user can write to.
@@ -63,10 +63,9 @@ checkout's cache.
 - Re-runs `cmake` after rewriting the cache so CMake refreshes generated
   files for the new worktree.
 - Copies build files with fresh mtimes (`rsync --no-times`) so copied
-  artifacts appear newer than checkout files. On a divergent branch this
-  can hide needed rebuilds, which is why the clean-worktree caveat matters.
-  As a safety measure, the script compares source/destination HEAD and
-  touches tracked files that differ.
+  artifacts appear newer than checkout files. This is safe because the
+  script requires identical HEADs; if HEADs differ, it refuses to run
+  rather than hiding rebuilds.
 
 Paste the script below into Orca's per-project or per-worktree setup step.
 Adjust the `SPACE_MAIN_CHECKOUT` and `ORCA_WORKTREE` environment variables
@@ -96,6 +95,15 @@ fi
 
 if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
   echo "Worktree is not clean; run this only before agent edits begin." >&2
+  exit 1
+fi
+
+src_head="$(git -C "$main_checkout" rev-parse HEAD)"
+dst_head="$(git -C "$worktree" rev-parse HEAD)"
+if [ "$src_head" != "$dst_head" ]; then
+  echo "Worktree HEAD ($dst_head) differs from main-checkout HEAD ($src_head)." >&2
+  echo "The warm-start script is only safe when the new worktree starts from the same commit as the main checkout." >&2
+  echo "For a divergent branch, run make build or warm from a checkout at the same commit." >&2
   exit 1
 fi
 
@@ -140,12 +148,6 @@ cmake_args=(-S "$worktree" -B "$dst_build" -DCMAKE_BUILD_TYPE=Release)
 [ -n "$profile" ] && cmake_args+=("-DSPACE_BUILD_PROFILE=$profile")
 [ -n "$cef" ] && cmake_args+=("-DSPACE_ENABLE_CEF=$cef")
 cmake "${cmake_args[@]}"
-
-src_head="$(git -C "$main_checkout" rev-parse HEAD)"
-if git -C "$worktree" cat-file -e "$src_head^{commit}" 2>/dev/null; then
-  git -C "$worktree" diff --name-only -z "$src_head"...HEAD -- \
-    | xargs -0 -r -I{} touch "$worktree/{}"
-fi
 
 cmake --build "$dst_build" --target space -- -j"${BUILD_JOBS:-1}"
 ```
