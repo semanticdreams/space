@@ -223,9 +223,9 @@ Once reviewer verification passes (status `pass`):
    .opencode/skills/github-workflow-debug/scripts/ci-artifact-dir.sh
    git diff --staged > .superpowers/sdd/ci-staged.diff
    ```
-   Dispatch the reviewer (CI STAGED REVIEW mode):
+   Dispatch the reviewer for staged review (CI DEBUG REVIEW MODE):
    ```
-   You are performing a CI STAGED REVIEW. The branch fixes were previously
+   You are performing a CI DEBUG REVIEW. The branch fixes were previously
    reviewed and approved (see branch review package). Confirm that the staged
    squash-commit diff matches the approved fixes minus the temporary workflow
    trigger.
