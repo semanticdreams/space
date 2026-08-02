@@ -67,14 +67,16 @@ Rules:
     - If the change is documentation/config only and existing docs/dev pages
       remain canonical, the plan must state why no additional docs/dev page is
       needed.
-18. For plans that touch `.fnl` files, Fennel tests, Fennel constraints, or
-    Fennel CLI/MCP tooling, name the validation ladder explicitly: `make build`
-    as runtime/freshness prerequisite when `./build/space` may be missing or
-    stale, then compile check first (`make fennel-check` or touched-file
-    `tools.fennel-check`), constraints second, focused Fennel tests third, and
-    the broader relevant suite only when justified by behavioral surface and
-    risk. Include enclosing form repair guidance when delimiter or parse
-    errors are in scope.
+18. For any plan whose validation invokes `./build/space` (including but not
+    limited to: Fennel compile checks, Fennel constraints, Fennel tests,
+    runtime tests, and C++ binding-surface validation), explicitly include
+    `make build` as the runtime/freshness prerequisite in the validation
+    ladder when the binary may be missing or stale. For Fennel-facing
+    plans specifically: name `make fennel-check` (or touched-file
+    `tools.fennel-check`) as the first focused check, constraints second,
+    focused Fennel tests third, and the broader relevant suite only when
+    justified by behavioral surface and risk; include enclosing form repair
+    guidance when delimiter or parse errors are in scope.
 
 Return only raw Markdown suitable for PLAN.md — do NOT wrap the output in a
 code fence. The plan must use these exact section headings so that automated
