@@ -1,6 +1,6 @@
 ---
 name: github-workflow-debug
-description: Debug a GitHub Actions workflow end-to-end using a temporary branch, temporarily enable the workflow for that branch, commit/push/poll in 100-second intervals until green, review and simplify the resulting fix commits, then squash-merge the final result into main as a local commit ready for human approval.
+description: Debug a GitHub Actions workflow end-to-end using a temporary branch, temporarily enable the workflow for that branch, commit/push/poll in 100-second intervals until green, review and simplify the resulting fix commits, then squash-merge the final result onto a dedicated PR branch, push it, and create a GitHub PR.
 ---
 
 # GitHub Workflow Debug Loop
@@ -18,7 +18,7 @@ This skill is for the full loop:
 - fix failures in a commit/push/poll loop until green
 - review all workflow-fix commits for correctness, cleanliness, and simplification
 - if worthwhile, improve and re-run the loop until green again
-- land the final result on `main` as a single local commit (ready to push)
+- land the final result on a dedicated PR branch, push it, and create a GitHub PR
 - delete the throwaway branch locally
 
 ## Completion Contract (non-negotiable)
@@ -26,13 +26,13 @@ This skill is for the full loop:
 - **Never return a final answer while any workflow run is pending.** If a run
   is queued, in_progress, or waiting, continue polling — do not summarize,
   do not suggest the user check later, do not produce a "Remaining Tasks"
-  list. The skill is not done until the debug-branch CI is green, reviews
-  pass, and a final local squash commit exists on `main` ready to push.
+   list. The skill is not done until the debug-branch CI is green, reviews
+   pass, and a final squash commit exists on a dedicated PR branch, is pushed, and a GitHub PR URL has been returned.
 - Use `gh-workflow-debug.sh wait-run` as the default polling mechanism.
   It blocks until the run completes (default 2h timeout) and returns the
   conclusion.
 - The only legitimate stop conditions are:
-  - Final squash commit is created locally on `main`, reviewed, and ready to push.
+  - Final squash commit is created on the PR branch, reviewed, pushed, and a PR URL has been returned.
   - A permission prompt requires human approval.
   - The `requires_human` escalation path is triggered.
 - **"I'll let the user check CI later" is a violation.** Poll now.
@@ -78,7 +78,7 @@ Common shapes in this repo:
 - `push.branches: [main]`:
   - expand it to a multi-line list and add the throwaway branch alongside `main`
 
-The throwaway-branch trigger change is temporary and must not survive the final squash onto `main`.
+The throwaway-branch trigger change is temporary and must not survive the final squash onto the PR branch.
 
 ## Main loop
 
@@ -206,26 +206,26 @@ Bias toward:
 
 The throwaway branch is allowed to have many debugging commits. `main` is not.
 
-## Final landing on main
+## Final landing through a PR branch
 
 Once reviewer verification passes (status `pass`):
 
-1. Check out `main`.
-2. Fast-forward `main` to the latest remote `main`.
-3. Squash-merge the throwaway branch into `main`.
-4. Dispatch **implementer** to remove the temporary throwaway-branch trigger
-   from the workflow file while keeping all real workflow/build/test fixes.
-   Instruct implementer to stage the result. Verify the staged diff before
-   continuing.
+1. Fetch `origin/main`.
+2. Create or switch to `opencode/workflow-debug-pr/<workflow-stem>-<utc-timestamp>` from `origin/main`; do not require checking out local `main`.
+3. Squash-merge the throwaway debug branch into the final PR branch.
+4. Dispatch **implementer** to remove the temporary throwaway-branch workflow
+   trigger from the workflow file while keeping all real workflow/build/test
+   fixes. Instruct implementer to stage the result. Verify the staged diff
+   before continuing.
 
 5. Generate the staged diff and dispatch the reviewer for staged verification:
    ```
    .opencode/skills/github-workflow-debug/scripts/ci-artifact-dir.sh
    git diff --staged > .superpowers/sdd/ci-staged.diff
    ```
-   Dispatch the reviewer (CI DEBUG REVIEW MODE, staged variant):
+   Dispatch the reviewer for staged review (CI DEBUG REVIEW MODE):
    ```
-   You are performing a CI STAGED REVIEW. The branch fixes were previously
+   You are performing a CI DEBUG REVIEW. The branch fixes were previously
    reviewed and approved (see branch review package). Confirm that the staged
    squash-commit diff matches the approved fixes minus the temporary workflow
    trigger.
@@ -237,32 +237,45 @@ Once reviewer verification passes (status `pass`):
    were dropped from the squash, and the only difference from the approved
    branch diff is the trigger removal.
    ```
-   - **pass** → create one final commit on `main` (step 6)
+   - **pass** → proceed to step 6
    - **candidates_found** → assess the findings:
      - If the issues are mechanical (missing trigger removal, leftover debug
        scaffolding, dropped fix in squash): dispatch **implementer** to fix the
        staged diff, then re-review.
-      - If the issues are substantive (a source, test, build, or workflow
-        behavior problem): abort the landing, return to the throwaway branch,
-        dispatch **implementer** to fix, verify the commit, push, poll until
-        green, then restart the full reviewer verification step.
+     - If the issues are substantive (a source, test, build, or workflow
+       behavior problem): abort the landing, return to the throwaway branch,
+       dispatch **implementer** to fix, verify the commit, push, poll until
+       green, then restart the full reviewer verification step.
 
-6. Create one final commit on `main`. Use the `git-commit` skill when
-   available. Stop after the commit — do not push `main` or poll `main`
-   CI in this automated loop. These are human-gated actions.
+6. On staged-review pass, create exactly one final squash commit on the PR
+   branch. Use the `git-commit` skill when available.
 
-7. Report the final commit SHA and a summary of what to do next:
+7. Verify no `.superpowers/sdd/ci-*` artifacts are staged or tracked and the
+   final workflow file no longer includes the temporary debug branch trigger.
+
+8. Push with:
    ```
-   Ready to push. Final commit on main: <sha>
-   To complete: git push origin main, then poll the main workflow run.
-   To clean up the remote debug branch: git push origin --delete <throwaway-branch>
+   git push origin HEAD:refs/heads/<final-pr-branch>
    ```
 
-Do not merge the throwaway branch directly. The final landed history must be a single commit.
+9. Create the PR with:
+   ```
+   gh pr create --base main --head <final-pr-branch> --fill
+   ```
+
+10. Return the PR URL plus an optional cleanup command for the remote debug
+    branch:
+    ```
+    PR landed: <pr-url>
+    To clean up the remote debug branch: git push origin --delete <throwaway-branch>
+    ```
+
+Direct pushes to `main` are branch-protection incompatible for this repo. The
+final workflow-debug fix must land through a PR.
 
 ## Cleanup
 
-After the final commit is created on `main`:
+After the final PR branch commit and PR are created:
 
 - delete the throwaway branch locally: `git branch -D <throwaway-branch>`
 - the remote debug branch (`origin/<throwaway-branch>`) remains for now;
@@ -273,6 +286,6 @@ After the final commit is created on `main`:
 Before reporting done:
 
 - confirm the throwaway branch no longer exists locally
-- confirm the workflow file on `main` no longer includes the throwaway branch in its triggers
-- confirm the final single commit on `main` contains all intended fixes
+- confirm the workflow file on the final PR branch no longer includes the throwaway branch in its triggers
+- confirm the final single commit on the PR branch contains all intended fixes
 - confirm no CI review artifacts (`.superpowers/sdd/ci-*`) are staged or tracked
