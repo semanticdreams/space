@@ -2,12 +2,12 @@
 (local Remote (require :repo/remote))
 
 (fn parse-github-ssh []
-  (local parsed (Remote.parse "git@github.com:semanticdreams/space.git"))
+  (local parsed (Remote.parse "git@github.com:semanticdreams/space2.git"))
   (assert (= parsed.host :github))
   (assert (= parsed.owner "semanticdreams"))
-  (assert (= parsed.name "space"))
-  (assert (= parsed.repo-id "github.com-semanticdreams-space"))
-  (assert (= parsed.remote-url "git@github.com:semanticdreams/space.git")))
+  (assert (= parsed.name "space2"))
+  (assert (= parsed.repo-id "github.com-semanticdreams-space2"))
+  (assert (= parsed.remote-url "git@github.com:semanticdreams/space2.git")))
 
 (fn parse-github-https []
   (local parsed (Remote.parse "https://github.com/user/repo.git"))

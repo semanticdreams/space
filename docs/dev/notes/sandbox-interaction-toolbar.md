@@ -176,8 +176,8 @@ The Scene (`scene.fnl`) implements `:height-at-world-point` by querying `Terrain
 ## See Also
 
 - [Layout](./sandbox-interaction-toolbar) — this document
-- [Activity Retention Tests](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-activity-retention.fnl) — tests for hook lifecycle
-- [Scene Drag Tests](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-scene-drag.fnl) — tests for predicate-gated dragging
-- [Layout Physics Bodies Tests](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-layout-physics-bodies.fnl) — tests for anchor drag
-- [Sandbox Camera Controls Tests](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-sandbox-camera-controls.fnl) — tests for grounded camera
-- [Camera Animation Tests](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-camera-animation.fnl) — tests for scalar channel
+- [Activity Retention Tests](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-activity-retention.fnl) — tests for hook lifecycle
+- [Scene Drag Tests](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-scene-drag.fnl) — tests for predicate-gated dragging
+- [Layout Physics Bodies Tests](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-layout-physics-bodies.fnl) — tests for anchor drag
+- [Sandbox Camera Controls Tests](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-sandbox-camera-controls.fnl) — tests for grounded camera
+- [Camera Animation Tests](https://github.com/semanticdreams/space2/blob/main/assets/lua/tests/test-camera-animation.fnl) — tests for scalar channel

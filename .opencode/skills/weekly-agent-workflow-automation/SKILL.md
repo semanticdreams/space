@@ -15,6 +15,7 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
 2. Use the sanitized analyzer; do not browse raw OpenCode database rows, raw logs, raw tool-output dumps, `auth.json`, or credential/account/auth/token/secret tables.
 3. Verify GitHub access with `gh auth status` before PR work.
 4. Treat `.opencode/**` changes as startup-loaded; note that OpenCode must restart after merge before the new automation is relied on.
+5. Verify merge queue protection is required for the target branch before relying on post-PR freshness; report `HUMAN_DECISION_REQUIRED` if merge queue is not enabled.
 
 ## Workflow
 
@@ -42,7 +43,7 @@ This skill turns a scheduled Orca/OpenCode trigger into a guarded weekly audit o
 10. Run validation. Use `systematic-debugging` for validation failures. A validation failure is not an immediate `BLOCKED` condition, even when it appears unrelated, flaky, timing-dependent, or environmental. Capture the failing command, failing tests, relevant output, current branch state, and `git status --porcelain`; establish root cause or the limits of available evidence; route any repository fix through `implementer` → `reviewer` → pass; commit reviewed fixes; re-fetch `origin`; recheck current `origin/main`; and rerun validation until green or a true human-input blocker is established. Do not weaken valid tests or ignore noise.
 11. Inspect the final diff and confirm it contains only reviewed, expected files.
 12. Re-fetch `origin` and recheck current `origin/main` before push or PR creation. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree.
-13. Commit reviewed changes, push the automation branch, create the PR, verify branch protection and required checks, then enable auto-merge only when safe.
+13. Commit reviewed changes, push the automation branch, create the PR, verify branch protection, required checks, and merge queue protection, then enable auto-merge (or queue the PR) only when safe. After the PR enters merge queue, poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged). Inspect merge_group runs with `gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt` and `gh run watch <run-id> --exit-status --interval 100` when queue checks are failing. Do not update the PR branch solely because origin/main advanced after PR creation — merge queue handles post-PR freshness. Resume only for actionable queue blockers: merge queue conflicts, merge-group `test` failures, missing merge queue protection, permission blockers, closed-unmerged PRs, and queue timeouts. For queue failures, invoke `systematic-debugging`, route any repository fix through `implementer` → `reviewer` → pass, commit reviewed fixes, validate from current `origin/main`, push, and requeue. Do not rebase or force-push unless the human explicitly requests it.
 
 ## Improvement Selection
 
@@ -92,16 +93,17 @@ If validation fails, follow the validation failure recovery steps in the Workflo
 
 Commit only after implementer → reviewer → pass and validation. Push with `git push origin HEAD:refs/heads/automation/weekly-agent-workflow/YYYY-Www`. Use `gh pr create --base main --head automation/weekly-agent-workflow/YYYY-Www --fill` when authenticated.
 
-Before auto-merge, run `gh auth status`, verify protection with `gh api repos/<owner>/<repo>/branches/main/protection`, and verify required checks are present and passing. Use `gh pr merge --auto --squash automation/weekly-agent-workflow/YYYY-Www` only after those checks. Never push directly to `origin/main`.
+Before auto-merge, run `gh auth status`, verify protection with `gh api repos/<owner>/<repo>/branches/main/protection` (or rulesets when classic returns 404), and verify required checks and merge queue requirement are present and passing. Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/weekly-agent-workflow/YYYY-Www` when rules allow merge commits (current for this repo) or `gh pr merge --auto --squash ...` when rules require squash. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`. After auto-merge is enabled, poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present — later `origin/main` movement is handled by merge queue. Resume only for actionable queue blockers: conflicts, merge-group `test` failures, missing merge queue protection, permission blockers, closed-unmerged PRs, and queue timeouts. Invoke `systematic-debugging` for any queue failure and route repository fixes through `implementer` → `reviewer` → pass, commit reviewed fixes, validate from current `origin/main`, push, and requeue.
 
 ## Fail-Closed Cases
 
 Stop with BLOCKED or HUMAN_DECISION_REQUIRED when the checkout is dirty,
 analyzer execution or redaction fails, sanitized evidence is insufficient, raw
-sensitive data would be needed, branch protection or required checks cannot be
-verified, GitHub authentication is missing for PR work, reviewer does not pass
-the diff, unexpected files appear, or validation remains red after systematic
-debugging establishes a true human-input blocker.
+sensitive data would be needed, branch protection, required checks, or merge
+queue requirement cannot be verified, GitHub authentication is missing for PR
+work, merge queue handoff fails with an unresolved blocker, reviewer does not
+pass the diff, unexpected files appear, or validation remains red after
+systematic debugging establishes a true human-input blocker.
 
 ## Red Flags
 

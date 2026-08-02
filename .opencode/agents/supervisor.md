@@ -51,6 +51,11 @@ permission:
     "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
     "gh pr merge --auto --merge automation/daily-devlog/????-??-??": allow
     "gh pr merge --auto --squash automation/weekly-agent-workflow/????-W??": allow
+    "gh pr merge --auto --merge automation/weekly-agent-workflow/????-W??": allow
+    "gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url": allow
+    "gh pr checks * --watch": allow
+    "gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt": allow
+    "gh run watch * --exit-status --interval 100": allow
     "git push origin --delete *": ask
     "git push *--force*": deny
     "git push * -f*": deny
@@ -201,6 +206,26 @@ debugging establishes that progress requires human input: credentials,
 inaccessible infrastructure, unsafe git history decisions, unreproducible
 behavior after reasonable evidence gathering, or a product/API/data/architecture
 choice.
+
+**Post-PR merge-queue discipline:**
+
+After a PR is open and auto-merge is enabled or the PR enters GitHub merge
+queue, do not safe-merge origin/main solely because
+origin/main advanced. Merge queue handles post-PR freshness. The supervisor
+polls with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged)
+and resumes only for actionable blockers: merge queue
+conflicts, required-check failures (including merge-group `test` failures),
+missing merge queue protection, permission failures, closed-unmerged PRs,
+and queue timeouts.
+
+Each resumption follows the fix loop: invoke `systematic-debugging`, route any
+repository fix through `implementer` → `reviewer` → pass, commit reviewed
+fixes, validate from current `origin/main`, push, and requeue. Do not rebase
+or force-push unless the human explicitly requests it. If the queue reports a
+state the supervisor cannot resolve without human input (missing queue
+protection, a permission gate, or a failure that cannot be diagnosed with
+available access), report HUMAN_DECISION_REQUIRED with the queue state,
+blocking check, and available evidence.
 
 ## Your Subagents
 

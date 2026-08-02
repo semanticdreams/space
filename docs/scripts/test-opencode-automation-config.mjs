@@ -9,14 +9,24 @@ const repoRoot = join(__dirname, '..', '..')
 
 let skillContent = ''
 let supervisorContent = ''
+let finishingContent = ''
+let weeklySkillContent = ''
 let notesContent = ''
 let workflowDebugContent = ''
+let testWorkflowContent = ''
+let agentsContent = ''
+let opencodeWorkflowContent = ''
 
 async function loadFiles() {
     if (skillContent) return
     skillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'daily-devlog-automation', 'SKILL.md'), 'utf8')
     supervisorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'supervisor.md'), 'utf8')
+    finishingContent = await readFile(join(repoRoot, '.opencode', 'skills', 'finishing-a-development-branch', 'SKILL.md'), 'utf8')
+    weeklySkillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'weekly-agent-workflow-automation', 'SKILL.md'), 'utf8')
     workflowDebugContent = await readFile(join(repoRoot, '.opencode', 'skills', 'github-workflow-debug', 'SKILL.md'), 'utf8')
+    testWorkflowContent = await readFile(join(repoRoot, '.github', 'workflows', 'test.yml'), 'utf8')
+    agentsContent = await readFile(join(repoRoot, 'AGENTS.md'), 'utf8')
+    opencodeWorkflowContent = await readFile(join(repoRoot, 'docs', 'dev', 'features', 'opencode-agent-workflow.md'), 'utf8')
     try {
         notesContent = await readFile(join(repoRoot, 'docs', 'dev', 'notes', 'daily-devlog-automation.md'), 'utf8')
     } catch { /* optional */ }
@@ -73,6 +83,21 @@ test('daily devlog skill does not hard-code --squash and instead selects merge m
         'SKILL.md should say to use the merge method allowed by verified branch rules')
 })
 
+test('weekly agent workflow skill does not hard-code --squash and instead selects merge method from rules', async () => {
+    await loadFiles()
+    // The skill must NOT require --squash as the only option
+    const hasHardcodedSquash = /gh pr merge --auto --squash automation\/weekly-agent-workflow/.test(weeklySkillContent)
+    // The skill must mention using the merge method from verified rules
+    const hasMergeMethodFromRules = /merge.method/i.test(weeklySkillContent) ||
+        /allowed.merge/i.test(weeklySkillContent) ||
+        /--merge automation\/weekly-agent-workflow/.test(weeklySkillContent) ||
+        /merge.*allowed/i.test(weeklySkillContent)
+    assert.ok(!hasHardcodedSquash,
+        'SKILL.md must NOT hard-code --squash for weekly auto-merge')
+    assert.ok(hasMergeMethodFromRules,
+        'SKILL.md should say to use the merge method allowed by verified branch rules')
+})
+
 test('supervisor permissions allow rules/branches/main API', async () => {
     await loadFiles()
     const hasAllow = supervisorContent.includes('gh api repos/*/*/rules/branches/main')
@@ -85,6 +110,13 @@ test('supervisor permissions allow --merge for daily auto-merge', async () => {
     const hasMergeAllow = /gh pr merge --auto --merge automation\/daily-devlog\/\?\?\?\?-\?\?-\?\?/.test(supervisorContent)
     assert.ok(hasMergeAllow,
         'supervisor.md must allow gh pr merge --auto --merge automation/daily-devlog/????-??-??')
+})
+
+test('supervisor permissions allow --merge for weekly auto-merge', async () => {
+    await loadFiles()
+    const hasMergeAllow = /gh pr merge --auto --merge automation\/weekly-agent-workflow\/\?\?\?\?-.?\?\?/.test(supervisorContent)
+    assert.ok(hasMergeAllow,
+        'supervisor.md must allow gh pr merge --auto --merge automation/weekly-agent-workflow/????-W??')
 })
 
 test('supervisor permissions keep existing --squash daily allow alongside new --merge allow', async () => {
@@ -223,6 +255,12 @@ test('daily devlog developer note documents fresh-checkout docs dependency insta
         'developer note should retain npm run docs:build in dependency flow')
 })
 
+test('required test workflow runs for merge queue merge_group events', async () => {
+    await loadFiles()
+    assert.match(testWorkflowContent, /^\s*merge_group:\s*$/m,
+        'test.yml should include an on.merge_group trigger so required checks run for merge queue candidates')
+})
+
 test('daily devlog developer note documents Orca/OpenCode project-config caveat', async () => {
     await loadFiles()
     assert.ok(notesContent.length > 0,
@@ -232,4 +270,80 @@ test('daily devlog developer note documents Orca/OpenCode project-config caveat'
         'developer note should document OPENCODE_DISABLE_PROJECT_CONFIG or project-config caveat')
     assert.match(oneLineNotes, /synchroniz|sync.*(?:global|config)|restart/i,
         'developer note should mention syncing global config or restarting after .opencode changes')
+})
+
+test('repository policy requires agents to poll merge queue until PR merge', async () => {
+    await loadFiles()
+    const combined = `${agentsContent}\n${opencodeWorkflowContent}`
+    const oneLine = combined.replace(/\s+/g, ' ')
+
+    assert.match(oneLine, /poll.{0,160}(?:mergedAt|merged)/i,
+        'policy should tell agents to poll until mergedAt or merged state')
+    assert.match(combined, /gh pr view/i,
+        'policy should document gh pr view for PR polling')
+    assert.match(combined, /gh run list --workflow test\.yml --event merge_group/i,
+        'policy should document merge_group run inspection')
+    assert.match(oneLine, /do not update.{0,180}origin\/main.{0,5}advanced/i,
+        'policy should keep the stale-branch update-loop prohibition')
+    assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
+        'policy should not treat merge-queue handoff as the terminal success state')
+    assert.match(oneLine, /push.{0,160}requeue/i,
+        'policy should require pushing the repaired branch before requeuing')
+})
+
+test('opencode workflows monitor queued PRs until merged', async () => {
+    await loadFiles()
+    const files = [
+        ['supervisor', supervisorContent],
+        ['finishing', finishingContent],
+        ['daily', skillContent],
+        ['weekly', weeklySkillContent],
+    ]
+
+    for (const [name, content] of files) {
+        const oneLine = content.replace(/\s+/g, ' ')
+        assert.match(oneLine, /poll.{0,180}(?:mergedAt|merged)/i,
+            `${name} should poll until mergedAt or merged state`)
+        assert.match(content, /gh pr view/i,
+            `${name} should mention gh pr view polling`)
+        assert.match(oneLine, /do not (?:safe-merge|update).{0,220}origin\/main advanced/i,
+            `${name} should preserve stale-branch loop prohibition`)
+        assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
+            `${name} should not stop after queue handoff`)
+        assert.match(oneLine, /closed[-\u2010\u2011\u2012\u2013\u2014]?unmerged/i,
+            `${name} should list closed-unmerged PRs as an actionable blocker`)
+        assert.match(oneLine, /queue timeout/i,
+            `${name} should list queue timeouts as an actionable blocker`)
+        assert.match(oneLine, /push.{0,80}requeue/i,
+            `${name} should require push before requeue in the fix loop`)
+    }
+})
+
+test('supervisor permissions allow merge queue polling commands', async () => {
+    await loadFiles()
+    assert.ok(supervisorContent.includes('gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url'),
+        'supervisor should allow gh pr view merge-queue polling')
+    assert.ok(supervisorContent.includes('gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt'),
+        'supervisor should allow merge_group run listing')
+    assert.ok(supervisorContent.includes('gh run watch * --exit-status --interval 100'),
+        'supervisor should allow watching merge_group runs')
+})
+
+test('opencode command examples match canonical merge-queue inspection forms', async () => {
+    await loadFiles()
+    const runtimeFiles = [
+        ['supervisor', supervisorContent],
+        ['finishing', finishingContent],
+        ['daily', skillContent],
+        ['weekly', weeklySkillContent],
+    ]
+
+    for (const [name, content] of runtimeFiles) {
+        assert.match(content, /gh pr view [-<][a-z]+[->].*--json state,mergedAt/i,
+            `${name} should use canonical gh pr view <pr-or-branch> form`)
+        assert.doesNotMatch(content, /--json state,mergedAt,\.\.\./,
+            `${name} should not use abbreviated --json state,mergedAt,... form`)
+        assert.match(content, /--exit-status --interval 100/,
+            `${name} should use canonical gh run watch form`)
+    }
 })

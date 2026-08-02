@@ -206,12 +206,64 @@ unless the human explicitly requests it.
 
 ## Branch and pull request policy
 
-All agent-driven changes follow these branch and PR rules:
+All agent-driven changes follow these branch and PR rules. The canonical source
+repository is `https://github.com/semanticdreams/space2`.
+
+### Pre-PR current-base validation
 
 - Pull requests target `main`.
 - Final validation and PR creation require a branch that is current with `origin/main`. Diff/base checks always use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
-- After implementation is complete — reviewed, committed, required validation passing, and the tree clean — the default integration action is to push the current branch and create a pull request targeting `main`.
+- Before final validation, PR creation, or a ready-to-merge claim, fetch `origin` and evaluate the branch against current `origin/main`. If the branch is behind, use a safe merge from `origin/main` when permitted, route resulting fixes through review, and rerun validation.
 - Do not push directly to `main`. Always work on a feature branch and open a pull request.
+
+### Post-PR merge queue
+
+After implementation is complete — reviewed, committed, all tests passing, and
+the tree clean — the default integration action is to push the current branch,
+create a pull request targeting `main`, and enable auto-merge to hand the PR off
+to GitHub's merge queue.
+
+After the PR is open and queued, agents keep running and poll until the PR is
+actually merged. Queue handoff alone is not success; success means the PR is
+merged (`mergedAt` present or equivalent merged state).
+
+Agents poll with:
+
+```bash
+gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url
+gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt
+gh run watch <run-id> --exit-status --interval 100
+```
+
+The following states are non-terminal: `queued`, `waiting`, `pending`,
+`in-progress`, `expected`, or `null`/missing conclusion on merge-group runs.
+
+The following are actionable blockers: merge conflicts, failed required `test`
+check, missing or disabled queue, permission failures, closed-unmerged PRs, and
+queue timeouts.
+
+- **Do not update the branch** solely because `origin/main` advanced. The
+  merge queue's merge-group checks are the post-PR integration freshness gate.
+- **Stale-branch update loops are forbidden.** The queue, not the agent, owns
+  post-PR freshness.
+- **Queue failures are actionable blockers.** Merge conflicts and merge-group
+  required-check failures trigger `systematic-debugging`. Repository fixes follow
+  the standard `implementer` → `reviewer` → pass flow. After reviewed fixes are
+  committed, validation passes against current `origin/main`, and the branch is
+  pushed, requeue the PR.
+- If merge queue is not enabled or cannot be verified, agents report
+  `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed and do not
+  enter a stale-branch polling loop.
+
+The `main` ruleset must actively require merge queue; a disabled ruleset that
+contains merge_queue is not sufficient.
+
+### GitHub admin requirement
+
+A repository admin must enable merge queue for `main` in the GitHub branch
+ruleset, ensure the required `test` check runs for merge-group candidates, and
+relax any rule that forces every PR branch to be updated after `main` moves if
+that rule blocks queue entry.
 
 If required validation fails after implementation, review, or commit, see [Validation continuation and current base](#validation-continuation-and-current-base). Do not finish, push, create a PR, merge, or clean up the branch while validation is red.
 
