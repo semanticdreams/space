@@ -33,7 +33,12 @@ Record BASE (`git rev-parse HEAD`) before dispatching.
 3. Interfaces and decisions from earlier tasks the brief cannot know
 4. The report-file path (`task-N-report.md` in the workspace)
 5. Context: whether this is a fresh dispatch or a fix-round resume
-6. For Fennel-facing tasks, relevant compile-check and constraint validation expectations from `AGENTS.md`/`docs/dev/constraints.md`: `make fennel-check` or touched-file `tools.fennel-check` first, `make constraints` second, focused tests third, broader suite last.
+6. The targeted local validation default from `AGENTS.md` — the implementer should run the narrowest meaningful checks for the changed behavioral surface, not the full suite by default before every checkpoint commit.
+7. The changed behavioral surface to validate (Fennel/UI/layout, C++ behind Fennel bindings, pure C++ utility, docs/prompt-only, or high-risk broad change).
+8. `make build` as the runtime/freshness prerequisite when `./build/space` may be missing or stale (C++, CMake, runtime initialization, bindings, or host scaffolding changes).
+9. For Fennel-facing work: compile check first (`make fennel-check` or touched-file `tools.fennel-check`), then constraints, then focused Fennel tests — with evidence reported in that order in the handoff.
+10. A requirement that the implementer report explain validation coverage (why the selected checks cover the behavioral surface), not merely list commands.
+11. A reminder that checkpoint commits are not final integration sign-offs — the reviewer must still approve before the task is complete. Do not claim ready-to-merge until the applicable PR CI gate is green.
 
 **Report file:** `task-N-report.md` in the plan's workspace. The implementer writes its full report there and returns only status summary.
 
@@ -129,7 +134,13 @@ During final review preparation, triage repeated `constraint obstructed/noisy` n
 ## Finish
 
 When final review is clean, use the finishing-a-development-branch skill. Do
-not report implementation complete merely because final review passed.
+not report implementation complete merely because final review passed. Final
+review passing does not mean ready-to-merge — the finishing skill chooses the
+required final validation from `AGENTS.md` for the changed surface, and **PR CI**
+remains the authoritative full integration gate before any ready-to-merge claim.
+
+OpenCode users must restart after `.opencode/**` changes for the updated
+agent and skill instructions to take effect.
 
 If finishing validation fails, or if the branch is behind current `origin/main`,
 stay in coordination mode. Follow the finishing skill's current-base and

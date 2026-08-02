@@ -36,6 +36,7 @@ permission:
     "git push origin main": ask
     "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
     "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": allow
+    "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow
     "gh *": deny
     "gh auth status*": allow
     "gh repo view --json owner,name --jq *": allow
@@ -43,6 +44,7 @@ permission:
     "gh api repos/*/*/rules/branches/main*": allow
     "gh pr create --base main --head automation/daily-devlog/????-??-?? --fill": allow
     "gh pr create --base main --head automation/weekly-agent-workflow/????-W?? --fill": allow
+    "gh pr create --base main --head opencode/workflow-debug-pr/* --fill": allow
     "gh pr view automation/daily-devlog/????-??-??": allow
     "gh pr view automation/weekly-agent-workflow/????-W??*": allow
     "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": allow

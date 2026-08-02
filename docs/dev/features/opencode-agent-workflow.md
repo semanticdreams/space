@@ -24,13 +24,133 @@ The local Orca plus remote SSH checklist below is one possible path; it is not a
 If you choose the local-Orca-plus-remote-SSH setup, work through these points:
 
 1. **Remote VM reachable.** Confirm you can SSH into the remote VM from your local machine.
-2. **Build and dev tools.** Install common tooling on the remote VM: `git`, `nodejs` and `npm`, `python3`, `make`, `g++`, `curl`, and `clangd`. These are typically available through the system package manager.
+2. **Build and dev tools.** Install common tooling on the remote VM: `git`, `nodejs` and `npm`, `python3`, `make`, `g++`, `curl`, `clangd`, and `rsync`. These are typically available through the system package manager.
 3. **OpenCode on the remote VM.** Install OpenCode and make sure it is on `PATH` for non-interactive SSH sessions so that Orca can invoke it automatically.
 4. **GitHub SSH access.** Configure SSH key access for GitHub on the remote VM so the agent can push branches and create pull requests. Test with `ssh -T git@github.com`.
 5. **Clone Space on the remote VM.** Clone the repository into a working directory the SSH user can write to.
 6. **Add the host in Orca.** Add the SSH host and repository path in Orca's remote-server workflow so it can open the checkout.
 7. **Rely on the checked-out repository.** Once the checkout is opened, the agent reads `AGENTS.md` and `.opencode/**` from the repository itself — no external configuration repository is needed.
 8. **Final checks.** Run `command -v git node npm clangd opencode` on the remote VM to confirm the expected tools are available, then verify SSH connectivity with `ssh -T git@github.com`.
+
+### Optional: warm new worktrees from the main build
+
+When creating a fresh `git worktree` for agent-driven work, you can warm the
+new worktree from a cached main-checkout build instead of running a full
+`make build` from scratch. This is a cache warm-start, not a substitute for
+validation; agents must still run the normal Space validation ladder.
+
+**When to use:** Run only on a freshly created, clean worktree before any
+agent edits begin. The script assumes the same machine and toolchain as the
+main checkout and a valid, up-to-date main-checkout build directory.
+
+**When not to use:** Skip this on worktrees that already contain divergent
+changes, or when the main-checkout build may be stale relative to the target
+branch. If anything behaves unexpectedly after warming, delete the copied
+build directory and run `make build`.
+
+The script copies build artifacts from the main checkout's `build/` directory
+into the new worktree, then rewrites CMake-generated absolute paths (source and
+build directories) to point at the new worktree. After repathing, it re-runs
+`cmake` so generated files are refreshed for the new location, then builds the
+main target. It preserves the build profile and CEF settings from the main
+checkout's cache.
+
+**Safety notes:**
+- Run only for a freshly created, clean worktree before agent work begins.
+- Assumes the same machine/toolchain and a valid main-checkout `build/`.
+- Does not copy credentials. Repaths only generated text files; binary
+  artifacts are skipped (detected by the presence of null bytes).
+- Re-runs `cmake` after rewriting the cache so CMake refreshes generated
+  files for the new worktree.
+- Copies build files with fresh mtimes (`rsync --no-times`) so copied
+  artifacts appear newer than checkout files. This is safe because the
+  script requires identical HEADs; if HEADs differ, it refuses to run
+  rather than hiding rebuilds.
+
+Paste the script below into Orca's per-project or per-worktree setup step.
+Adjust the `SPACE_MAIN_CHECKOUT` and `ORCA_WORKTREE` environment variables
+(or the script's default paths) to match your environment.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+main_checkout="${SPACE_MAIN_CHECKOUT:-$HOME/space/space}"
+worktree="${ORCA_WORKTREE:-$PWD}"
+main_checkout="$(cd "$main_checkout" && pwd)"
+worktree="$(cd "$worktree" && pwd)"
+
+if [ "$main_checkout" = "$worktree" ]; then
+  echo "Refusing to seed the main checkout from itself: $worktree" >&2
+  exit 1
+fi
+
+src_build="$main_checkout/build"
+dst_build="$worktree/build"
+
+if [ ! -f "$src_build/CMakeCache.txt" ]; then
+  echo "No reusable build cache at $src_build; run make build in $main_checkout first." >&2
+  exit 1
+fi
+
+if [ -n "$(git -C "$worktree" status --porcelain)" ]; then
+  echo "Worktree is not clean; run this only before agent edits begin." >&2
+  exit 1
+fi
+
+src_head="$(git -C "$main_checkout" rev-parse HEAD)"
+dst_head="$(git -C "$worktree" rev-parse HEAD)"
+if [ "$src_head" != "$dst_head" ]; then
+  echo "Worktree HEAD ($dst_head) differs from main-checkout HEAD ($src_head)." >&2
+  echo "The warm-start script is only safe when the new worktree starts from the same commit as the main checkout." >&2
+  echo "For a divergent branch, run make build or warm from a checkout at the same commit." >&2
+  exit 1
+fi
+
+mkdir -p "$dst_build"
+rsync -a --delete --no-times \
+  --exclude '/logs/' \
+  --exclude '/Testing/Temporary/' \
+  "$src_build/" "$dst_build/"
+
+python3 - "$main_checkout" "$worktree" <<'PY'
+import sys
+from pathlib import Path
+
+old_src = Path(sys.argv[1]).resolve()
+new_src = Path(sys.argv[2]).resolve()
+old_build = old_src / "build"
+new_build = new_src / "build"
+replacements = [
+    (str(old_build).encode(), str(new_build).encode()),
+    (str(old_src).encode(), str(new_src).encode()),
+]
+
+for path in new_build.rglob("*"):
+    if not path.is_file() or path.is_symlink():
+        continue
+    try:
+        data = path.read_bytes()
+    except OSError:
+        continue
+    if b"\0" in data:
+        continue
+    updated = data
+    for old, new in replacements:
+        updated = updated.replace(old, new)
+    if updated != data:
+        path.write_bytes(updated)
+PY
+
+profile="$(awk -F= '/^SPACE_BUILD_PROFILE:STRING=/{print $2}' "$dst_build/CMakeCache.txt" || true)"
+cef="$(awk -F= '/^SPACE_ENABLE_CEF:BOOL=/{print $2}' "$dst_build/CMakeCache.txt" || true)"
+cmake_args=(-S "$worktree" -B "$dst_build" -DCMAKE_BUILD_TYPE=Release)
+[ -n "$profile" ] && cmake_args+=("-DSPACE_BUILD_PROFILE=$profile")
+[ -n "$cef" ] && cmake_args+=("-DSPACE_ENABLE_CEF=$cef")
+cmake "${cmake_args[@]}"
+
+cmake --build "$dst_build" --target space -- -j"${BUILD_JOBS:-1}"
+```
 
 ## Remote-VM Orca alternative
 
@@ -45,14 +165,21 @@ Once your agent environment is connected to a Space checkout, these repository c
 - **`AGENTS.md`** is the always-on repository guidance. Agents read it on startup and follow its rules for every session. It covers branch conventions, build commands, test invocation, coding style, and project structure.
 - **`.opencode/**`** is the repo-local source for Space agents, skills, and OpenCode configuration. It includes agent definitions, skill files that provide specialized guidance for Fennel, UI, testing, and graph work, and the OpenCode configuration file. This in-repo configuration is canonical for this repository — no separate global config repository is needed.
 - **Restart OpenCode after `.opencode/**` changes.** When you add or modify agents, skills, or configuration under `.opencode/`, restart OpenCode so the updated definitions and workflow instruction changes take effect. OpenCode loads these files at startup and does not hot-reload them.
-- **Follow repository validation expectations from `AGENTS.md`.** Agents must respect the validation ladder: for Fennel work, run compile checks first, then constraints, then focused tests, then the broader suite. Required validation failures are debugging tasks, not items to bypass.
-- **Full Space validation.** When a change touches code that could affect the broader system, run the full test suite:
+- **Follow repository validation expectations from `AGENTS.md`.** Agents must respect the validation ladder: for Fennel work, run compile checks first, then constraints, then focused Fennel tests. Broader local validation (such as `make test`) is required only when the change is high-risk or the plan/reviewer requires it. Required validation failures are debugging tasks, not items to bypass.
+- **Targeted local validation by default.** Agents run the narrowest meaningful checks for the changed behavioral surface rather than the full suite before every checkpoint commit. The expected validation depends on what changed:
 
+  - **Fennel/UI/layout behavior:** compile check first (`make fennel-check` or touched-file `tools.fennel-check`), then constraints (`make constraints` or explicit-file constraints), then focused Fennel tests.
+  - **C++ behind Fennel bindings:** build first, then focused Fennel tests through the binding surface.
+  - **Pure C++ utility behavior:** build the relevant target and/or focused CTest.
+  - **Docs/prompt-only changes:** focused text searches, diff review, and formatting checks.
+  - **Build, package, startup, runtime initialization, broad binding/API, or other high-risk changes:** broaden local validation, including `make test` when that is the relevant local gate.
+
+- **`make build`** remains the runtime/freshness prerequisite when the built Space runtime (`./build/space`) may be missing or stale, or when C++, CMake, runtime initialization, bindings, or host scaffolding changed.
+- The standard full-suite command is documented for high-risk or explicitly required local validation:
   ```bash
   SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test
   ```
-
-- **Fennel-facing work** must use the project-native Fennel validation ladder from `AGENTS.md`. Do not use system `fennel`, `fennel-ls`, `fnlfmt`, or ad-hoc evaluation as validation oracles. Use `tools.fennel-check`, constraints, and the test harness instead.
+- **PR CI** is the full integration gate. Do not claim ready-to-merge until the applicable PR CI gate is green.
 - **Required validation failures**: see [Validation continuation and current base](#validation-continuation-and-current-base) for the full contract.
 
 ## Validation continuation and current base

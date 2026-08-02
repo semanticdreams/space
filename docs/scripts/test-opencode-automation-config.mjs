@@ -10,11 +10,13 @@ const repoRoot = join(__dirname, '..', '..')
 let skillContent = ''
 let supervisorContent = ''
 let notesContent = ''
+let workflowDebugContent = ''
 
 async function loadFiles() {
     if (skillContent) return
     skillContent = await readFile(join(repoRoot, '.opencode', 'skills', 'daily-devlog-automation', 'SKILL.md'), 'utf8')
     supervisorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'supervisor.md'), 'utf8')
+    workflowDebugContent = await readFile(join(repoRoot, '.opencode', 'skills', 'github-workflow-debug', 'SKILL.md'), 'utf8')
     try {
         notesContent = await readFile(join(repoRoot, 'docs', 'dev', 'notes', 'daily-devlog-automation.md'), 'utf8')
     } catch { /* optional */ }
@@ -153,4 +155,81 @@ test('daily devlog developer note documents landing-date and inline-link policie
         'developer note should document inline Markdown links')
     assert.match(oneLineNotes, /link lists/i,
         'developer note should forbid separate link lists')
+})
+
+test('github workflow debug lands through a PR branch instead of local main', async () => {
+    await loadFiles()
+
+    const oneLineSkill = workflowDebugContent.replace(/\s+/g, ' ')
+
+    assert.match(oneLineSkill, /final PR branch/i,
+        'workflow-debug skill should name a final PR branch')
+    assert.match(oneLineSkill, /origin\/main/i,
+        'workflow-debug final PR branch should be created from origin/main')
+    assert.match(oneLineSkill, /squash-merge/i,
+        'workflow-debug skill should keep squash-merge landing semantics')
+    assert.match(oneLineSkill, /remove.{0,160}temporary.{0,80}trigger/i,
+        'workflow-debug skill should remove the temporary workflow trigger before final commit')
+    assert.match(oneLineSkill, /staged review/i,
+        'workflow-debug skill should require staged review')
+    assert.match(oneLineSkill, /gh pr create --base main --head <final-pr-branch> --fill/i,
+        'workflow-debug skill should create a PR with gh pr create')
+    assert.match(oneLineSkill, /PR URL/i,
+        'workflow-debug skill should return the PR URL')
+    assert.match(oneLineSkill, /branch-protection incompatible/i,
+        'workflow-debug skill should say direct main push is branch-protection incompatible')
+
+    assert.doesNotMatch(workflowDebugContent, /## Final landing on main/,
+        'workflow-debug skill must not title the landing path as local main')
+    assert.doesNotMatch(oneLineSkill, /Check out `main`|Fast-forward `main`|Final commit on main|Ready to push|git checkout main|checkout main|check out main|commit (?:on|to|onto) (?:`?main`?|main)|squash[- ]merge[\s\S]*?(?:onto|into)\s+(?:`?main`?|main)|squash\s+(?:onto|into)\s+(?:`?main`?|main)/i,
+        'workflow-debug skill must not reference local main checkout, commit-on-main, or ready-to-push-main output')
+    assert.doesNotMatch(workflowDebugContent, /git push origin main/,
+        'workflow-debug skill must not tell agents to push main directly')
+})
+
+test('supervisor permissions allow workflow-debug final PR branch integration only', async () => {
+    await loadFiles()
+
+    assert.ok(supervisorContent.includes('"git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow'),
+        'supervisor should allow pushing workflow-debug final PR branches')
+    assert.ok(supervisorContent.includes('"gh pr create --base main --head opencode/workflow-debug-pr/* --fill": allow'),
+        'supervisor should allow creating workflow-debug final PRs')
+    assert.ok(supervisorContent.includes('"git push origin main": ask'),
+        'direct main push must remain ask-gated, not allowed')
+    assert.ok(!supervisorContent.includes('"git push origin main": allow'),
+        'direct main push must not be allowed')
+})
+
+test('daily devlog skill preconditions mention installing locked docs dependencies when node_modules or vitepress is missing', async () => {
+    await loadFiles()
+    // Validation/preconditions area must mention npm ci for docs dependency install
+    const oneLineSkill = skillContent.replace(/\s+/g, ' ')
+    assert.match(oneLineSkill, /npm\s+ci/i,
+        'SKILL.md should mention npm ci for installing locked docs dependencies')
+    assert.ok(
+        oneLineSkill.includes('node_modules') || oneLineSkill.includes('vitepress'),
+        'SKILL.md should reference checking for docs/node_modules or vitepress'
+    )
+})
+
+test('daily devlog developer note documents fresh-checkout docs dependency install before docs build', async () => {
+    await loadFiles()
+    assert.ok(notesContent.length > 0,
+        'daily devlog developer note should be present for human-facing policy')
+    const oneLineNotes = notesContent.replace(/\s+/g, ' ')
+    assert.match(oneLineNotes, /npm\s+ci/i,
+        'developer note should document npm ci for installing locked docs dependencies')
+    assert.match(oneLineNotes, /npm run docs:build/i,
+        'developer note should retain npm run docs:build in dependency flow')
+})
+
+test('daily devlog developer note documents Orca/OpenCode project-config caveat', async () => {
+    await loadFiles()
+    assert.ok(notesContent.length > 0,
+        'daily devlog developer note should be present for human-facing policy')
+    const oneLineNotes = notesContent.replace(/\s+/g, ' ')
+    assert.match(oneLineNotes, /OPENCODE_DISABLE_PROJECT_CONFIG|project.config/i,
+        'developer note should document OPENCODE_DISABLE_PROJECT_CONFIG or project-config caveat')
+    assert.match(oneLineNotes, /synchroniz|sync.*(?:global|config)|restart/i,
+        'developer note should mention syncing global config or restarting after .opencode changes')
 })
