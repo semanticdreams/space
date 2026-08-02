@@ -43,19 +43,44 @@ the required suite is green.
 
 ### Post-PR merge queue
 
-After a pull request is open and queued by GitHub merge queue, agents follow
-these rules:
+After a pull request is open and queued by GitHub merge queue, agents keep running
+and poll until the PR is actually merged. Queue handoff alone is not success;
+success means the PR is merged (`mergedAt` present or equivalent merged state).
+
+Agents poll with:
+
+```bash
+gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url
+gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt
+gh run watch <run-id> --exit-status --interval 100
+```
+
+The following states are non-terminal and the agent should keep polling:
+`queued`, `waiting`, `pending`, `in-progress`, `expected`, or
+`null`/missing conclusion on merge-group runs.
+
+The following are actionable blockers:
+
+- **merge conflicts:** the merge queue cannot assemble or validate the merge
+  group.
+- **failed required `test` check:** the merge-group run completed with
+  `failure`, `cancelled`, `timed_out`, or `action_required`.
+- **missing or disabled queue:** merge queue is not active for `main` (neither
+  the merge-group trigger fires nor the queue processes).
+- **permission failures:** the agent cannot query PR status, list merge-group
+  runs, or watch runs.
+- **closed-unmerged PRs:** the PR was closed without being merged.
+- **queue timeouts:** the merge-group run remains `queued` or `in_progress`
+  beyond a reasonable window.
 
 - Do not update the PR branch solely because `origin/main` advanced. The merge
   queue's merge-group checks are the post-PR integration freshness gate.
-- Queue conflicts, missing merge-queue protection, or merge-group `test`
-  failures are actionable blockers.
+- Rebase and force-push remain forbidden unless the human explicitly requests
+  them.
 - For actionable blockers, invoke `systematic-debugging` to identify root cause
   or establish the limits of available evidence. Route any repository fix
   through `implementer` → `reviewer` → pass, commit reviewed fixes, and rerun
   validation from a clean tree before requeuing.
-- Rebase and force-push remain forbidden unless the human explicitly requests
-  them.
 - If merge queue is not enabled or cannot be verified, report
   `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed instead of
   entering a stale-branch polling loop.

@@ -12,6 +12,8 @@ let supervisorContent = ''
 let notesContent = ''
 let workflowDebugContent = ''
 let testWorkflowContent = ''
+let agentsContent = ''
+let opencodeWorkflowContent = ''
 
 async function loadFiles() {
     if (skillContent) return
@@ -19,6 +21,8 @@ async function loadFiles() {
     supervisorContent = await readFile(join(repoRoot, '.opencode', 'agents', 'supervisor.md'), 'utf8')
     workflowDebugContent = await readFile(join(repoRoot, '.opencode', 'skills', 'github-workflow-debug', 'SKILL.md'), 'utf8')
     testWorkflowContent = await readFile(join(repoRoot, '.github', 'workflows', 'test.yml'), 'utf8')
+    agentsContent = await readFile(join(repoRoot, 'AGENTS.md'), 'utf8')
+    opencodeWorkflowContent = await readFile(join(repoRoot, 'docs', 'dev', 'features', 'opencode-agent-workflow.md'), 'utf8')
     try {
         notesContent = await readFile(join(repoRoot, 'docs', 'dev', 'notes', 'daily-devlog-automation.md'), 'utf8')
     } catch { /* optional */ }
@@ -240,4 +244,21 @@ test('daily devlog developer note documents Orca/OpenCode project-config caveat'
         'developer note should document OPENCODE_DISABLE_PROJECT_CONFIG or project-config caveat')
     assert.match(oneLineNotes, /synchroniz|sync.*(?:global|config)|restart/i,
         'developer note should mention syncing global config or restarting after .opencode changes')
+})
+
+test('repository policy requires agents to poll merge queue until PR merge', async () => {
+    await loadFiles()
+    const combined = `${agentsContent}\n${opencodeWorkflowContent}`
+    const oneLine = combined.replace(/\s+/g, ' ')
+
+    assert.match(oneLine, /poll.{0,160}(?:mergedAt|merged)/i,
+        'policy should tell agents to poll until mergedAt or merged state')
+    assert.match(combined, /gh pr view/i,
+        'policy should document gh pr view for PR polling')
+    assert.match(combined, /gh run list --workflow test\.yml --event merge_group/i,
+        'policy should document merge_group run inspection')
+    assert.match(oneLine, /do not update.{0,180}origin\/main.{0,5}advanced/i,
+        'policy should keep the stale-branch update-loop prohibition')
+    assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
+        'policy should not treat merge-queue handoff as the terminal success state')
 })
