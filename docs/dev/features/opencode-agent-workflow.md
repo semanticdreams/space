@@ -45,7 +45,7 @@ Once your agent environment is connected to a Space checkout, these repository c
 - **`AGENTS.md`** is the always-on repository guidance. Agents read it on startup and follow its rules for every session. It covers branch conventions, build commands, test invocation, coding style, and project structure.
 - **`.opencode/**`** is the repo-local source for Space agents, skills, and OpenCode configuration. It includes agent definitions, skill files that provide specialized guidance for Fennel, UI, testing, and graph work, and the OpenCode configuration file. This in-repo configuration is canonical for this repository — no separate global config repository is needed.
 - **Restart OpenCode after `.opencode/**` changes.** When you add or modify agents, skills, or configuration under `.opencode/`, restart OpenCode so the updated definitions and workflow instruction changes take effect. OpenCode loads these files at startup and does not hot-reload them.
-- **Follow repository validation expectations from `AGENTS.md`.** Agents must respect the validation ladder: for Fennel work, run compile checks first, then constraints, then focused tests, then the broader suite. Required validation failures are debugging tasks, not items to bypass.
+- **Follow repository validation expectations from `AGENTS.md`.** Agents must respect the validation ladder: for Fennel work, run compile checks first, then constraints, then focused Fennel tests. Broader local validation (such as `make test`) is required only when the change is high-risk or the plan/reviewer requires it. Required validation failures are debugging tasks, not items to bypass.
 - **Targeted local validation by default.** Agents run the narrowest meaningful checks for the changed behavioral surface rather than the full suite before every checkpoint commit. The expected validation depends on what changed:
 
   - **Fennel/UI/layout behavior:** compile check first (`make fennel-check` or touched-file `tools.fennel-check`), then constraints (`make constraints` or explicit-file constraints), then focused Fennel tests.
@@ -90,7 +90,7 @@ All agent-driven changes follow these branch and PR rules:
 
 - Pull requests target `main`.
 - Final validation and PR creation require a branch that is current with `origin/main`. Diff/base checks always use `origin/main`, not local `main`. Local `main` may be stale or contain unrelated local commits.
-- After implementation is complete — reviewed, committed, all tests passing, and the tree clean — the default integration action is to push the current branch and create a pull request targeting `main`.
+- After implementation is complete — reviewed, committed, required validation passing, and the tree clean — the default integration action is to push the current branch and create a pull request targeting `main`.
 - Do not push directly to `main`. Always work on a feature branch and open a pull request.
 
 If required validation fails after implementation, review, or commit, see [Validation continuation and current base](#validation-continuation-and-current-base). Do not finish, push, create a PR, merge, or clean up the branch while validation is red.

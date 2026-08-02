@@ -119,8 +119,8 @@ automatic or requires presenting a menu.
 current branch and create a pull request targeting `main`"):
 
   1. Confirm the user has not explicitly requested a different integration action.
-  2. Confirm the branch is safe for automatic integration (clean tree, tests
-     passing — already confirmed in Steps 0–1).
+  2. Confirm the branch is safe for automatic integration (clean tree, required
+     validation passing — already confirmed in Steps 0–1).
 
 Before any automatic push or PR creation, re-fetch and recheck the base:
 
