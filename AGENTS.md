@@ -79,8 +79,8 @@ The following are actionable blockers:
   them.
 - For actionable blockers, invoke `systematic-debugging` to identify root cause
   or establish the limits of available evidence. Route any repository fix
-  through `implementer` → `reviewer` → pass, commit reviewed fixes, and rerun
-  validation from a clean tree before requeuing.
+  through `implementer` → `reviewer` → pass. After reviewed fixes are committed,
+  rerun validation from current `origin/main`, push the PR branch, and requeue.
 - If merge queue is not enabled or cannot be verified, report
   `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed instead of
   entering a stale-branch polling loop.

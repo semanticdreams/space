@@ -249,7 +249,8 @@ queue timeouts.
 - **Queue failures are actionable blockers.** Merge conflicts and merge-group
   required-check failures trigger `systematic-debugging`. Repository fixes follow
   the standard `implementer` → `reviewer` → pass flow. After reviewed fixes are
-  committed and validation passes against current `origin/main`, requeue the PR.
+  committed, validation passes against current `origin/main`, and the branch is
+  pushed, requeue the PR.
 - If merge queue is not enabled or cannot be verified, agents report
   `HUMAN_DECISION_REQUIRED` with the exact GitHub setting needed and do not
   enter a stale-branch polling loop.

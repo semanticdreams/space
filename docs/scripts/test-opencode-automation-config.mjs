@@ -261,4 +261,6 @@ test('repository policy requires agents to poll merge queue until PR merge', asy
         'policy should keep the stale-branch update-loop prohibition')
     assert.doesNotMatch(oneLine, /Stop after successful merge-queue handoff/i,
         'policy should not treat merge-queue handoff as the terminal success state')
+    assert.match(oneLine, /push.{0,160}requeue/i,
+        'policy should require pushing the repaired branch before requeuing')
 })
