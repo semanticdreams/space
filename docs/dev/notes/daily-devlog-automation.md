@@ -21,6 +21,40 @@ The daily devlog automation generates brief narrative journal entries capturing 
 
 After any changes to `.opencode/**` (skills, agents, or configuration), restart OpenCode/Orca so the updated skill definitions are loaded.
 
+### Remote-host automation target
+
+When scheduling automations for a remote Orca host from a laptop or web
+UI, Orca may save the automation run target as a transient remote runtime
+hostId (e.g. `runtime:<uuid>`). For unattended host-side scheduling on
+this repo, the automation must target the durable local project host
+setup on the server, whose `runContext.hostId` should be `local`.
+
+If the automation is bound to `runtime:<uuid>`, manual and scheduled runs
+can be recorded as `skipped_unavailable` with no workspace or session
+created, and may produce an error like:
+
+> Remote-server automation scheduling is not available from this Orca
+> client yet…
+
+**Remediation:** Create or edit remote-host automations from the
+server-side Orca CLI, or explicitly pass `--project-host-setup <setup-id>`.
+
+```bash
+# List available project host setups
+orca project setups --json
+
+# Inspect the current automation target
+orca automations show --id <automation-id> --json
+
+# Retarget to the local project host setup
+orca automations edit --id <automation-id> \
+  --project-host-setup <setup-id> --json
+```
+
+**Verification:** `runContext.hostId` must be `local`. Values starting
+with `runtime:` indicate a transient runtime binding unsuitable for
+durable scheduled host-side automation on current Orca versions.
+
 ## Prompt
 
 ```text
