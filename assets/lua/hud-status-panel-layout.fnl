@@ -2,10 +2,11 @@
 (local {: Layout} (require :layout))
 (local Padding (require :padding))
 (local Card (require :card))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 
-(local row-spacing 0.4)
-(local column-edge-insets [0.1 0.1])
-(local column-horizontal-padding 0.2)
+(local row-spacing HudChromeMetrics.status-row-spacing)
+(local column-edge-insets HudChromeMetrics.status-column-edge-insets)
+(local column-horizontal-padding HudChromeMetrics.status-column-horizontal-padding)
 
 (fn padded-column [child-builder]
   (Padding {:edge-insets column-edge-insets
@@ -124,7 +125,7 @@
       ((Card
          {:child
           (Padding
-            {:edge-insets [0.6 0.4]
+            {:edge-insets HudChromeMetrics.single-row-shell-padding
              :child (fn [_child-ctx]
                       row)})})
        ctx))

@@ -79,7 +79,8 @@
                 "volume_down"
                 "volume_up")))))
 
-(fn make-volume-button []
+(fn make-volume-button [opts]
+  (local options (or opts {}))
   (local volume-step 0.05)
   (fn build [ctx]
     (local initial-volume (or stored-volume (current-master-volume)))
@@ -87,7 +88,8 @@
                   :last-volume (math.max 0.05 initial-volume)})
     (local button-builder
       (Button {:variant :primary
-               :padding [0.4 0.4]
+               :padding (or options.padding [0.4 0.4])
+               :icon-style options.icon-style
                :icon (volume-icon-name (current-master-volume) stored-muted?)
                :name "volume-control"}))
     (local button (button-builder ctx))

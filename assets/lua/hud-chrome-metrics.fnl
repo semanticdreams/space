@@ -5,5 +5,5 @@
  :single-row-shell-padding [0.6 0.3]
  :control-row-spacing 0.5
  :status-row-spacing 0.4
- :status-column-edge-insets [0.1 0.1]
+ :status-column-edge-insets [0.1 0.9]
  :status-column-horizontal-padding 0.2}

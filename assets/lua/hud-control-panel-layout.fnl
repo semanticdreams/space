@@ -3,6 +3,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Padding (require :padding))
 (local Card (require :card))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 
 (fn make-flex-spacer []
   (fn build [_ctx]
@@ -34,11 +35,11 @@
     ((Card
        {:child
         (Padding
-          {:edge-insets [0.6 0.4]
+          {:edge-insets HudChromeMetrics.single-row-shell-padding
            :child
            (Flex
              {:axis 1
-              :xspacing 0.5
+              :xspacing HudChromeMetrics.control-row-spacing
               :yalign :center
               :children children})})})
      ctx)))
