@@ -12,6 +12,7 @@
 (local Button (require :button))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 (local Stack (require :stack))
 (local Rectangle (require :rectangle))
 
@@ -630,13 +631,13 @@
   (local rail-button (. ctx.clickables.left-click-objects 1))
   (assert rail-button "right rail should register a clickable button")
   (assert (= rail-button.icon :test_icon) "right rail button should keep the entry icon")
-  (assert (= rail-button.text.child.style.scale 3.2)
-          "right rail icon style should match activity dock icon scale")
+  (assert (= rail-button.text.child.style.scale HudChromeMetrics.rail-button-icon-style.scale)
+          "right rail icon style should match the shared HUD rail icon scale")
   (local reference-button
-    ((Button {:padding [0.4 0.25]
+    ((Button {:padding HudChromeMetrics.rail-button-padding
               :focusable? false
               :icon :test_icon
-              :icon-style {:scale 3.2}
+              :icon-style HudChromeMetrics.rail-button-icon-style
               :name "reference-extended-sidebar-test"
               :focus-name "Test"
               :on-click (fn [_button _event] nil)

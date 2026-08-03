@@ -4,6 +4,7 @@
 (local VolumeControl (require :volume-control))
 (local ThemeActions (require :theme-actions))
 (local {: ControlPanelLayout} (require :hud-control-panel-layout))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 (local LauncherLaunchable (require :launchables/launcher))
 (local WalletLaunchable (require :launchables/wallet))
 (local TerminalLaunchable (require :launchables/terminal))
@@ -18,7 +19,10 @@
   (LauncherLaunchable.open-panel {:hud app.hud}))
 
 (fn make-button-row [_opts]
-  (local volume-button (VolumeControl.make-volume-button))
+  (local button-padding HudChromeMetrics.single-row-button-padding)
+  (local button-icon-style HudChromeMetrics.single-row-button-icon-style)
+  (local volume-button (VolumeControl.make-volume-button {:padding button-padding
+                                                           :icon-style button-icon-style}))
   (Flex
     {:axis 1
      :yalign :largest
@@ -26,26 +30,31 @@
      [
       (FlexChild (Button {:icon "apps"
                           :variant :primary
-                          :padding [0.4 0.4]
+                          :padding button-padding
+                          :icon-style button-icon-style
                           :on-click (fn [_button _event]
                                       (open-launcher))}))
       (FlexChild volume-button)
       (FlexChild (Button {:icon "wallet"
                           :variant :primary
-                          :padding [0.4 0.4]
+                          :padding button-padding
+                          :icon-style button-icon-style
                           :on-click (fn [_button _event]
                                       (open-wallet))}))
       (FlexChild (Button {:icon "terminal"
                           :variant :primary
-                          :padding [0.4 0.4]
+                          :padding button-padding
+                          :icon-style button-icon-style
                           :on-click (fn [_button _event]
                                       (open-terminal))}))
       (FlexChild (Button {:icon "settings"
                           :variant :primary
-                          :padding [0.4 0.4]}))
+                          :padding button-padding
+                          :icon-style button-icon-style}))
       (FlexChild (Button {:icon "contrast"
                           :variant :primary
-                          :padding [0.4 0.4]
+                          :padding button-padding
+                          :icon-style button-icon-style
                           :on-click (fn [_button _event]
                                       (ThemeActions.request-toggle-theme))}))
       ]}))

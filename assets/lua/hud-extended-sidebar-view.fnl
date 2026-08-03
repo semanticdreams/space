@@ -5,6 +5,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
 (local {: adjust} (require :widget-theme-utils))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 
 (local panel-width 38)
 
@@ -95,10 +96,10 @@
         (table.insert rail-children
                       (FlexChild
                         (fn [child-ctx]
-                          ((Button {:padding [0.4 0.25]
+                          ((Button {:padding HudChromeMetrics.rail-button-padding
                                     :focusable? false
                                     :icon entry.icon
-                                    :icon-style {:scale 3.2}
+                                    :icon-style HudChromeMetrics.rail-button-icon-style
                                     :name (.. "extended-sidebar-" id)
                                     :focus-name entry.label
                                     :on-click (fn [_button _event]

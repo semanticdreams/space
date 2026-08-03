@@ -32,6 +32,7 @@
     :tests.test-hud-command-hints
     :tests.test-hud-control-panel
     :tests.test-hud-extended-sidebar
+    :tests.test-hud-chrome-uniformity
     :tests.test-hud-layout
     :tests.test-deep-dialog
     :tests.test-tetris-game

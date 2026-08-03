@@ -68,7 +68,10 @@
         ;; Flex wraps children in {:flex N :element <entity>}
         (when (and (= (type child) :table) child.element)
           (walk child.element))
-        (walk child))))
+        (walk child)))
+    ;; Descend through single-child wrappers (e.g. Padding, Card)
+    (when (and entity entity.child (not found))
+      (walk entity.child)))
   (walk root)
   found)
 
