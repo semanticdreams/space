@@ -5,6 +5,8 @@
 (local HudExtendedSidebar (require :hud-extended-sidebar))
 (local HudExtendedSidebarView (require :hud-extended-sidebar-view))
 (local {: StatusPanelLayout} (require :hud-status-panel-layout))
+(local SandboxToolbarState (require :sandbox-toolbar-state))
+(local SandboxToolbarView (require :sandbox-toolbar-view))
 (local Text (require :text))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
@@ -106,10 +108,34 @@
                 "normal status panel natural height should match collapsed rail width")
   (panel:drop))
 
+(fn hud-chrome-sandbox-toolbar-height-matches-rail-width []
+  (local ctx (make-test-ctx))
+  (local rail-width (reference-rail-width ctx))
+  (local state (SandboxToolbarState {}))
+  (local toolbar ((SandboxToolbarView state) ctx))
+  (local measured (measure-entity toolbar))
+  (assert-close measured.y rail-width
+                "Sandbox toolbar natural height should match collapsed rail width")
+  (toolbar:drop))
+
+(fn hud-chrome-sandbox-toolbar-root-has-card-background []
+  (local ctx (make-test-ctx))
+  (local state (SandboxToolbarState {}))
+  (local toolbar ((SandboxToolbarView state) ctx))
+  (assert toolbar.background-color
+          "Sandbox toolbar root should expose a Card background color")
+  (assert (and toolbar.children (. toolbar.children 1))
+          "Sandbox toolbar Card root should include a background rectangle child")
+  (toolbar:drop))
+
 (table.insert tests {:name "HUD chrome control panel height matches rail width"
                      :fn hud-chrome-control-panel-height-matches-rail-width})
 (table.insert tests {:name "HUD chrome status panel height matches rail width"
                      :fn hud-chrome-status-panel-height-matches-rail-width})
+(table.insert tests {:name "HUD chrome Sandbox toolbar height matches rail width"
+                     :fn hud-chrome-sandbox-toolbar-height-matches-rail-width})
+(table.insert tests {:name "HUD chrome Sandbox toolbar root has Card background"
+                     :fn hud-chrome-sandbox-toolbar-root-has-card-background})
 
 (local main
   (fn []
