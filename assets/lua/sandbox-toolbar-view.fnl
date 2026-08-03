@@ -77,7 +77,7 @@
 
     (local root
       ((Card {:child
-              (Padding {:edge-insets HudChromeMetrics.single-row-shell-padding
+              (Padding {:edge-insets HudChromeMetrics.button-owned-shell-padding
                         :child row-builder})})
        ctx))
 

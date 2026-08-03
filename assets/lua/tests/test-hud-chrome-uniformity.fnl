@@ -10,6 +10,7 @@
 (local Text (require :text))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 
 (fn make-clickables-stub []
   (local stub {})
@@ -118,6 +119,18 @@
                 "Sandbox toolbar natural height should match collapsed rail width")
   (toolbar:drop))
 
+(fn hud-chrome-button-owned-metrics-match-rail-cross-axis []
+  (local icon-height HudChromeMetrics.single-row-button-icon-style.scale)
+  (local button-padding-y (. HudChromeMetrics.single-row-button-padding 2))
+  (local shell-padding-y (. HudChromeMetrics.button-owned-shell-padding 2))
+  (local natural-height (+ icon-height (* 2 button-padding-y) (* 2 shell-padding-y)))
+  (local rail-width (+ HudChromeMetrics.rail-button-icon-style.scale
+                       (* 2 (. HudChromeMetrics.rail-button-padding 1))))
+  (assert-close natural-height rail-width
+                "button-owned chrome metrics should match rail cross-axis without shell padding")
+  (assert-close shell-padding-y 0
+                "button-owned chrome shell padding should not contribute to height"))
+
 (fn hud-chrome-sandbox-toolbar-root-has-card-background []
   (local ctx (make-test-ctx))
   (local state (SandboxToolbarState {}))
@@ -128,6 +141,8 @@
           "Sandbox toolbar Card root should include a background rectangle child")
   (toolbar:drop))
 
+(table.insert tests {:name "HUD chrome button-owned metrics match rail cross-axis"
+                     :fn hud-chrome-button-owned-metrics-match-rail-cross-axis})
 (table.insert tests {:name "HUD chrome control panel height matches rail width"
                      :fn hud-chrome-control-panel-height-matches-rail-width})
 (table.insert tests {:name "HUD chrome status panel height matches rail width"

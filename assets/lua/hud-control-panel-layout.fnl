@@ -35,7 +35,7 @@
     ((Card
        {:child
         (Padding
-          {:edge-insets HudChromeMetrics.single-row-shell-padding
+          {:edge-insets HudChromeMetrics.button-owned-shell-padding
            :child
            (Flex
              {:axis 1
