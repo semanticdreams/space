@@ -7,6 +7,7 @@
 (local Button (require :button))
 (local Activities (require :activities))
 (local {: adjust} (require :widget-theme-utils))
+(local HudChromeMetrics (require :hud-chrome-metrics))
 
 (fn panel-shell [content-builder background-color opts]
   (local options (or opts {}))
@@ -22,10 +23,10 @@
 
 (fn feature-button [icon name label active? on-click]
   (assert on-click "feature-button requires on-click")
-  (Button {:padding [0.4 0.25]
+  (Button {:padding HudChromeMetrics.rail-button-padding
            :focusable? false
            :icon icon
-           :icon-style {:scale 3.2}
+           :icon-style HudChromeMetrics.rail-button-icon-style
            :name name
            :focus-name label
            :on-click (fn [button event]
