@@ -35,7 +35,7 @@
   (local glyph {:advance 1
                 :planeBounds {:left 0 :right 1 :top 1 :bottom 0}
                 :atlasBounds {:left 0 :right 1 :top 1 :bottom 0}})
-  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+  (local font {:metadata {:metrics {:ascender 1 :descender -1 :lineHeight 1}
                           :atlas {:width 1 :height 1}}
                :glyph-map {4242 glyph}
                :advance 1})
