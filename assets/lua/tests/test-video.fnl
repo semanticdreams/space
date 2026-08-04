@@ -2,9 +2,16 @@
 
 (local tests [])
 
+;; Use wall-clock seconds (not os.clock CPU time) for deadlines
+;; so that sleep-based wait loops don't drift on busy CI runners.
+(local wall-clock-seconds
+  (if (and app app.engine app.engine.now-ms)
+      (fn [] (/ (app.engine:now-ms) 1000.0))
+      (fn [] (os.time))))
+
 (fn wait-until [predicate timeout-seconds pump]
-  (local deadline (+ (os.clock) timeout-seconds))
-  (while (and (not (predicate)) (< (os.clock) deadline))
+  (local deadline (+ (wall-clock-seconds) timeout-seconds))
+  (while (and (not (predicate)) (< (wall-clock-seconds) deadline))
     (if pump
         (pump)
         (os.execute "sleep 0.005")))
@@ -87,8 +94,8 @@
 
   (player:pause)
   (local paused-pos (player:position))
-  (local pause-deadline (+ (os.clock) 0.8))
-  (while (< (os.clock) pause-deadline)
+  (local pause-deadline (+ (wall-clock-seconds) 0.8))
+  (while (< (wall-clock-seconds) pause-deadline)
     (player:update 16)
     (os.execute "sleep 0.01")
     (local delta (math.abs (- (player:position) paused-pos)))
