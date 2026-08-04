@@ -89,9 +89,21 @@
   (fn [ctx]
     ((Text {:text value}) ctx)))
 
-(fn hud-chrome-icon-button-height-matches-rail-width []
+(fn reference-rail-button-height [ctx]
+  (local button-builder
+    (Button {:icon "apps"
+             :variant :primary
+             :padding HudChromeMetrics.rail-button-padding
+             :icon-style HudChromeMetrics.rail-button-icon-style}))
+  (local button (button-builder ctx))
+  (local measured (measure-entity button))
+  (local height measured.y)
+  (button:drop)
+  height)
+
+(fn hud-chrome-icon-button-height-matches-rail-button-height []
   (local ctx (make-test-ctx))
-  (local rail-width (reference-rail-width ctx))
+  (local rail-button-height (reference-rail-button-height ctx))
   (local button-builder
     (Button {:icon "apps"
              :variant :primary
@@ -99,8 +111,8 @@
              :icon-style HudChromeMetrics.single-row-button-icon-style}))
   (local button (button-builder ctx))
   (local measured (measure-entity button))
-  (assert-close measured.y rail-width
-                "single-row icon-only button natural height should match collapsed rail width")
+  (assert-close measured.y rail-button-height
+                 "single-row icon-only button natural height should match rail first-row/tile height")
   (button:drop))
 
 (fn hud-chrome-test-stub-line-height-is-material []
@@ -114,13 +126,13 @@
   (assert-close metrics.lineHeight 1.2
                 "test stub icon font lineHeight must match real Material icons so square stubs cannot mask bugs"))
 
-(fn hud-chrome-control-panel-height-matches-rail-width []
+(fn hud-chrome-control-panel-height-matches-rail-button-height []
   (local ctx (make-test-ctx))
-  (local rail-width (reference-rail-width ctx))
+  (local rail-button-height (reference-rail-button-height ctx))
   (local panel (((. HudControlPanel :ControlPanel) {}) ctx))
   (local measured (measure-entity panel))
-  (assert-close measured.y rail-width
-                "normal control panel natural height should match collapsed rail width")
+  (assert-close measured.y rail-button-height
+                 "normal control panel natural height should match rail first-row/tile height")
   (panel:drop))
 
 (fn hud-chrome-status-panel-height-matches-rail-width []
@@ -135,14 +147,14 @@
                 "normal status panel natural height should match collapsed rail width")
   (panel:drop))
 
-(fn hud-chrome-sandbox-toolbar-height-matches-rail-width []
+(fn hud-chrome-sandbox-toolbar-height-matches-rail-button-height []
   (local ctx (make-test-ctx))
-  (local rail-width (reference-rail-width ctx))
+  (local rail-button-height (reference-rail-button-height ctx))
   (local state (SandboxToolbarState {}))
   (local toolbar ((SandboxToolbarView state) ctx))
   (local measured (measure-entity toolbar))
-  (assert-close measured.y rail-width
-                "Sandbox toolbar natural height should match collapsed rail width")
+  (assert-close measured.y rail-button-height
+                 "Sandbox toolbar natural height should match rail first-row/tile height")
   (toolbar:drop))
 
 (fn hud-chrome-sandbox-toolbar-root-has-card-background []
@@ -155,16 +167,16 @@
           "Sandbox toolbar Card root should include a background rectangle child")
   (toolbar:drop))
 
-(table.insert tests {:name "HUD chrome icon-button height matches rail width"
-                      :fn hud-chrome-icon-button-height-matches-rail-width})
+(table.insert tests {:name "HUD chrome icon-button height matches rail button height"
+                       :fn hud-chrome-icon-button-height-matches-rail-button-height})
 (table.insert tests {:name "HUD chrome test stub lineHeight is material-realistic"
-                      :fn hud-chrome-test-stub-line-height-is-material})
-(table.insert tests {:name "HUD chrome control panel height matches rail width"
-                     :fn hud-chrome-control-panel-height-matches-rail-width})
+                       :fn hud-chrome-test-stub-line-height-is-material})
+(table.insert tests {:name "HUD chrome control panel height matches rail button height"
+                      :fn hud-chrome-control-panel-height-matches-rail-button-height})
 (table.insert tests {:name "HUD chrome status panel height matches rail width"
-                     :fn hud-chrome-status-panel-height-matches-rail-width})
-(table.insert tests {:name "HUD chrome Sandbox toolbar height matches rail width"
-                     :fn hud-chrome-sandbox-toolbar-height-matches-rail-width})
+                      :fn hud-chrome-status-panel-height-matches-rail-width})
+(table.insert tests {:name "HUD chrome Sandbox toolbar height matches rail button height"
+                      :fn hud-chrome-sandbox-toolbar-height-matches-rail-button-height})
 (table.insert tests {:name "HUD chrome Sandbox toolbar root has Card background"
                      :fn hud-chrome-sandbox-toolbar-root-has-card-background})
 
