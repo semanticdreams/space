@@ -1,8 +1,10 @@
 (local glm (require :glm))
-(local _ (require :main))
+(local Main (require :main))
 (local WorldTabsWidget (require :world-tabs-widget))
 (local BuildContext (require :build-context))
 (local Signal (require :signal))
+(local MathUtils (require :math-utils))
+(local approx (. MathUtils :approx))
 
 (local tests [])
 
@@ -35,6 +37,42 @@
   (BuildContext {:clickables (assert options.clickables "world tabs widget test context requires clickables")
                  :hoverables (assert options.hoverables "world tabs widget test context requires hoverables")
                  :theme (and app app.themes (app.themes.get-active-theme))}))
+
+(fn assert-close [actual expected message]
+  (assert (approx actual expected)
+          (.. message "; expected " (tostring expected) ", got " (tostring actual))))
+
+(fn sum-layout-child-widths [row-layout]
+  (accumulate [sum 0 _ child-layout (ipairs row-layout.children)]
+    (do
+      (child-layout:measurer)
+      (+ sum child-layout.measure.x))))
+
+(fn make-world-manager [tabs]
+  (local changed (Signal))
+  {:changed changed
+   :list-tabs (fn [_self] tabs)})
+
+(fn hud-world-selector-buttons-have-zero-spacing []
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables
+                             :hoverables hoverables}))
+  (local world-manager
+    (make-world-manager [{:index 1 :id "alpha" :name "home" :active? true}
+                         {:index 2 :id "beta" :name "home-2" :active? false}]))
+  (local builder (assert Main.build-hud-world-tabs-widget
+                         "main should export HUD world tabs builder for focused tests"))
+  (local widget ((builder world-manager) ctx))
+  (widget.layout:measurer)
+  (local row-layout (assert (. widget.layout.children 1)
+                            "WorldTabsWidget should own a row layout"))
+  (assert (= (length row-layout.children) 3)
+          "HUD world selector should include two world buttons plus add-world button")
+  (assert-close row-layout.measure.x
+                (sum-layout-child-widths row-layout)
+                "HUD world selector row width should equal sum of tab and add-world button widths")
+  (widget:drop))
 
 (fn world-tabs-right-click-opens-delete-menu []
   (local clickables (make-clickables-stub))
@@ -94,6 +132,8 @@
 
 (table.insert tests {:name "WorldTabsWidget opens delete context menu on tab right click"
                      :fn world-tabs-right-click-opens-delete-menu})
+(table.insert tests {:name "HUD world selector buttons have zero spacing"
+                     :fn hud-world-selector-buttons-have-zero-spacing})
 
 (local main
   (fn []

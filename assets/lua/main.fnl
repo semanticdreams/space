@@ -877,11 +877,15 @@
 (local KEY_1 (string.byte "1"))
 (local KEY_9 (string.byte "9"))
 
+(fn build-hud-world-tabs-widget [world-manager]
+  (assert world-manager "build-hud-world-tabs-widget requires world-manager")
+  (WorldTabsWidget {:world-manager world-manager
+                    :tab-spacing 0}))
+
 (fn world-tab-status-builder []
   (assert app.world-manager "world-tab-status-builder requires app.world-manager")
   (fn [ctx]
-    ((WorldTabsWidget {:world-manager app.world-manager
-                       :tab-spacing 0.1}) ctx)))
+    ((build-hud-world-tabs-widget app.world-manager) ctx)))
 
 (fn world-runtime-context []
   {:hud app.hud
@@ -2196,6 +2200,7 @@
   (app.engine:shutdown))
 
 {:init app.init
+ :build-hud-world-tabs-widget build-hud-world-tabs-widget
  :install-app-shell! install-app-shell!
  :bind-active-world-runtime installable-bind-active-world-runtime
  :ensure-user-code-units! ensure-user-code-units!

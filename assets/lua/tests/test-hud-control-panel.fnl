@@ -3,6 +3,9 @@
 (local HudControlPanelLayout (require :hud-control-panel-layout))
 (local Text (require :text))
 (local Button (require :button))
+(local HudChromeMetrics (require :hud-chrome-metrics))
+(local MathUtils (require :math-utils))
+(local approx (. MathUtils :approx))
 
 (local tests [])
 
@@ -57,6 +60,22 @@
               (when (= (type value) :table)
                 (table.insert queue value)))))))
   found)
+
+(fn assert-close [actual expected message]
+  (assert (approx actual expected)
+          (.. message "; expected " (tostring expected) ", got " (tostring actual))))
+
+(fn icon-button-row? [node]
+  (and node.children
+       (= (length node.children) 6)
+       (accumulate [ok true _ child (ipairs node.children)]
+         (and ok child.element child.element.icon))))
+
+(fn sum-flex-element-widths [row]
+  (accumulate [sum 0 _ child (ipairs row.children)]
+    (do
+      (child.element.layout:measurer)
+      (+ sum child.element.layout.measure.x))))
 
 (fn control-panel-has-apps-button []
   (local original-hud app.hud)
@@ -166,10 +185,32 @@
   (panel-without-title:drop)
   (panel-with-title:drop))
 
+(fn control-panel-icon-button-row-has-zero-spacing []
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local icons (make-icons-stub))
+  (local ctx
+    (BuildContext {:clickables clickables
+                   :hoverables hoverables
+                   :icons icons
+                   :pointer-target {}}))
+  (local panel (((. HudControlPanel :ControlPanel) {}) ctx))
+  (local row (assert (find-table panel icon-button-row?)
+                     "Control panel should expose the six-button icon row"))
+  (row.layout:measurer)
+  (assert (= HudChromeMetrics.control-row-spacing 0)
+          "HUD control row spacing metric should be zero for visible icon clusters")
+  (assert-close row.layout.measure.x
+                (sum-flex-element-widths row)
+                "Control panel icon-button row width should equal sum of child button widths")
+  (panel:drop))
+
 (table.insert tests {:name "Control panel apps button opens launcher"
                      :fn control-panel-has-apps-button})
 (table.insert tests {:name "Control panel layout renders custom title"
                      :fn control-panel-layout-renders-custom-title})
+(table.insert tests {:name "Control panel icon-button row has zero spacing"
+                     :fn control-panel-icon-button-row-has-zero-spacing})
 
 (local main
   (fn []

@@ -853,7 +853,7 @@
 (table.insert tests {:name "view collapsed panel remains effectively culled"
                      :fn view-collapsed-panel-remains-effectively-culled})
 
-(fn expanded-panel-reserves-toolbar-height-while-rail-remains-full-height []
+(fn expanded-panel-below-toolbar-bottom-anchored-full-rail []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -879,14 +879,14 @@
   (assert (approx rail-layout.size.y 30)
           (.. "rail should remain full-height 30, got " rail-layout.size.y))
   (assert panel-layout "panel should be present when expanded")
-  (assert (approx panel-layout.position.y 4)
-          (.. "panel y should be offset by reserve height 4, got " panel-layout.position.y))
+  (assert (approx panel-layout.position.y 0)
+          (.. "panel should be bottom-anchored at root y=0 (below toolbar reserve), got " panel-layout.position.y))
   (assert (approx panel-layout.size.y 26)
           (.. "panel height should be 26 (= 30 - 4), got " panel-layout.size.y))
   (entity:drop))
 
-(table.insert tests {:name "Expanded panel reserves toolbar height while rail remains full-height"
-                     :fn expanded-panel-reserves-toolbar-height-while-rail-remains-full-height})
+(table.insert tests {:name "Expanded panel below toolbar bottom-anchored, rail full-height"
+                     :fn expanded-panel-below-toolbar-bottom-anchored-full-rail})
 
 (local main
   (fn []

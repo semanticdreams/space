@@ -167,6 +167,24 @@
           "Sandbox toolbar Card root should include a background rectangle child")
   (toolbar:drop))
 
+(fn hud-chrome-button-sizing-metrics-remain-unchanged []
+  (assert (= (. HudChromeMetrics.single-row-button-padding 1) 0.4)
+          "single-row button horizontal padding should remain 0.4")
+  (assert (= (. HudChromeMetrics.single-row-button-padding 2) 0.25)
+          "single-row button vertical padding should remain 0.25")
+  (assert (= (. HudChromeMetrics.rail-button-padding 1) 0.4)
+          "rail button horizontal padding should remain 0.4")
+  (assert (= (. HudChromeMetrics.rail-button-padding 2) 0.25)
+          "rail button vertical padding should remain 0.25")
+  (assert-close HudChromeMetrics.single-row-button-icon-style.scale 3.2
+                "single-row button icon scale should remain 3.2")
+  (assert-close HudChromeMetrics.rail-button-icon-style.scale 3.2
+                "rail button icon scale should remain 3.2")
+  (assert (= (. HudChromeMetrics.button-owned-shell-padding 1) 0)
+          "control panel shell horizontal padding should remain button-owned/zero")
+  (assert (= (. HudChromeMetrics.button-owned-shell-padding 2) 0)
+          "control panel shell vertical padding should remain button-owned/zero"))
+
 (table.insert tests {:name "HUD chrome icon-button height matches rail button height"
                        :fn hud-chrome-icon-button-height-matches-rail-button-height})
 (table.insert tests {:name "HUD chrome test stub lineHeight is material-realistic"
@@ -179,6 +197,8 @@
                       :fn hud-chrome-sandbox-toolbar-height-matches-rail-button-height})
 (table.insert tests {:name "HUD chrome Sandbox toolbar root has Card background"
                      :fn hud-chrome-sandbox-toolbar-root-has-card-background})
+(table.insert tests {:name "HUD chrome button sizing metrics remain unchanged"
+                     :fn hud-chrome-button-sizing-metrics-remain-unchanged})
 
 (local main
   (fn []
