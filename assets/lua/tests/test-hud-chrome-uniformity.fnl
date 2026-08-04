@@ -8,6 +8,7 @@
 (local SandboxToolbarState (require :sandbox-toolbar-state))
 (local SandboxToolbarView (require :sandbox-toolbar-view))
 (local Text (require :text))
+(local Button (require :button))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
 (local HudChromeMetrics (require :hud-chrome-metrics))
@@ -36,7 +37,7 @@
   (local glyph {:advance 1
                 :planeBounds {:left 0 :right 1 :top 1 :bottom 0}
                 :atlasBounds {:left 0 :right 1 :top 1 :bottom 0}})
-  (local font {:metadata {:metrics {:ascender 1 :descender -1 :lineHeight 1}
+  (local font {:metadata {:metrics {:ascender 1.1 :descender -0.1 :lineHeight 1.2}
                           :atlas {:width 1 :height 1}}
                :glyph-map {4242 glyph}
                :advance 1})
@@ -88,6 +89,31 @@
   (fn [ctx]
     ((Text {:text value}) ctx)))
 
+(fn hud-chrome-icon-button-height-matches-rail-width []
+  (local ctx (make-test-ctx))
+  (local rail-width (reference-rail-width ctx))
+  (local button-builder
+    (Button {:icon "apps"
+             :variant :primary
+             :padding HudChromeMetrics.single-row-button-padding
+             :icon-style HudChromeMetrics.single-row-button-icon-style}))
+  (local button (button-builder ctx))
+  (local measured (measure-entity button))
+  (assert-close measured.y rail-width
+                "single-row icon-only button natural height should match collapsed rail width")
+  (button:drop))
+
+(fn hud-chrome-test-stub-line-height-is-material []
+  (local ctx (make-test-ctx))
+  (local icons (assert ctx.icons "test context must provide icons"))
+  (local resolved (icons:resolve "test_icon"))
+  (local font (and resolved resolved.font))
+  (assert font "test stub must resolve a font")
+  (local metrics (and font.metadata font.metadata.metrics))
+  (assert metrics "test stub font must expose metrics")
+  (assert-close metrics.lineHeight 1.2
+                "test stub icon font lineHeight must match real Material icons so square stubs cannot mask bugs"))
+
 (fn hud-chrome-control-panel-height-matches-rail-width []
   (local ctx (make-test-ctx))
   (local rail-width (reference-rail-width ctx))
@@ -119,18 +145,6 @@
                 "Sandbox toolbar natural height should match collapsed rail width")
   (toolbar:drop))
 
-(fn hud-chrome-button-owned-metrics-match-rail-cross-axis []
-  (local icon-height HudChromeMetrics.single-row-button-icon-style.scale)
-  (local button-padding-y (. HudChromeMetrics.single-row-button-padding 2))
-  (local shell-padding-y (. HudChromeMetrics.button-owned-shell-padding 2))
-  (local natural-height (+ icon-height (* 2 button-padding-y) (* 2 shell-padding-y)))
-  (local rail-width (+ HudChromeMetrics.rail-button-icon-style.scale
-                       (* 2 (. HudChromeMetrics.rail-button-padding 1))))
-  (assert-close natural-height rail-width
-                "button-owned chrome metrics should match rail cross-axis without shell padding")
-  (assert-close shell-padding-y 0
-                "button-owned chrome shell padding should not contribute to height"))
-
 (fn hud-chrome-sandbox-toolbar-root-has-card-background []
   (local ctx (make-test-ctx))
   (local state (SandboxToolbarState {}))
@@ -141,8 +155,10 @@
           "Sandbox toolbar Card root should include a background rectangle child")
   (toolbar:drop))
 
-(table.insert tests {:name "HUD chrome button-owned metrics match rail cross-axis"
-                     :fn hud-chrome-button-owned-metrics-match-rail-cross-axis})
+(table.insert tests {:name "HUD chrome icon-button height matches rail width"
+                      :fn hud-chrome-icon-button-height-matches-rail-width})
+(table.insert tests {:name "HUD chrome test stub lineHeight is material-realistic"
+                      :fn hud-chrome-test-stub-line-height-is-material})
 (table.insert tests {:name "HUD chrome control panel height matches rail width"
                      :fn hud-chrome-control-panel-height-matches-rail-width})
 (table.insert tests {:name "HUD chrome status panel height matches rail width"
