@@ -160,7 +160,7 @@
       (local rail-position (+ base-position (base-rotation:rotate rail-offset)))
       (local reserve (top-reserve-height))
       (when active-panel-entity
-        (local panel-offset (glm.vec3 (- allocated-width rail-w panel-width) reserve 0))
+        (local panel-offset (glm.vec3 (- allocated-width rail-w panel-width) 0 0))
         (set active-panel-entity.layout.position (+ base-position (base-rotation:rotate panel-offset)))
         (set active-panel-entity.layout.size (glm.vec3 panel-width (math.max 0 (- height reserve)) 0))
         (set active-panel-entity.layout.rotation base-rotation)
