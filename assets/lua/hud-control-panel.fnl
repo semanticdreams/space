@@ -25,6 +25,7 @@
                                                            :icon-style button-icon-style}))
   (Flex
     {:axis 1
+     :xspacing HudChromeMetrics.control-row-spacing
      :yalign :largest
      :children
      [
