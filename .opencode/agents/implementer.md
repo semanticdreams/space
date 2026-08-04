@@ -1,7 +1,8 @@
 ---
 description: Implements approved plans and accepted review findings using targeted local validation by default
 mode: subagent
-model: deepseek/deepseek-v4-pro
+model: openai/gpt-5.5
+variant: medium
 temperature: 0.4
 steps: 100
 permission:
