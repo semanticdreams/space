@@ -2,9 +2,20 @@
 
 (local tests [])
 
+;; Use wall-clock seconds (not os.clock CPU time) for deadlines
+;; so that sleep-based wait loops don't drift on busy CI runners.
+(var _now-ms nil)
+(local wall-clock-seconds
+  (fn []
+    (when (not _now-ms)
+      (set _now-ms (and app app.engine app.engine.now-ms))
+      (assert _now-ms
+              "video tests require app.engine:now-ms for wall-clock timing"))
+    (/ (_now-ms app.engine) 1000.0)))
+
 (fn wait-until [predicate timeout-seconds pump]
-  (local deadline (+ (os.clock) timeout-seconds))
-  (while (and (not (predicate)) (< (os.clock) deadline))
+  (local deadline (+ (wall-clock-seconds) timeout-seconds))
+  (while (and (not (predicate)) (< (wall-clock-seconds) deadline))
     (if pump
         (pump)
         (os.execute "sleep 0.005")))
@@ -87,8 +98,8 @@
 
   (player:pause)
   (local paused-pos (player:position))
-  (local pause-deadline (+ (os.clock) 0.8))
-  (while (< (os.clock) pause-deadline)
+  (local pause-deadline (+ (wall-clock-seconds) 0.8))
+  (while (< (wall-clock-seconds) pause-deadline)
     (player:update 16)
     (os.execute "sleep 0.01")
     (local delta (math.abs (- (player:position) paused-pos)))
@@ -123,8 +134,8 @@
   (local duration (player:duration))
   (assert (> duration 0.0) "loop test duration should be > 0")
 
-  (local deadline (+ (os.clock) 1.2))
-  (while (< (os.clock) deadline)
+  (local deadline (+ (wall-clock-seconds) 1.2))
+  (while (< (wall-clock-seconds) deadline)
     (player:update 16)
     (os.execute "sleep 0.01"))
 
@@ -225,8 +236,8 @@
                         (os.execute "sleep 0.01"))))
         (assert ready? "audio concurrency players did not become ready")
 
-        (local deadline (+ (os.clock) 1.2))
-        (while (< (os.clock) deadline)
+        (local deadline (+ (wall-clock-seconds) 1.2))
+        (while (< (wall-clock-seconds) deadline)
           (a:update 16)
           (b:update 16)
           (os.execute "sleep 0.01"))
@@ -378,8 +389,8 @@
   (local prev-status (player:status))
   (var prev-iterations (. prev-status "decode-loop-iterations"))
   (var prev-wait-ms (. prev-status "decode-wait-ms"))
-  (local deadline (+ (os.clock) 0.6))
-  (while (< (os.clock) deadline)
+  (local deadline (+ (wall-clock-seconds) 0.6))
+  (while (< (wall-clock-seconds) deadline)
     (player:update 16)
     (local status (player:status))
     (local iterations (. status "decode-loop-iterations"))
@@ -422,18 +433,18 @@
             (do
               (local initial-status (player:status))
               (local drift-window (math.max 0.5 (or (. initial-status "av-drift-window-seconds") 2.0)))
-              (local settle-deadline (+ (os.clock) drift-window 0.35))
-              (while (< (os.clock) settle-deadline)
+              (local settle-deadline (+ (wall-clock-seconds) drift-window 0.35))
+              (while (< (wall-clock-seconds) settle-deadline)
                 (player:update 16)
                 (local status (player:status))
                 (assert (not (. status "has-error")) (.. "drift status error: " status.error))
                 (os.execute "sleep 0.01"))
 
-              (local sample-deadline (+ (os.clock) 0.8))
+              (local sample-deadline (+ (wall-clock-seconds) 0.8))
               (var sampled-frames 0)
               (var peak-recent-drift 0.0)
               (var saw-audio-active? false)
-              (while (< (os.clock) sample-deadline)
+              (while (< (wall-clock-seconds) sample-deadline)
                 (player:update 16)
                 (local status (player:status))
                 (assert (not (. status "has-error")) (.. "drift status error: " status.error))
