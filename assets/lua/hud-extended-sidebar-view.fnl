@@ -143,10 +143,10 @@
       (each [_ child (ipairs (or self.children []))]
         (child:measurer))
       (local rail-w (rail-measured-w))
-      (local total-width (if (and sidebar.expanded? sidebar.active-id active-panel-entity)
-                             (+ panel-width rail-w)
-                             rail-w))
-      (set self.measure (glm.vec3 total-width 0 0)))
+      (set self.measure (glm.vec3 rail-w 0 0)))
+    ;; The expanded panel is a flyout outside the in-flow root width.
+    ;; Parent HUD layout should reserve only the measured rail width.
+    ;; Keep panel placement in layouter below.
 
     (fn layouter [self]
       (local base-position self.position)

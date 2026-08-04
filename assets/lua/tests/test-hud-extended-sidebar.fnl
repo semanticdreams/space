@@ -667,7 +667,7 @@
           "collapsed sidebar width should equal measured rail width")
   (entity:drop))
 
-(fn view-expanded-width-equals-panel-plus-measured-rail-width []
+(fn view-expanded-width-equals-measured-rail-width []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -682,8 +682,10 @@
   (local rail-layout (. entity.layout.children 2))
   (assert panel-layout "expanded sidebar should contain the active panel layout")
   (assert rail-layout "expanded sidebar should contain the rail layout")
-  (assert (approx entity.layout.measure.x (+ 38 rail-layout.measure.x))
-          "expanded sidebar width should equal panel width plus measured rail width")
+  (assert (approx entity.layout.measure.x rail-layout.measure.x)
+          "expanded sidebar width should equal measured rail width")
+  (assert (not (approx entity.layout.measure.x (+ 38 rail-layout.measure.x)))
+          "expanded sidebar width should not include panel width")
   (entity:drop))
 
 (fn view-expanded-layout-anchors-rail-to-right-edge []
@@ -699,7 +701,7 @@
   (entity.layout:measurer)
   (local panel-layout (. entity.layout.children 1))
   (local rail-layout (. entity.layout.children 2))
-  (local allocated-width (+ entity.layout.measure.x 5))
+  (local allocated-width entity.layout.measure.x)
   (set entity.layout.position (glm.vec3 10 20 0))
   (set entity.layout.size (glm.vec3 allocated-width 12 0))
   (set entity.layout.rotation (glm.quat 1 0 0 0))
@@ -707,14 +709,16 @@
   (set entity.layout.depth-offset-index 0)
   (entity.layout:layouter)
   (local rail-width rail-layout.measure.x)
-  (local expected-rail-x (+ 10 (- allocated-width rail-width)))
+  (local expected-rail-x 10)
   (local expected-panel-x (- expected-rail-x 38))
+  (assert (approx allocated-width rail-width)
+          "natural allocated sidebar width should equal rail width")
   (assert (approx rail-layout.position.x expected-rail-x)
-          "rail should be positioned at the right edge of the allocated sidebar area")
+          "rail should be positioned at the right edge of the rail-width sidebar area")
   (assert (approx rail-layout.size.x rail-width)
           "rail layout width should equal measured rail width")
   (assert (approx panel-layout.position.x expected-panel-x)
-          "panel should be immediately left of the rail")
+          "panel should project left of the rail-width sidebar root")
   (assert (approx panel-layout.size.x 38)
           "expanded panel width should remain fixed at 38 HUD units")
   (entity:drop))
@@ -842,8 +846,8 @@
                      :fn view-rail-button-matches-activity-button-metrics})
 (table.insert tests {:name "view collapsed width equals measured rail width"
                      :fn view-collapsed-width-equals-measured-rail-width})
-(table.insert tests {:name "view expanded width equals panel plus measured rail width"
-                     :fn view-expanded-width-equals-panel-plus-measured-rail-width})
+(table.insert tests {:name "view expanded width equals measured rail width"
+                     :fn view-expanded-width-equals-measured-rail-width})
 (table.insert tests {:name "view expanded layout anchors rail to right edge"
                      :fn view-expanded-layout-anchors-rail-to-right-edge})
 (table.insert tests {:name "view collapse removes panel render resources"

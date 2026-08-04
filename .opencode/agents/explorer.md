@@ -1,7 +1,8 @@
 ---
 description: Focused codebase investigation — finds files, patterns, and answers specific questions. Use for targeted repository searches.
 mode: subagent
-model: deepseek/deepseek-v4-pro
+model: openai/gpt-5.5
+variant: medium
 temperature: 0.7
 steps: 30
 permission:

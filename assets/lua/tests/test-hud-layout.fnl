@@ -29,7 +29,42 @@
                            (set captured.position self.position))}))
     {:layout layout
      :drop (fn [_self]
-             (layout:drop))}))
+              (layout:drop))}))
+
+(local HudExtendedSidebar (require :hud-extended-sidebar))
+(local HudExtendedSidebarView (require :hud-extended-sidebar-view))
+(local Intersectables (require :intersectables))
+(local Clickables (require :clickables))
+(local Hoverables (require :hoverables))
+(local MathUtils (require :math-utils))
+(local approx (. MathUtils :approx))
+
+(fn make-test-theme []
+  {:font nil
+   :card {:background (glm.vec4 0.1 0.12 0.16 0.96)}})
+
+(fn make-icons-stub []
+  (local glyph {:advance 1})
+  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                          :atlas {:width 1 :height 1}}
+               :glyph-map {4242 glyph}
+               :advance 1})
+  {:font font
+   :resolve (fn [_self _name]
+              {:type :font
+               :codepoint 4242
+               :font font})
+   :get (fn [_self _name] 4242)})
+
+(fn make-hud-widget-ctx [hud]
+  (local intersector (Intersectables))
+  (local clickables (assert (Clickables {:intersectables intersector}) "HUD layout test context requires clickables"))
+  (local hoverables (assert (Hoverables {:intersectables intersector}) "HUD layout test context requires hoverables"))
+  (BuildContext {:pointer-target hud
+                 :clickables clickables
+                 :hoverables hoverables
+                 :icons (make-icons-stub)
+                 :theme (make-test-theme)}))
 
 (fn left-dock-fills-canvas-band-height []
   (local hud {:world-units-per-pixel 1
@@ -270,6 +305,44 @@
           (.. "tiles height should be 31 (= 35 - 4), got " entity.tiles-root.layout.size.y))
   (entity:drop))
 
+(fn right-dock-expanded-sidebar-reserves-rail-width-only []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 50
+              :half-height 20})
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fixed-widget "right-panel" (glm.vec3 38 10 0))})
+  (sidebar:select :test)
+  (local ctx (make-hud-widget-ctx hud))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 100 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 100 2 0))
+       :right-dock-builder (HudExtendedSidebarView sidebar)
+       :top-toolbar-builder (fixed-widget "toolbar" (glm.vec3 20 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (local right-dock entity.right-dock-root)
+  (local rail-layout (. right-dock.layout.children 2))
+  (assert rail-layout "expanded sidebar right dock should contain the rail as its second child")
+  (local rail-width rail-layout.measure.x)
+  (assert (approx right-dock.layout.measure.x rail-width)
+          "expanded right sidebar dock should measure as rail width only")
+  (assert (approx right-dock.layout.size.x rail-width)
+          "HUD layout should allocate only measured rail width to the right dock")
+  (assert (approx entity.top-toolbar-root.layout.size.x (- 100 rail-width))
+          "top toolbar should reserve only rail width for the expanded right sidebar")
+  (entity:drop))
+
 (table.insert tests {:name "Hud layout top toolbar reserves center column between full-height rails"
                      :fn top-toolbar-reserves-center-column-between-full-height-rails})
 
@@ -287,6 +360,8 @@
                      :fn right-dock-coexists-with-left-dock})
 (table.insert tests {:name "Hud layout right dock uses natural measured width"
                      :fn right-dock-uses-natural-measured-width})
+(table.insert tests {:name "Hud layout expanded right sidebar reserves rail width only"
+                     :fn right-dock-expanded-sidebar-reserves-rail-width-only})
 (table.insert tests {:name "Status panel layout uses one gap with two columns"
                      :fn status-panel-layout-uses-single-gap-with-two-columns})
 
