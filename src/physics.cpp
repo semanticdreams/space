@@ -1,5 +1,7 @@
 #include "physics.h"
 
+#include <stdexcept>
+
 Physics::Physics() {
     broadphase = new btDbvtBroadphase();
     collisionConfiguration = new btDefaultCollisionConfiguration();
@@ -10,6 +12,12 @@ Physics::Physics() {
 
 Physics::~Physics()
 {
+    // Remove all constraints before collision objects; Lua owns the constraint objects via sol2.
+    for (int i = dynamicsWorld->getNumConstraints() - 1; i >= 0; i--) {
+        btTypedConstraint* constraint = dynamicsWorld->getConstraint(i);
+        dynamicsWorld->removeConstraint(constraint);
+    }
+
     // Remove all rigid bodies; Lua owns the objects themselves via sol2.
     for (int i = dynamicsWorld->getNumCollisionObjects() - 1; i >= 0; i--) {
         btCollisionObject* obj = dynamicsWorld->getCollisionObjectArray()[i];
@@ -74,4 +82,27 @@ void Physics::addAction(btActionInterface* action)
 void Physics::removeAction(btActionInterface* action)
 {
     dynamicsWorld->removeAction(action);
+}
+
+void Physics::addConstraint(btTypedConstraint* constraint, bool disableCollisionsBetweenLinkedBodies)
+{
+    if (!constraint) {
+        throw std::invalid_argument("Physics::addConstraint requires a constraint");
+    }
+
+    dynamicsWorld->addConstraint(constraint, disableCollisionsBetweenLinkedBodies);
+}
+
+void Physics::removeConstraint(btTypedConstraint* constraint)
+{
+    if (!constraint) {
+        throw std::invalid_argument("Physics::removeConstraint requires a constraint");
+    }
+
+    dynamicsWorld->removeConstraint(constraint);
+}
+
+int Physics::getNumConstraints() const
+{
+    return dynamicsWorld->getNumConstraints();
 }

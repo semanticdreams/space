@@ -375,6 +375,31 @@ sol::table create_physics_table(sol::state_view lua)
         sol::base_classes, sol::bases<btCollisionObject>()
     );
 
+    bt.new_usertype<btTypedConstraint>("TypedConstraint",
+        sol::no_constructor
+    );
+
+    bt.new_usertype<btPoint2PointConstraint>("Point2PointConstraint",
+        sol::no_constructor,
+        "setPivotB", &btPoint2PointConstraint::setPivotB,
+        "getPivotInA", [](btPoint2PointConstraint& self) {
+            return btVector3(self.getPivotInA());
+        },
+        "getPivotInB", [](btPoint2PointConstraint& self) {
+            return btVector3(self.getPivotInB());
+        },
+        "setTau", [](btPoint2PointConstraint& self, btScalar tau) {
+            self.m_setting.m_tau = tau;
+        },
+        "setDamping", [](btPoint2PointConstraint& self, btScalar damping) {
+            self.m_setting.m_damping = damping;
+        },
+        "setImpulseClamp", [](btPoint2PointConstraint& self, btScalar impulseClamp) {
+            self.m_setting.m_impulseClamp = impulseClamp;
+        },
+        sol::base_classes, sol::bases<btTypedConstraint>()
+    );
+
     bt.new_usertype<btCollisionConfiguration>("CollisionConfiguration");
 
     bt.new_usertype<btDefaultCollisionConfiguration>("DefaultCollisionConfiguration",
@@ -585,6 +610,12 @@ sol::table create_physics_table(sol::state_view lua)
     bt.set_function("RigidBody", [](const RigidBodyCI& info) {
         return std::make_unique<btRigidBody>(info);
     });
+    bt.set_function("Point2PointConstraint", [](btRigidBody* body, const btVector3& pivotInA) {
+        if (!body) {
+            throw sol::error("bt.Point2PointConstraint requires a rigid body");
+        }
+        return std::make_unique<btPoint2PointConstraint>(*body, pivotInA);
+    });
     bt.set_function("DefaultCollisionConfiguration", []() {
         return std::make_unique<btDefaultCollisionConfiguration>();
     });
@@ -624,6 +655,9 @@ sol::table create_physics_table(sol::state_view lua)
         "syncMovedRigidBody", &Physics::syncMovedRigidBody,
         "addAction", &Physics::addAction,
         "removeAction", &Physics::removeAction,
+        "addConstraint", &Physics::addConstraint,
+        "removeConstraint", &Physics::removeConstraint,
+        "getNumConstraints", &Physics::getNumConstraints,
         "getWorld", &Physics::getWorld,
         "update", &Physics::update
     );
