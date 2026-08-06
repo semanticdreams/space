@@ -159,7 +159,7 @@ The Scene (`scene.fnl`) implements `:height-at-world-point` by querying `Terrain
 
 ### Movement
 
-- **Horizontal:** WASD-style movement actions (`move-left`/`move-right`/`move-forward`/`move-backward`) move the camera along the horizontal projection of the camera's forward and right vectors. Speed is multiplied by 1.5 while the jump key is held.
+- **Horizontal:** WASD-style movement actions (`move-left`/`move-right`/`move-forward`/`move-backward`) move the camera at the configured `movement-speed` along the horizontal projection of the camera's forward and right vectors.
 - **Look:** Arrow-key look actions adjust yaw and pitch. Left-button mouse look also adjusts yaw and pitch when the camera controls receive the drag.
 - **Pitch clamp:** Accumulated pitch is clamped to `[pitch-min, pitch-max]` (default `[-1.2, 1.2]` radians). The pitch accumulator is tracked internally and reset on `drop`.
 
