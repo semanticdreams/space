@@ -75,22 +75,22 @@ permission:
     "rm -r*": deny
     "rm -f*": deny
     "find * -delete*": deny
-    "sudo *": ask
-    "sudo": ask
-    "su *": ask
-    "su": ask
-    "doas *": ask
-    "doas": ask
-    "apt *": ask
-    "apt": ask
-    "apt-get *": ask
-    "apt-get": ask
-    "dnf *": ask
-    "dnf": ask
-    "pacman *": ask
-    "pacman": ask
-    "brew *": ask
-    "brew": ask
+    "sudo *": deny
+    "sudo": deny
+    "su *": deny
+    "su": deny
+    "doas *": deny
+    "doas": deny
+    "apt *": deny
+    "apt": deny
+    "apt-get *": deny
+    "apt-get": deny
+    "dnf *": deny
+    "dnf": deny
+    "pacman *": deny
+    "pacman": deny
+    "brew *": deny
+    "brew": deny
 ---
 
 You are the implementation agent. The approved PLAN.md is the implementation
