@@ -141,6 +141,98 @@
      :drop (fn [_self]
              (layout:drop))}))
 
+(fn start-runtime-panel-grab [scene size-ref]
+  (local builder (make-probe-panel-builder size-ref))
+  (local panel (scene:add-panel-child {:builder builder
+                                       :skip-cuboid true
+                                       :position (glm.vec3 0 12 0)}))
+  (assert panel "Expected panel for point-grab cleanup test")
+  (local entry (find-physics-entry-for-element scene panel))
+  (assert (and entry entry.body) "Expected runtime physics body for point-grab cleanup")
+  (local grab-entry (find-movable-for-layout scene panel.layout))
+  (assert grab-entry "Should find grab-mode movable entry")
+  (local starting-count (app.engine.physics:getNumConstraints))
+  (local hit-point (glm.vec3 1 14 3))
+  (local drag {:hit-point hit-point
+               :plane {:point hit-point
+                       :normal (glm.vec3 0 1 0)}})
+  (grab-entry.on-drag-start grab-entry drag {:button 1})
+  (assert drag.point-grab "Grab mode should create a point-grab session")
+  (assert (drag.point-grab:active?) "Point-grab session should be active before cleanup")
+  (assert (= (app.engine.physics:getNumConstraints) (+ starting-count 1))
+          "Grab start should add one constraint before cleanup")
+  {:panel panel
+   :entry entry
+   :grab-entry grab-entry
+   :drag drag
+   :starting-count starting-count})
+
+(fn assert-point-grab-cleaned [session message]
+  (local current-count (app.engine.physics:getNumConstraints))
+  (when (not (= current-count session.starting-count))
+    (when (and session.drag session.drag.point-grab (session.drag.point-grab:active?))
+      (session.drag.point-grab:destroy))
+    (error (.. message
+               (string.format " (expected_constraints=%d actual_constraints=%d)"
+                              session.starting-count
+                              current-count))))
+  (assert (not (session.drag.point-grab:active?))
+          (.. message " should deactivate the point-grab session")))
+
+(fn make-attached-grab-entity []
+  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+  (local layout
+    (Layout {:name "attached-grab-panel"
+             :measure (glm.vec3 4 4 4)
+             :size (glm.vec3 4 4 4)
+             :measurer (fn [self]
+                         (set self.measure (glm.vec3 4 4 4)))
+             :layouter (fn [self]
+                         (set self.size self.measure))}))
+  (local element {:layout layout
+                  :drop (fn [_self]
+                          (layout:drop))})
+  (local entity {:layout {:position (glm.vec3 0 0 0)
+                          :rotation (glm.quat 1 0 0 0)}
+                 :children [{:element element}]
+                 :movables []
+                 :drop (fn [_self]
+                         (element:drop))})
+  (local entries [{:spawn (glm.vec3 0 12 0)
+                   :size (glm.vec3 4 4 4)
+                   :offset (glm.vec3 0 12 0)
+                   :body-options {}
+                   :positioned nil
+                   :body nil
+                   :body-active? false
+                   :dragging false
+                   :rigid nil}])
+  (LayoutPhysicsBodies.attach entity {:entries entries})
+  {:entity entity
+   :entry (. entries 1)
+   :element element})
+
+(fn start-attached-entity-grab []
+  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+  (local attached (make-attached-grab-entity))
+  (local entry attached.entry)
+  (assert (and entry entry.body) "Expected attached physics body for point-grab cleanup")
+  (local grab-entry (. (LayoutPhysicsBodies.collect-movables attached.entity) 1))
+  (assert grab-entry "Should find attached grab-mode movable entry")
+  (local starting-count (app.engine.physics:getNumConstraints))
+  (local hit-point (glm.vec3 1 14 3))
+  (local drag {:hit-point hit-point
+               :plane {:point hit-point
+                       :normal (glm.vec3 0 1 0)}})
+  (grab-entry.on-drag-start grab-entry drag {:button 1})
+  (assert drag.point-grab "Attached grab mode should create a point-grab session")
+  (assert (= (app.engine.physics:getNumConstraints) (+ starting-count 1))
+          "Attached grab start should add one constraint before cleanup")
+  {:entity attached.entity
+   :entry entry
+   :drag drag
+   :starting-count starting-count})
+
 (fn exercise-perlin-terrain-collision [scene panel-builder]
   (scene:add-panel-child
     {:builder (PerlinTerrain {:position (glm.vec3 500 -100 -500)
@@ -545,6 +637,114 @@
   (when (not ok)
     (error err)))
 
+(fn physics-grab-deactivate-destroys-active-point-constraint []
+  (assert bt "Deactivate point-grab cleanup test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
+  (local setup (setup-scene))
+  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local session (start-runtime-panel-grab scene size-ref))
+        (LayoutPhysicsBodies.deactivate scene.entity)
+        (assert-point-grab-cleaned session
+                                   "Deactivate should remove active point-grab constraint"))))
+  (cleanup)
+  (set app.activity-object-drag-mode-provider original-provider)
+  (when (not ok)
+    (error err)))
+
+(fn physics-grab-runtime-remove-destroys-active-point-constraint []
+  (assert bt "Runtime remove point-grab cleanup test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
+  (local setup (setup-scene))
+  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local session (start-runtime-panel-grab scene size-ref))
+        (LayoutPhysicsBodies.remove-runtime-layout-body-for-element scene.entity session.panel)
+        (assert-point-grab-cleaned session
+                                   "Runtime body remove should remove active point-grab constraint"))))
+  (cleanup)
+  (set app.activity-object-drag-mode-provider original-provider)
+  (when (not ok)
+    (error err)))
+
+(fn physics-grab-runtime-drop-destroys-active-point-constraint []
+  (assert bt "Runtime drop point-grab cleanup test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local session (start-runtime-panel-grab scene size-ref))
+        (scene:attach-entity nil)
+        (assert-point-grab-cleaned session
+                                   "Runtime entity drop should remove active point-grab constraint"))))
+  (cleanup)
+  (set app.activity-object-drag-mode-provider original-provider)
+  (when (not ok)
+    (error err)))
+
+(fn physics-grab-resize-rebuild-destroys-active-point-constraint []
+  (assert bt "Resize rebuild point-grab cleanup test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local session (start-runtime-panel-grab scene size-ref))
+        (set size-ref.value (glm.vec3 8 4 4))
+        (session.panel.layout:mark-measure-dirty)
+        (scene:update)
+        (scene:update)
+        (assert-point-grab-cleaned session
+                                   "Runtime body rebuild should remove active point-grab constraint"))))
+  (cleanup)
+  (set app.activity-object-drag-mode-provider original-provider)
+  (when (not ok)
+    (error err)))
+
+(fn physics-grab-attached-drop-destroys-active-point-constraint []
+  (assert bt "Attached drop point-grab cleanup test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local session (start-attached-entity-grab))
+        (session.entity:drop)
+        (assert-point-grab-cleaned session
+                                   "Attached entity drop should remove active point-grab constraint"))))
+  (cleanup)
+  (set app.activity-object-drag-mode-provider original-provider)
+  (when (not ok)
+    (error err)))
+
 (fn physics-center-mode-allows-default-teleport []
   (assert bt "Center mode test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -610,9 +810,19 @@
 (table.insert tests {:name "Physics grab mode creates updates and removes point constraint"
                      :fn physics-grab-mode-creates-updates-and-removes-point-constraint})
 (table.insert tests {:name "Physics center mode allows default teleport"
-                     :fn physics-center-mode-allows-default-teleport})
+                      :fn physics-center-mode-allows-default-teleport})
 (table.insert tests {:name "Physics grab mode errors when entry body missing"
-                     :fn physics-grab-mode-errors-when-entry-body-missing})
+                      :fn physics-grab-mode-errors-when-entry-body-missing})
+(table.insert tests {:name "Physics grab deactivate destroys active point constraint"
+                     :fn physics-grab-deactivate-destroys-active-point-constraint})
+(table.insert tests {:name "Physics grab runtime remove destroys active point constraint"
+                     :fn physics-grab-runtime-remove-destroys-active-point-constraint})
+(table.insert tests {:name "Physics grab runtime drop destroys active point constraint"
+                     :fn physics-grab-runtime-drop-destroys-active-point-constraint})
+(table.insert tests {:name "Physics grab resize rebuild destroys active point constraint"
+                     :fn physics-grab-resize-rebuild-destroys-active-point-constraint})
+(table.insert tests {:name "Physics grab attached drop destroys active point constraint"
+                     :fn physics-grab-attached-drop-destroys-active-point-constraint})
 
 (local main
   (fn []

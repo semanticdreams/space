@@ -49,7 +49,7 @@
   (when entity
     (set entity.physics-bodies entries)))
 
-(var attach-movables nil)
+(var attach-movables nil) (var destroy-point-grab! nil)
 
 (fn apply-body-options! [body options]
   (local resolved (or options {}))
@@ -165,7 +165,7 @@
     (when body.activate
       (body:activate true))))
 
-(fn remove-body [entry]
+(fn remove-body [entry] (destroy-point-grab! entry)
   (when (and entry.body entry.body-active? (physics-available?))
     (app.engine.physics:removeRigidBody entry.body)
     (set entry.body-active? false)))
@@ -528,15 +528,15 @@
     (sync-moved-body entry.body)
     (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
 
-(fn destroy-point-grab! [entry drag]
-  (local point-grab
-    (if (and drag drag.point-grab)
-        drag.point-grab
-        entry.point-grab))
-  (when point-grab
-    (point-grab:destroy))
-  (set entry.point-grab nil)
-  true)
+(set destroy-point-grab! (fn [entry drag]
+       (local point-grab
+         (if (and drag drag.point-grab)
+             drag.point-grab
+             entry.point-grab))
+       (when point-grab
+         (point-grab:destroy))
+       (set entry.point-grab nil)
+       true))
 
 (fn create-movable-entry [entity entry]
   (local target (and entry.positioned entry.positioned.layout))
@@ -626,7 +626,7 @@
 
 (fn deactivate [entity]
   (local entries (get-entries entity))
-  (each [_ entry (ipairs entries)]
+  (each [_ entry (ipairs entries)] (destroy-point-grab! entry)
     (when (and entry.body entry.body-active? (physics-available?))
       (remove-body entry)))
   true)
