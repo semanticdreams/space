@@ -451,6 +451,36 @@
     (controls:drop))
   true)
 
+(fn object-mode-releases-clear-walk-input-state []
+  (each [_ mode (ipairs [:move :grab])]
+    (local camera (make-fake-camera))
+    (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
+    (local flight-controls (make-fake-flight-controls camera))
+    (local fake-sampler (make-fake-terrain-sampler 0))
+    (local controls (SandboxCameraControls {:camera camera
+                                             :toolbar-state toolbar-state
+                                             :flight-controls flight-controls
+                                             :terrain-sampler fake-sampler
+                                             :eye-height 0.0
+                                             :gravity 0.0
+                                             :movement-speed 10.0}))
+    (controls:on-key-down {:key 119})
+    (controls:on-mouse-button-down {:button 1 :x 0 :y 0})
+    (toolbar-state:set-interaction-mode mode)
+    (controls:on-key-up {:key 119})
+    (controls:on-mouse-button-up {:button 1 :x 0 :y 0})
+    (toolbar-state:set-interaction-mode :walk)
+    (controls:update 1000)
+    (controls:on-mouse-motion {:x 100 :y 0})
+    (assert (= camera.position.z 0)
+            (.. (tostring mode) " release must clear stale Walk W state"))
+    (assert (= (length camera.yaw-calls) 0)
+            (.. (tostring mode) " release must clear stale Walk mouse-look state"))
+    (assert (= (length flight-controls.key-calls) 0)
+            (.. (tostring mode) " release must not delegate to flight controls"))
+    (controls:drop))
+  true)
+
 (fn flight-to-grounded-on-key-down-without-sampler-errors []
   "When toggled to grounded without terrain sampler, on-key-down must error
   before mutating any grounded state."
@@ -695,6 +725,8 @@
                        :fn walk-arrow-keys-yaw-and-clamp-pitch})
 (table.insert tests {:name "object modes ignore camera controls"
                        :fn object-modes-ignore-camera-controls})
+(table.insert tests {:name "object-mode releases clear Walk input state"
+                       :fn object-mode-releases-clear-walk-input-state})
 (table.insert tests {:name "flight to grounded syncs y-channel from current camera Y"
                        :fn flight-to-grounded-syncs-y-channel-from-current-camera-y})
 (table.insert tests {:name "grounded landing snaps channel to target-y not below terrain"

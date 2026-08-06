@@ -245,7 +245,8 @@
         (= mode :walk)
         (do
           (ensure-grounded-deps!)
-          (set (. grounded-keys payload.key) nil))))
+          (set (. grounded-keys payload.key) nil))
+        (set (. grounded-keys payload.key) nil)))
 
   (fn on-mouse-wheel [self payload]
     (local mode (current-navigation-mode))
@@ -274,7 +275,9 @@
         (do
           (ensure-grounded-deps!)
           (when (= payload.button SDL_BUTTON_LEFT)
-            (set grounded-drag-look-start nil)))))
+            (set grounded-drag-look-start nil)))
+        (when (= payload.button SDL_BUTTON_LEFT)
+          (set grounded-drag-look-start nil))))
 
   (fn on-mouse-motion [self payload]
     (local mode (current-navigation-mode))
