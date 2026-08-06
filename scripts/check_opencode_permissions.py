@@ -77,8 +77,9 @@ def _mapping_entries(raw: str, parent: str) -> list[tuple[str, str]]:
 
 def _normalized_command(pattern: str) -> str:
     command = " ".join(pattern.strip().lower().split())
-    if command.startswith("git -c * "):
-        return command.removeprefix("git -c * ")
+    parts = command.split()
+    if len(parts) > 3 and parts[0] == "git" and parts[1] == "-c":
+        return "git " + " ".join(parts[3:])
     return command
 
 
