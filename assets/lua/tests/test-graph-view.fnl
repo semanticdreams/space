@@ -3653,7 +3653,7 @@
 (table.insert tests {:name "GraphView double drop errors"
                      :fn graph-view-double-drop-errors})
 (table.insert tests {:name "GraphView public API errors after drop"
-                     :fn graph-view-public-api-errors-after-drop})
+                      :fn graph-view-public-api-errors-after-drop})
 (table.insert tests {:name "GraphView updates selection and focus borders" :fn graph-view-updates-selection-and-focus-borders})
 (table.insert tests {:name "GraphView auto-focus updates focus ring" :fn graph-view-autofocus-updates-focus-ring})
 (table.insert tests {:name "GraphView point click focuses node under logical input scaling"
@@ -4197,6 +4197,71 @@
             (assert (string.find (tostring err) "requires app.panel-transfer" 1 true)
                     "Receiver extra panel restore error should mention missing panel-transfer"))))
 
+(fn make-test-camera [position]
+    (local camera {:position (if position position (glm.vec3 10 20 100))})
+    (set camera.set-position
+         (fn [self next-position]
+             (set self.position next-position)))
+    camera)
+
+(fn graph-view-reveal-node-selects-focuses-and-centers []
+    (local graph (Graph {:with-start false}))
+    (local graph-map (GraphMap.GraphMap {:graph graph :id "main" :name "Main"}))
+    (register-graph-map-test-loaders graph ["test:alpha"])
+    (local node (Graph.GraphNode {:key "test:alpha" :label "Alpha"}))
+    (graph-map:add-node node)
+    (local camera (make-test-camera (glm.vec3 10 20 100)))
+    (local ctx (make-ctx))
+    (local view (GraphView {:graph-map graph-map
+                            :ctx ctx
+                            :camera camera
+                            :data-dir "/tmp/space/tests/graph-view-reveal"}))
+    (local point (. view.points node))
+    (assert point "GraphView should create a presentation for the node")
+    (point:set-position (glm.vec3 42 24 0))
+    (view:reveal-node node)
+    (assert (= (length view.selection.selected-nodes) 1)
+            "reveal-node should select exactly one node")
+    (assert (= (. view.selection.selected-nodes 1) node)
+            "reveal-node should select the requested node")
+    (assert (= (ctx.focus.manager:get-focused-node) (. view.focus-nodes node))
+            "reveal-node should request focus for the requested node")
+    (assert (= camera.position.x 42) "reveal-node should center camera x on compact node")
+    (assert (= camera.position.y 24) "reveal-node should center camera y on compact node")
+    (assert (= camera.position.z 100) "reveal-node should preserve camera z")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
+(fn graph-view-open-node-reveals-and-opens []
+    (var opened-count 0)
+    (fn TestNodeView [_node]
+        (fn [_ctx]
+            (set opened-count (+ opened-count 1))
+            {:layout (Layout {:name "test-node-view"})
+             :drop (fn [_self])}))
+    (local graph (Graph {:with-start false}))
+    (local graph-map (GraphMap.GraphMap {:graph graph :id "main" :name "Main"}))
+    (register-graph-map-test-loaders graph ["test:open"])
+    (local node (Graph.GraphNode {:key "test:open" :label "Open Me" :view TestNodeView}))
+    (graph-map:add-node node)
+    (local camera (make-test-camera (glm.vec3 0 0 75)))
+    (local ctx (make-ctx))
+    (local view (GraphView {:graph-map graph-map
+                            :ctx ctx
+                            :camera camera
+                            :data-dir "/tmp/space/tests/graph-view-open"}))
+    (local result (view:open-node "test:open"))
+    (assert (= result true) "open-node should return true when it opens a node")
+    (assert (= (length view.selection.selected-nodes) 1)
+            "open-node should reveal/select the node before opening")
+    (assert (= (. view.selection.selected-nodes 1) node)
+            "open-node should select the opened node")
+    (assert (= opened-count 1) "open-node should build the node view once")
+    (view:drop)
+    (graph-map:drop)
+    (graph:drop))
+
 (table.insert tests {:name "GraphView capture-state emits selected_node_keys" :fn graph-view-capture-restore-selected-node-keys})
 (table.insert tests {:name "GraphView capture/restore preserves node selection" :fn graph-view-capture-restore-preserves-selection})
 (table.insert tests {:name "GraphView node-view panel capture includes graph-map-id" :fn graph-node-view-capture-includes-graph-map-id})
@@ -4211,6 +4276,10 @@
                      :fn llm-message-extra-panel-transfer-updates-target})
 (table.insert tests {:name "GraphView capture-state persists extra panels" :fn graph-view-capture-persists-extra-panels})
 (table.insert tests {:name "GraphView receiver extra panel restore requires panel-transfer" :fn graph-view-extra-panel-receiver-restore-errors-without-panel-transfer})
+(table.insert tests {:name "GraphView reveal-node selects focuses and centers"
+                     :fn graph-view-reveal-node-selects-focuses-and-centers})
+(table.insert tests {:name "GraphView open-node reveals and opens"
+                     :fn graph-view-open-node-reveals-and-opens})
 
 (local main
   (fn []
