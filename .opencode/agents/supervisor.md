@@ -22,18 +22,15 @@ permission:
   task: allow
   external_directory:
     "*": ask
-    "~/.local/share/opencode/opencode.db*": allow
-    "~/.local/share/opencode/tool-output/**": allow
-    "~/.local/share/opencode/log/**": allow
     "~/space/**": allow
   webfetch: deny
   websearch: deny
   question: deny
   bash:
-    "*": allow
+    "*": ask
     "git push*": ask
     "git push origin opencode/workflow-debug/*": allow
-    "git push origin main": ask
+    "git push origin main": deny
     "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
     "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": allow
     "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow
@@ -42,24 +39,14 @@ permission:
     "gh repo view --json owner,name --jq *": allow
     "gh api repos/*/*/branches/main/protection*": allow
     "gh api repos/*/*/rules/branches/main*": allow
-    "gh pr create --base main --head automation/daily-devlog/????-??-?? --fill": allow
-    "gh pr create --base main --head automation/weekly-agent-workflow/????-W?? --fill": allow
-    "gh pr create --base main --head opencode/workflow-debug-pr/* --fill": allow
     "gh pr view automation/daily-devlog/????-??-??": allow
     "gh pr view automation/weekly-agent-workflow/????-W??*": allow
     "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": allow
-    "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
-    "gh pr merge --auto --merge automation/daily-devlog/????-??-??": allow
-    "gh pr merge --auto --squash automation/weekly-agent-workflow/????-W??": allow
-    "gh pr merge --auto --merge automation/weekly-agent-workflow/????-W??": allow
-    "gh pr view * --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url": allow
     "gh pr checks * --watch": allow
-    "gh run list --workflow test.yml --event merge_group --limit * --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt": allow
-    "gh run watch * --exit-status --interval 100": allow
-    "git push origin --delete *": ask
+    "git push origin --delete *": deny
     "git push *--force*": deny
     "git push * -f*": deny
-    "git push -f *": ask
+    "git push -f *": deny
     "git pull*": ask
     "git pull --ff-only origin main": allow
     "git merge*": ask
@@ -69,35 +56,35 @@ permission:
     "git restore*": deny
     "git checkout --*": deny
     "git commit --amend*": deny
-    "git rebase*": ask
+    "git rebase*": deny
     "git -C * push*": ask
     "git -C * reset*": deny
     "git -C * clean*": deny
     "git -C * restore*": deny
     "git -C * checkout --*": deny
     "git -C * commit --amend*": deny
-    "git -C * rebase*": ask
+    "git -C * rebase*": deny
     "rm -rf*": deny
     "rm -fr*": deny
     "rm -r*": deny
     "rm -f*": deny
     "find * -delete*": deny
-    "sudo *": ask
-    "sudo": ask
-    "su *": ask
-    "su": ask
-    "doas *": ask
-    "doas": ask
-    "apt *": ask
-    "apt": ask
-    "apt-get *": ask
-    "apt-get": ask
-    "dnf *": ask
-    "dnf": ask
-    "pacman *": ask
-    "pacman": ask
-    "brew *": ask
-    "brew": ask
+    "sudo *": deny
+    "sudo": deny
+    "su *": deny
+    "su": deny
+    "doas *": deny
+    "doas": deny
+    "apt *": deny
+    "apt": deny
+    "apt-get *": deny
+    "apt-get": deny
+    "dnf *": deny
+    "dnf": deny
+    "pacman *": deny
+    "pacman": deny
+    "brew *": deny
+    "brew": deny
 ---
 
 You are the supervisor. Your job is coordination — follow skills to dispatch
@@ -237,6 +224,9 @@ blocking check, and available evidence.
 | **implementer** | Task implementation, TDD, fix rounds | deepseek |
 | **reviewer** | Spec compliance + code quality review, re-review | gpt-5.5 (high) |
 | **adjudicator** | Breaker cap: accept/park/escalate findings | gpt-5.5 (high) |
+| **git-integrator** | Guarded current-branch Git status, fetch, safe merge from origin/main, and push wrappers | gpt-5.5 |
+| **github-operator** | Guarded GitHub auth/protection checks, PR creation, auto-merge, and merge-queue polling wrappers | gpt-5.5 |
+| **config-auditor** | Guarded OpenCode home config verification for project-supplied non-secret support links | gpt-5.5 |
 
 Dispatch with the `task` tool and the appropriate `subagent_type`. Provide each
 subagent exactly what it needs — never paste your full session history.
@@ -252,6 +242,32 @@ Skills describe actions. On OpenCode these resolve to:
 - "Run a shell command" → `bash`
 - "Search file contents" / "find files" → `grep`, `glob`
 - "Fetch a URL" → `webfetch`
+
+
+## Capability Boundary Routing
+
+Privileged Git, GitHub, and OpenCode home config verification are capability
+boundaries. Dispatch the dedicated capability subagent instead of requesting
+direct broad permission:
+
+- Dispatch `git-integrator` for current-branch integration status,
+  `origin/main` fetch, safe merge from `origin/main`, and pushing the current
+  branch through `scripts/opencode_git_integrate.py`.
+- Dispatch `github-operator` for GitHub authentication checks, target-branch
+  protection checks, PR creation, auto-merge enablement, PR state reads, and
+  merge-queue polling through `scripts/opencode_pr_operator.py`.
+- Dispatch `config-auditor` for OpenCode home config verification through
+  `scripts/verify_opencode_home_config.py`.
+
+If a capability wrapper returns `human_decision_required`, report
+`HUMAN_DECISION_REQUIRED` with the wrapper evidence. Do not ask for one-off broad
+Git, GitHub, shell, external-directory, rebase, force-push, reset, clean,
+branch-delete, sudo/package-manager, or OpenCode credential/log/database access.
+
+Direct main push, force-push, rebase, reset, clean, broad branch deletion, broad
+recursive removal, `sudo`, `su`, `doas`, `apt`, `apt-get`, `dnf`, `pacman`, and
+`brew` are denied. Keep reviewer, implementer, and web-researcher boundaries
+unchanged.
 
 
 ## External Directory Access

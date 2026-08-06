@@ -182,6 +182,16 @@ Once your agent environment is connected to a Space checkout, these repository c
 - **PR CI** is the full integration gate. Do not claim ready-to-merge until the applicable PR CI gate is green.
 - **Required validation failures**: see [Validation continuation and current base](#validation-continuation-and-current-base) for the full contract.
 
+## Permission capability model
+
+Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.
+
+- **Routine project-scoped operations** stay with normal agents when they are already part of the assigned role and repository workflow, such as focused validation commands and local Git inspection (`git status`, `git diff`).
+- **Privileged bounded operations** go through capability agents instead of broad direct permissions. `git-integrator` handles reviewed Git integration boundaries, `github-operator` handles bounded GitHub PR/check/merge-queue operations, and `config-auditor` verifies repo-local OpenCode policy and configuration.
+- **Role-breaking or destructive/ambiguous operations** remain denied. Reviewer edit/bash, implementer push or external-directory access, web-researcher local read/bash, force-push, reset/clean, direct `origin/main` pushes, credential access, and similarly unsafe requests surface as `HUMAN_DECISION_REQUIRED` rather than being auto-approved.
+- **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
+- **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
+
 ## Validation continuation and current base
 
 Required validation failures are active debugging work, not a terminal workflow

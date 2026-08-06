@@ -11,6 +11,16 @@ description: Use when implementation is complete and reviewed, to run final vali
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
+## Capability Boundaries
+
+Safe base update and push steps dispatch `git-integrator`; do not request direct
+broad Git permission. PR creation, protection checks, auto-merge enablement, and
+merge-queue polling dispatch `github-operator`; do not request direct broad `gh`
+permission. OpenCode config verification, when needed, dispatches
+`config-auditor`. If a capability wrapper returns `human_decision_required`, the
+supervisor reports `HUMAN_DECISION_REQUIRED` with wrapper evidence and does not
+ask for a one-off broad command permission.
+
 ## Step 0: Verify Clean Working Tree
 
 ```bash
@@ -44,6 +54,10 @@ git fetch origin main
 git merge-base --is-ancestor origin/main HEAD
 ```
 
+In OpenCode sessions with capability agents available, dispatch
+`git-integrator` for the fetch/status decision instead of asking for direct Git
+permission.
+
 **If the merge-base check exits 0:** Continue to required validation.
 
 **If the merge-base check exits nonzero:** The branch has not incorporated
@@ -53,6 +67,10 @@ force-push. If a safe merge is permitted, run:
 ```bash
 git merge --no-edit origin/main
 ```
+
+In OpenCode sessions with capability agents available, dispatch
+`git-integrator` for the safe merge wrapper instead of requesting direct merge
+permission.
 
 If the merge has conflicts, generated-file changes, or code/test/doc changes
 that need repair, route that work through `implementer` → `reviewer` → pass.
@@ -129,6 +147,10 @@ git fetch origin main
 git merge-base --is-ancestor origin/main HEAD
 ```
 
+Dispatch `git-integrator` for the re-fetch/status check and current-branch push.
+Dispatch `github-operator` for PR creation, main protection checks, auto-merge
+enablement, and merge-queue polling.
+
 If the branch is no longer current with `origin/main`, do not push or create a
 PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes
 through `implementer` → `reviewer` → pass, commit reviewed fixes, and restart
@@ -137,12 +159,12 @@ because the remote/base moved, do not force-push; fetch, update by safe merge
 when permitted, and restart from Step 0.
 
   3. If both checks pass: execute the default action automatically:
-     - Push the current branch.
-     - Create a pull request targeting the base branch.
+      - Push the current branch through `git-integrator`.
+      - Create a pull request targeting the base branch through `github-operator`.
        - Enable auto-merge (or queue the PR) when branch protection allows it.
        - Poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present (PR merged).\
-         Inspect merge_group runs with `gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`\
-         and `gh run watch <run-id> --exit-status --interval 100` when needed.
+          Use `github-operator` wrapper evidence for merge-queue polling; do not
+          run direct broad `gh run list` or `gh run watch` commands.
 
       Do not update the PR branch
       solely because origin/main advanced after PR creation. Merge queue
@@ -232,6 +254,10 @@ git fetch origin main
 git merge-base --is-ancestor origin/main HEAD
 ```
 
+Dispatch `git-integrator` for the re-fetch/status check and push. Dispatch
+`github-operator` for PR creation, protection checks, auto-merge enablement, and
+merge-queue polling.
+
 If the branch is no longer current with `origin/main`, do not push or create a
 PR. Safe-merge `origin/main` when permitted, route conflicts or resulting fixes
 through `implementer` → `reviewer` → pass, commit reviewed fixes, and restart
@@ -239,7 +265,8 @@ from Step 0 so validation runs on the updated branch. If push is rejected
 because the remote/base moved, do not force-push; fetch, update by safe merge
 when permitted, and restart from Step 0.
 
-Push the branch and create the pull request using the forge's tooling. Keep the worktree — the human iterates on PR feedback there.
+Push the branch through `git-integrator` and create the pull request through
+`github-operator`. Keep the worktree — the human iterates on PR feedback there.
 
 ### Option 3: Keep As-Is
 
