@@ -230,6 +230,19 @@ def test_classify_permission_friction_does_not_double_count_destructive_bounded_
     assert analyzer.classify_permission_friction(text) == ["destructive-ambiguous"]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "implementer push permission denied for git push origin HEAD:refs/heads/feature/x",
+        "permission prompt for implementer external access before gh pr view",
+        "permission denied when reviewer tried bash for gh pr view",
+        "web-researcher local bash permission prompt for git push origin HEAD:refs/heads/feature/x",
+    ],
+)
+def test_classify_permission_friction_does_not_double_count_role_mismatch_bounded_variants(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["role-mismatch"]
+
+
 def test_classify_permission_friction_fails_closed_for_general_prompt() -> None:
     assert analyzer.classify_permission_friction("permission prompt requested approval") == ["destructive-ambiguous"]
 
