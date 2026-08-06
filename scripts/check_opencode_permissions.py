@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Fail-closed policy checks for repo-local OpenCode permissions."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class PolicyViolation:
+    path: str
+    code: str
+    message: str
+
+
+REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
+REQUIRED_SKILL_KEYS = {"name", "description"}
+CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor"}
+DESTRUCTIVE_PATTERNS = [
+    r'git push origin main"?:\s*allow',
+    r'git push \*--force\*"?:\s*allow',
+    r'git rebase\*"?:\s*ask',
+    r'git reset\*"?:\s*ask',
+    r'git clean\*"?:\s*allow',
+    r'sudo \*"?:\s*ask',
+    r'apt-get \*"?:\s*allow',
+    r'gh \*"?:\s*allow',
+]
+SECRET_EXTERNAL_PATTERNS = ("auth.json", "auth.jsonc", "secret", "token")
+
+
+def _rel(repo_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _frontmatter(text: str) -> tuple[dict[str, str], str | None]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            raw = "\n".join(lines[1:index])
+            keys: dict[str, str] = {}
+            for line in lines[1:index]:
+                if line.startswith((" ", "\t")) or ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                keys[key.strip()] = value.strip().strip('"\'')
+            return keys, raw
+    return {}, None
+
+
+def _has_scalar_permission(raw: str, key: str, action: str) -> bool:
+    return re.search(rf"(?m)^\s{{2}}{re.escape(key)}:\s*{re.escape(action)}\s*$", raw) is not None
+
+
+def _has_mapping_action(raw: str, parent: str, pattern: str, action: str) -> bool:
+    parent_match = re.search(rf"(?m)^\s{{2}}{re.escape(parent)}:\s*$", raw)
+    if not parent_match:
+        return False
+    tail = raw[parent_match.end() :]
+    block_lines = []
+    for line in tail.splitlines():
+        if line.startswith("  ") and not line.startswith("    ") and line.strip():
+            break
+        block_lines.append(line)
+    block = "\n".join(block_lines)
+    return re.search(rf"(?m)^\s{{4}}[\"']?{re.escape(pattern)}[\"']?:\s*{re.escape(action)}\s*$", block) is not None
+
+
+def _violation(path: Path, repo_root: Path, code: str, message: str) -> PolicyViolation:
+    return PolicyViolation(_rel(repo_root, path), code, message)
+
+
+def _check_opencode_json(repo_root: Path) -> list[PolicyViolation]:
+    path = repo_root / ".opencode" / "opencode.json"
+    violations: list[PolicyViolation] = []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [_violation(path, repo_root, "opencode-json", f".opencode/opencode.json must parse as JSON: {error}")]
+    if data.get("default_agent") != "supervisor":
+        violations.append(_violation(path, repo_root, "opencode-json", 'opencode.json must keep "default_agent": "supervisor"'))
+    return violations
+
+
+def _check_unsafe_text(path: Path, repo_root: Path, raw: str) -> list[PolicyViolation]:
+    violations = []
+    for pattern in DESTRUCTIVE_PATTERNS:
+        if re.search(pattern, raw):
+            violations.append(_violation(path, repo_root, "unsafe-permission", f"Unsafe permission grant matched policy pattern: {pattern}"))
+    if re.search(r'(?m)^\s+external_directory:\s*(allow|ask)\s*$', raw):
+        violations.append(_violation(path, repo_root, "unsafe-permission", "external_directory must not be a broad scalar allow/ask"))
+    if _has_mapping_action(raw, "external_directory", "*", "allow"):
+        violations.append(_violation(path, repo_root, "unsafe-permission", "external_directory must not allow broad * access"))
+    return violations
+
+
+def _check_role_boundaries(path: Path, repo_root: Path, name: str, raw: str) -> list[PolicyViolation]:
+    violations: list[PolicyViolation] = []
+    if name == "reviewer":
+        for key in ("edit", "task", "external_directory", "webfetch", "websearch", "question", "bash"):
+            if not _has_scalar_permission(raw, key, "deny"):
+                violations.append(_violation(path, repo_root, "role-boundary", f"reviewer must keep {key}: deny"))
+    elif name == "implementer":
+        if not _has_scalar_permission(raw, "external_directory", "deny"):
+            violations.append(_violation(path, repo_root, "role-boundary", "implementer must keep external_directory: deny"))
+        if not _has_mapping_action(raw, "bash", "git push*", "deny"):
+            violations.append(_violation(path, repo_root, "role-boundary", "implementer must deny git push*"))
+    elif name == "web-researcher":
+        for key in ("read", "glob", "grep", "list", "lsp", "edit", "task", "external_directory", "question", "bash"):
+            if not _has_scalar_permission(raw, key, "deny"):
+                violations.append(_violation(path, repo_root, "role-boundary", f"web-researcher must keep local {key}: deny"))
+        for key in ("webfetch", "websearch"):
+            if not _has_scalar_permission(raw, key, "allow"):
+                violations.append(_violation(path, repo_root, "role-boundary", f"web-researcher must keep {key}: allow"))
+    return violations
+
+
+def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str) -> list[PolicyViolation]:
+    if name not in CAPABILITY_AGENTS:
+        return []
+    violations: list[PolicyViolation] = []
+    for key in ("edit", "task", "webfetch", "websearch", "question"):
+        if not _has_scalar_permission(raw, key, "deny"):
+            violations.append(_violation(path, repo_root, "capability-boundary", f"{name} must keep {key}: deny"))
+    if name != "config-auditor" and not _has_scalar_permission(raw, "external_directory", "deny"):
+        violations.append(_violation(path, repo_root, "capability-boundary", f"{name} must deny external_directory"))
+    if name == "config-auditor":
+        if not _has_mapping_action(raw, "external_directory", "~/.config/opencode/**", "allow"):
+            violations.append(_violation(path, repo_root, "capability-boundary", "config-auditor external access must be limited to ~/.config/opencode/**"))
+        for secret in SECRET_EXTERNAL_PATTERNS:
+            if secret not in raw:
+                violations.append(_violation(path, repo_root, "capability-boundary", f"config-auditor must deny {secret}-looking OpenCode home paths"))
+    return violations
+
+
+def _check_agents(repo_root: Path) -> list[PolicyViolation]:
+    agents_dir = repo_root / ".opencode" / "agents"
+    violations: list[PolicyViolation] = []
+    for path in sorted(agents_dir.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        keys, raw = _frontmatter(text)
+        name = path.stem
+        if raw is None:
+            violations.append(_violation(path, repo_root, "agent-frontmatter", "agent file must start with frontmatter"))
+            continue
+        missing = REQUIRED_AGENT_KEYS - set(keys)
+        if missing:
+            violations.append(_violation(path, repo_root, "agent-frontmatter", f"agent frontmatter missing: {', '.join(sorted(missing))}"))
+        violations.extend(_check_unsafe_text(path, repo_root, raw))
+        violations.extend(_check_role_boundaries(path, repo_root, name, raw))
+        violations.extend(_check_capability_boundary(path, repo_root, name, raw))
+    return violations
+
+
+def _check_skills(repo_root: Path) -> list[PolicyViolation]:
+    skills_dir = repo_root / ".opencode" / "skills"
+    violations: list[PolicyViolation] = []
+    for path in sorted(skills_dir.glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        keys, raw = _frontmatter(text)
+        if raw is None:
+            violations.append(_violation(path, repo_root, "skill-frontmatter", "skill file must start with frontmatter"))
+            continue
+        missing = REQUIRED_SKILL_KEYS - set(keys)
+        if missing:
+            violations.append(_violation(path, repo_root, "skill-frontmatter", f"skill frontmatter missing: {', '.join(sorted(missing))}"))
+    return violations
+
+
+def check_repo(repo_root: Path) -> list[PolicyViolation]:
+    repo_root = repo_root.resolve()
+    violations: list[PolicyViolation] = []
+    violations.extend(_check_opencode_json(repo_root))
+    violations.extend(_check_agents(repo_root))
+    violations.extend(_check_skills(repo_root))
+    return violations
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", required=True, type=Path)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    violations = check_repo(args.repo_root)
+    status = "fail" if violations else "pass"
+    print(json.dumps({"status": status, "violations": [asdict(violation) for violation in violations]}, sort_keys=True))
+    return 1 if violations else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
