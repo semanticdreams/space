@@ -430,8 +430,8 @@
 (fn physics-anchor-mode-records-relative-anchor []
   (assert bt "Anchor drag test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-provider app.activity-drag-attachment-provider)
-  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -479,15 +479,15 @@
                     (string.format "relative-anchor z should be hit-point.z - body-center.z, got %.3f"
                                    (or drag.relative-anchor.z 0)))))]
     (cleanup)
-    (set app.activity-drag-attachment-provider original-provider)
+    (set app.activity-object-drag-mode-provider original-provider)
     (when (not ok)
       (error err))))
 
 (fn physics-anchor-mode-calls-applyForceAtPosition-during-drag []
   (assert bt "Anchor force test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-provider app.activity-drag-attachment-provider)
-  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -562,15 +562,15 @@
             (assert activate-called "Anchor mode should activate the body")
             (assert handled? "Anchor mode on-drag-update should return true to suppress teleport")))]
     (cleanup)
-    (set app.activity-drag-attachment-provider original-provider)
+    (set app.activity-object-drag-mode-provider original-provider)
     (when (not ok)
       (error err))))
 
 (fn physics-center-mode-allows-default-teleport []
   (assert bt "Center mode test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-provider app.activity-drag-attachment-provider)
-  (set app.activity-drag-attachment-provider (fn [] :center))
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :move))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -613,15 +613,15 @@
             (assert (not handled?)
                     "Center mode on-drag-update should return false to allow default teleport")))]
     (cleanup)
-    (set app.activity-drag-attachment-provider original-provider)
+    (set app.activity-object-drag-mode-provider original-provider)
     (when (not ok)
       (error err))))
 
 (fn physics-anchor-mode-errors-if-applyForceAtPosition-absent []
   (assert bt "Missing-API test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-provider app.activity-drag-attachment-provider)
-  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -685,15 +685,15 @@
                       "Error should mention applyForceAtPosition, got: %s"
                       (tostring call-err)))))]
     (cleanup)
-    (set app.activity-drag-attachment-provider original-provider)
+    (set app.activity-object-drag-mode-provider original-provider)
     (when (not ok)
       (error err))))
 
 (fn physics-anchor-drag-end-preserves-body-rotation []
   (assert bt "Anchor drag end test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-provider app.activity-drag-attachment-provider)
-  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local original-provider app.activity-object-drag-mode-provider)
+  (set app.activity-object-drag-mode-provider (fn [] :grab))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -778,7 +778,7 @@
                               (approx final-velocity.z 0)))
                     "Anchor drag end should NOT call apply-layout-to-body; body velocity should not be zeroed")))]
     (cleanup)
-    (set app.activity-drag-attachment-provider original-provider)
+    (set app.activity-object-drag-mode-provider original-provider)
     (when (not ok)
       (error err))))
 
