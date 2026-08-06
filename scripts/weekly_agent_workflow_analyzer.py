@@ -130,9 +130,18 @@ def classify_permission_friction(text: str) -> list[str]:
     return classes
 
 
-def _permission_friction_text(text: str) -> str:
-    lines = [line for line in text.splitlines() if PERMISSION_RE.search(line)]
-    return "\n".join(lines)
+def _permission_friction_contexts(session: dict[str, Any]) -> list[str]:
+    contexts: list[str] = []
+    for text in session.get("evidence_texts", []):
+        if isinstance(text, str) and PERMISSION_RE.search(text):
+            contexts.append(text)
+    for excerpt in session.get("excerpts", []):
+        if excerpt.get("source") == "database":
+            continue
+        text = excerpt.get("text", "")
+        if PERMISSION_RE.search(text):
+            contexts.append(text)
+    return contexts
 
 
 def redact_text(text: str) -> tuple[str, list[str]]:
@@ -240,6 +249,7 @@ def analyze(config: AnalyzerConfig) -> dict[str, Any]:
                 "redactions": sorted(set(title_redactions + model_redactions)),
                 "excerpts": excerpts[:3],
                 "evidence_text": text_blob,
+                "evidence_texts": evidence_texts,
                 "_raw_session_id": row["id"],
             }
         )
@@ -247,6 +257,7 @@ def analyze(config: AnalyzerConfig) -> dict[str, Any]:
     findings = _findings(sessions)
     for session in sessions:
         del session["evidence_text"]
+        del session["evidence_texts"]
         del session["_raw_session_id"]
     result = {
         "schema_version": 1,
@@ -533,15 +544,10 @@ def _findings(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 classes: dict[str, int] = {}
                 refs_by_class: dict[str, set[str]] = {}
                 for session in sessions:
-                    text = str(session.get("evidence_text", "")) + "\n" + "\n".join(
-                        excerpt.get("text", "") for excerpt in session.get("excerpts", [])
-                    )
-                    permission_text = _permission_friction_text(text)
-                    if not permission_text:
-                        continue
-                    for class_id in classify_permission_friction(permission_text):
-                        classes[class_id] = classes.get(class_id, 0) + 1
-                        refs_by_class.setdefault(class_id, set()).add(session["session_ref"])
+                    for permission_text in _permission_friction_contexts(session):
+                        for class_id in classify_permission_friction(permission_text):
+                            classes[class_id] = classes.get(class_id, 0) + 1
+                            refs_by_class.setdefault(class_id, set()).add(session["session_ref"])
                 finding["classes"] = dict(sorted(classes.items()))
                 finding["session_refs_by_class"] = {
                     class_id: sorted(class_refs) for class_id, class_refs in sorted(refs_by_class.items())

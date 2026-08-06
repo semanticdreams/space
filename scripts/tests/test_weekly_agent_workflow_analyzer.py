@@ -254,6 +254,22 @@ def test_permission_friction_finding_includes_classes_and_session_refs(tmp_path:
     }
 
 
+def test_permission_friction_finding_classifies_adjacent_command_lines(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    append_fixture_part(config.opencode_data_dir, "project-session-1", "permission prompt requested approval\nmake test", 1)
+    append_fixture_part(config.opencode_data_dir, "project-session-1", "permission denied\nCommand: gh pr view", 2)
+
+    result = analyzer.analyze(config)
+
+    finding = next(item for item in result["findings"] if item["id"] == "permission-friction")
+    session_ref = result["sessions"][0]["session_ref"]
+    assert finding["classes"] == {"privileged-bounded": 1, "routine-project-scoped": 1}
+    assert finding["session_refs_by_class"] == {
+        "privileged-bounded": [session_ref],
+        "routine-project-scoped": [session_ref],
+    }
+
+
 def test_permission_friction_classification_preserves_redaction_and_session_refs(tmp_path: Path) -> None:
     config = config_for(tmp_path)
     append_fixture_part(
