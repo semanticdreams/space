@@ -191,12 +191,27 @@ def audit_opencode_home(repo_root: Path, opencode_home: Path) -> dict[str, objec
             skipped_sensitive_count += 1
             continue
         if entry.name in {"package.json", "package-lock.json"}:
-            local_support.append(entry.name)
+            if entry.is_symlink():
+                unsafe.append({"entry": entry.name, "reason": "support_entry_is_symlink"})
+            elif entry.is_file():
+                local_support.append(entry.name)
+            else:
+                unsafe.append({"entry": entry.name, "reason": "support_entry_is_not_regular_file"})
             continue
-        if entry.name == "plugins" and entry.is_dir():
+        if entry.name == "plugins":
+            if entry.is_symlink():
+                unsafe.append({"entry": entry.name, "reason": "support_entry_is_symlink"})
+                continue
+            if not entry.is_dir():
+                unsafe.append({"entry": entry.name, "reason": "support_entry_is_not_local_directory"})
+                continue
             plugin = entry / "rtk.ts"
-            if plugin.exists() and not plugin.is_symlink():
+            if plugin.is_symlink():
+                unsafe.append({"entry": "plugins/rtk.ts", "reason": "support_entry_is_symlink"})
+            elif plugin.exists() and plugin.is_file():
                 local_support.append("plugins/rtk.ts")
+            elif plugin.exists():
+                unsafe.append({"entry": "plugins/rtk.ts", "reason": "support_entry_is_not_regular_file"})
             plugin_unexpected = [child.name for child in entry.iterdir() if child.name != "rtk.ts" and not _is_sensitive_entry(child)]
             unexpected.extend(f"plugins/{name}" for name in plugin_unexpected)
             continue

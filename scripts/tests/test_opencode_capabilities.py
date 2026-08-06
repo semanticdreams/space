@@ -138,6 +138,63 @@ def test_audit_opencode_home_fails_closed_when_expected_symlink_resolves_outside
     assert "agents" in json.dumps(result)
 
 
+def test_audit_opencode_home_fails_closed_for_symlinked_package_support_file(tmp_path: Path) -> None:
+    repo = init_git_repo(tmp_path / "space")
+    create_repo_opencode_tree(repo)
+    home = make_opencode_home(tmp_path, repo)
+    outside = tmp_path / "outside-package.json"
+    outside.write_text('{"type":"module"}\n', encoding="utf-8")
+    (home / "package.json").unlink()
+    (home / "package.json").symlink_to(outside)
+
+    result = capabilities.audit_opencode_home(repo, home)
+
+    serialized = json.dumps(result)
+    assert result["status"] == "human_decision_required"
+    assert "package.json" in serialized
+    assert "support_entry_is_symlink" in serialized
+
+
+def test_audit_opencode_home_fails_closed_for_symlinked_plugins_directory_without_traversing_it(
+    tmp_path: Path,
+) -> None:
+    repo = init_git_repo(tmp_path / "space")
+    create_repo_opencode_tree(repo)
+    home = make_opencode_home(tmp_path, repo)
+    outside_plugins = tmp_path / "outside-plugins"
+    outside_plugins.mkdir()
+    (outside_plugins / "rtk.ts").write_text("external plugin content must not be inspected\n", encoding="utf-8")
+    (home / "plugins" / "rtk.ts").unlink()
+    (home / "plugins").rmdir()
+    (home / "plugins").symlink_to(outside_plugins, target_is_directory=True)
+
+    result = capabilities.audit_opencode_home(repo, home)
+
+    serialized = json.dumps(result)
+    assert result["status"] == "human_decision_required"
+    assert "plugins" in serialized
+    assert "support_entry_is_symlink" in serialized
+    assert "rtk.ts" not in serialized
+    assert "external plugin content" not in serialized
+
+
+def test_audit_opencode_home_fails_closed_for_symlinked_rtk_plugin_file(tmp_path: Path) -> None:
+    repo = init_git_repo(tmp_path / "space")
+    create_repo_opencode_tree(repo)
+    home = make_opencode_home(tmp_path, repo)
+    outside_plugin = tmp_path / "external-rtk.ts"
+    outside_plugin.write_text("export default async () => ({})\n", encoding="utf-8")
+    (home / "plugins" / "rtk.ts").unlink()
+    (home / "plugins" / "rtk.ts").symlink_to(outside_plugin)
+
+    result = capabilities.audit_opencode_home(repo, home)
+
+    serialized = json.dumps(result)
+    assert result["status"] == "human_decision_required"
+    assert "plugins/rtk.ts" in serialized
+    assert "support_entry_is_symlink" in serialized
+
+
 def test_audit_opencode_home_does_not_read_auth_json_or_leak_secret_text(tmp_path: Path) -> None:
     repo = init_git_repo(tmp_path / "space")
     create_repo_opencode_tree(repo)
