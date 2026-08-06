@@ -33,11 +33,6 @@
             (error (.. "Invalid activity object drag mode: " (tostring mode)))))
       nil))
 
-(fn drag-attachment-mode []
-  (if (= (activity-object-drag-mode) :grab)
-      :anchor
-      :center))
-
 (fn clickables-active? []
   (assert app.clickables "state runtime requires app.clickables")
   app.clickables.active?)
@@ -183,7 +178,6 @@
  :ctrl-held? ctrl-held?
  :alt-held? alt-held?
  :activity-object-drag-mode activity-object-drag-mode
- :drag-attachment-mode drag-attachment-mode
  :active-controls active-controls
  :clickables-active? clickables-active?
  :movables-active? movables-active?

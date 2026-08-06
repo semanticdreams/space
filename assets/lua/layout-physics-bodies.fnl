@@ -2,6 +2,7 @@
 (local bt (require :bt))
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
+(local PhysicsPointGrab (require :physics-point-grab))
 (local Runtime (require :state-runtime))
 
 (local safe-vec3? CoordinateGuard.safe-vec3?)
@@ -281,8 +282,8 @@
       (copy-vec3-into! entry.spawn local-offset)
       (set entry.spawn (glm.vec3 local-offset.x local-offset.y local-offset.z))))
 
-(fn drag-attachment-mode []
-  (Runtime.drag-attachment-mode))
+(fn object-drag-mode []
+  (Runtime.activity-object-drag-mode))
 
 (fn resolve-entry-world-state [entry base-position base-rotation positioned]
   (local body entry.body)
@@ -292,11 +293,11 @@
         nil))
   {:body body
    :world-position
-   (if entry.dragging
-       (if (= (drag-attachment-mode) :anchor)
-           (if transform
-               (do
-                 (local origin (transform:getOrigin))
+    (if entry.dragging
+        (if (= (object-drag-mode) :grab)
+            (if transform
+                (do
+                  (local origin (transform:getOrigin))
                  (physics-glm-vec3 origin))
                (+ positioned.layout.position
                   (positioned.layout.rotation:rotate (half-size entry))))
@@ -482,35 +483,60 @@
 
 (fn compute-body-center [entry]
   (if (and entry.body entry.body.getCenterOfMassTransform)
-      (let [transform (entry.body:getCenterOfMassTransform)
-            origin (transform:getOrigin)]
+      (do
+        (local transform (entry.body:getCenterOfMassTransform))
+        (local origin (transform:getOrigin))
         (glm.vec3 (or origin.x 0) (or origin.y 0) (or origin.z 0)))
-      (let [layout (and entry.positioned entry.positioned.layout)]
+      (do
+        (local layout (and entry.positioned entry.positioned.layout))
         (if layout
             (+ layout.position
                (layout.rotation:rotate (half-size entry)))
             (glm.vec3 0 0 0)))))
 
-(fn apply-anchor-force! [entry relative-anchor desired-world-position]
-  (local spring-strength 35.0)
-  (local body entry.body)
+(fn body-rotation-or-target [entry target]
+  (if (and entry.body entry.body.getCenterOfMassTransform)
+      (do
+        (local transform (entry.body:getCenterOfMassTransform))
+        (bt-quat->glm-quat (transform:getRotation)))
+      (assert target.rotation "Grab drag end requires target rotation")))
+
+(fn sync-grab-end! [entry target base inverse]
   (local body-center (compute-body-center entry))
-  (local current-anchor-world
-    (+ body-center relative-anchor))
-  (local spring-force
-    (* (- desired-world-position current-anchor-world)
-       (glm.vec3 spring-strength spring-strength spring-strength)))
-  ;; Apply velocity damping if getVelocityInLocalPoint is available
-  (local damped-force
-    (if body.getVelocityInLocalPoint
-        (let [velocity (body:getVelocityInLocalPoint (bt-glm-vec3 relative-anchor))]
-          (- spring-force (* (physics-glm-vec3 velocity) (glm.vec3 4.0 4.0 4.0))))
-        spring-force))
-  (body:applyForceAtPosition (bt-glm-vec3 damped-force)
-                              (bt-glm-vec3 relative-anchor))
-  ;; Activate the body
-  (when body.activate
-    (body:activate true)))
+  (local entry-half (half-size entry))
+  (local body-rotation (body-rotation-or-target entry target))
+  (local layout-position (- body-center (body-rotation:rotate entry-half)))
+  (set target.position layout-position)
+  (set target.rotation body-rotation)
+  (update-entry-offset-from-world-center! entry base.position inverse body-center)
+  (when (and entry.positioned entry.positioned.layout)
+    (entry.positioned.layout:mark-layout-dirty))
+  (ensure-body-matches-layout-size entry)
+  (activate-entry-body! entry)
+  (when entry.body
+    (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+
+(fn sync-move-end! [entry target base inverse]
+  (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
+  (update-entry-offset-from-world-center! entry base.position inverse world-center)
+  (when (and entry.positioned entry.positioned.layout)
+    (entry.positioned.layout:mark-layout-dirty))
+  (ensure-body-matches-layout-size entry)
+  (apply-layout-to-body entry)
+  (activate-entry-body! entry)
+  (when entry.body
+    (sync-moved-body entry.body)
+    (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+
+(fn destroy-point-grab! [entry drag]
+  (local point-grab
+    (if (and drag drag.point-grab)
+        drag.point-grab
+        entry.point-grab))
+  (when point-grab
+    (point-grab:destroy))
+  (set entry.point-grab nil)
+  true)
 
 (fn create-movable-entry [entity entry]
   (local target (and entry.positioned entry.positioned.layout))
@@ -520,71 +546,37 @@
      :key entry
      :owner entry.positioned
      :on-drag-start
-      (fn [_movable drag _payload]
-        (set entry.dragging true)
-        (ensure-body-matches-layout-size entry)
-        (when (= (drag-attachment-mode) :anchor)
-          (set drag.relative-anchor
-               (- drag.hit-point (compute-body-center entry)))))
+     (fn [_movable drag _payload]
+       (set entry.dragging true)
+       (when (= (object-drag-mode) :grab)
+         (assert entry.body "Grab drag requires a physics body on the entry")
+         (ensure-body-matches-layout-size entry)
+         (assert entry.body "Grab drag requires a physics body on the entry")
+         (set drag.point-grab
+              (PhysicsPointGrab.create {:physics app.engine.physics
+                                        :body entry.body
+                                        :hit-point drag.hit-point}))
+         (set entry.point-grab drag.point-grab))
+       (when (not (= (object-drag-mode) :grab))
+         (ensure-body-matches-layout-size entry)))
      :on-drag-update
-     (fn [movable drag update]
-       (local mode (drag-attachment-mode))
-       (if (= mode :anchor)
+     (fn [_movable drag update]
+       (if (= (object-drag-mode) :grab)
            (do
-             (assert entry.body "Anchor drag requires a physics body on the entry")
-             (assert entry.body.applyForceAtPosition
-                     "Anchor drag requires body:applyForceAtPosition binding")
-             (local body-center (compute-body-center entry))
-             (when (not drag.relative-anchor)
-               (set drag.relative-anchor
-                    (- drag.hit-point body-center)))
-             (apply-anchor-force! entry drag.relative-anchor update.new-position)
+             (assert drag.point-grab "Grab drag update requires an active point-grab session")
+             (assert update.hit "Grab drag update requires update.hit")
+             (drag.point-grab:update-target update.hit)
              true)
            false))
      :on-drag-end
-      (fn [_movable]
-        (set entry.dragging false)
-        (local base (entity-transform entity))
-        (local inverse (base.rotation:inverse))
-        (local mode (drag-attachment-mode))
-      (if (= mode :anchor)
-          (let [body-center (compute-body-center entry)
-                entry-half (half-size entry)
-                ;; Read body rotation from the actual body transform,
-                ;; not from stale layout state. Syncing layout FROM body
-                ;; ensures rotation applied by physics forces is preserved.
-                body-rotation (if (and entry.body entry.body.getCenterOfMassTransform)
-                                 (let [transform (entry.body:getCenterOfMassTransform)]
-                                   (bt-quat->glm-quat (transform:getRotation)))
-                                 (or target.rotation (glm.quat 1 0 0 0)))
-                layout-position (- body-center (body-rotation:rotate entry-half))]
-            ;; Sync layout FROM body (position and rotation).
-            (set target.position layout-position)
-            (set target.rotation body-rotation)
-            (update-entry-offset-from-world-center! entry base.position inverse body-center)
-            (when (and entry.positioned entry.positioned.layout)
-              (entry.positioned.layout:mark-layout-dirty))
-            (ensure-body-matches-layout-size entry)
-            ;; Do NOT call apply-layout-to-body for anchor mode:
-            ;; the body already holds the correct physics transform.
-            ;; apply-layout-to-body would overwrite current body rotation
-            ;; with a value derived from stale layout state.
-            (activate-entry-body! entry)
-            (when entry.body
-              (sync-moved-body entry.body)
-              (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
-            (do
-              (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
-              (update-entry-offset-from-world-center! entry base.position inverse world-center)
-              (when (and entry.positioned entry.positioned.layout)
-                (entry.positioned.layout:mark-layout-dirty))
-              (ensure-body-matches-layout-size entry)
-              (apply-layout-to-body entry)
-              (activate-entry-body! entry)
-              (when entry.body
-                (sync-moved-body entry.body)
-                (entry.body:applyForce (bt.Vector3 0 -0.5 0))))))
-     }))
+     (fn [_movable drag]
+       (set entry.dragging false)
+       (destroy-point-grab! entry drag)
+       (local base (entity-transform entity))
+       (local inverse (base.rotation:inverse))
+       (if (= (object-drag-mode) :grab)
+           (sync-grab-end! entry target base inverse)
+           (sync-move-end! entry target base inverse)))}))
 
 (fn collect-movables [entity]
   (var entries [])
