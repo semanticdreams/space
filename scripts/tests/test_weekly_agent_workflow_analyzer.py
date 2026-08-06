@@ -151,6 +151,76 @@ def test_redact_text_removes_json_style_secret_values_with_spaces() -> None:
     assert "secret-assignment" in labels
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "permission denied for make test",
+        "permission prompt blocked pytest",
+        "denied tool ctest",
+        "tool git status denied",
+        "permission denied for git diff",
+    ],
+)
+def test_classify_permission_friction_identifies_routine_project_scoped(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["routine-project-scoped"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "permission denied for git fetch origin main",
+        "permission prompt for git merge --no-edit origin/main",
+        "denied tool git push origin HEAD:refs/heads/feature/x",
+        "permission denied: gh pr create",
+        "permission prompt: gh pr view",
+        "denied tool gh pr merge --auto",
+        "tool gh run list denied",
+        "permission denied for gh run watch",
+    ],
+)
+def test_classify_permission_friction_identifies_privileged_bounded(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["privileged-bounded"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "permission denied when reviewer tried edit",
+        "permission prompt for reviewer bash",
+        "implementer push permission denied",
+        "permission denied for implementer external directory access",
+        "web-researcher local read denied",
+        "web-researcher bash permission prompt",
+    ],
+)
+def test_classify_permission_friction_identifies_role_mismatch(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["role-mismatch"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "permission denied for git push --force",
+        "permission prompt for git rebase origin/main",
+        "denied tool git reset --hard",
+        "permission denied for git clean -fd",
+        "permission denied for rm -rf build",
+        "sudo apt install permission prompt",
+        "denied tool git push origin HEAD:refs/heads/main",
+        "permission prompt mentioned auth.json",
+        "permission denied because token file requested",
+        "permission denied for broad home access",
+        "permission denied for root directory access",
+    ],
+)
+def test_classify_permission_friction_identifies_destructive_ambiguous(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["destructive-ambiguous"]
+
+
+def test_classify_permission_friction_fails_closed_for_general_prompt() -> None:
+    assert analyzer.classify_permission_friction("permission prompt requested approval") == ["destructive-ambiguous"]
+
+
 def test_analyze_redacts_json_style_secret_assignments(tmp_path: Path) -> None:
     config = config_for(tmp_path)
     append_fixture_part(
@@ -166,6 +236,40 @@ def test_analyze_redacts_json_style_secret_assignments(tmp_path: Path) -> None:
     assert "correct horse battery staple" not in serialized
     assert "plain secret value" not in serialized
     assert "opaque session value" not in serialized
+
+
+def test_permission_friction_finding_includes_classes_and_session_refs(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    append_fixture_part(config.opencode_data_dir, "project-session-1", "permission denied for make test", 1)
+    append_fixture_part(config.opencode_data_dir, "project-session-1", "permission prompt for gh pr view", 2)
+
+    result = analyzer.analyze(config)
+
+    finding = next(item for item in result["findings"] if item["id"] == "permission-friction")
+    session_ref = result["sessions"][0]["session_ref"]
+    assert finding["classes"] == {"privileged-bounded": 1, "routine-project-scoped": 1}
+    assert finding["session_refs_by_class"] == {
+        "privileged-bounded": [session_ref],
+        "routine-project-scoped": [session_ref],
+    }
+
+
+def test_permission_friction_classification_preserves_redaction_and_session_refs(tmp_path: Path) -> None:
+    config = config_for(tmp_path)
+    append_fixture_part(
+        config.opencode_data_dir,
+        "project-session-1",
+        "permission denied for git push --force using token=plain secret value from project-session-1",
+        1,
+    )
+
+    result = analyzer.analyze(config)
+    serialized = json.dumps(result)
+
+    finding = next(item for item in result["findings"] if item["id"] == "permission-friction")
+    assert finding["classes"] == {"destructive-ambiguous": 1}
+    assert "project-session-1" not in serialized
+    assert "plain secret value" not in serialized
 
 
 def test_discover_worktrees_includes_matching_origin_only(tmp_path: Path) -> None:
