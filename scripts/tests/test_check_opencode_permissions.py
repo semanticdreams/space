@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER = REPO_ROOT / "scripts" / "check_opencode_permissions.py"
@@ -102,19 +104,42 @@ def test_capability_agent_with_edit_allow_fails(tmp_path: Path):
     assert "capability-boundary" in violation_codes(repo)
 
 
-def test_unsafe_permission_patterns_fail(tmp_path: Path):
-    unsafe_lines = [
-        '    "git push origin main": allow',
-        '    "git push *--force*": allow',
-        '    "git rebase*": ask',
-        '    "git reset*": ask',
-        '    "git clean*": allow',
-        '    "sudo *": ask',
-        '    "apt-get *": allow',
-        '    "gh *": allow',
-        '    "*": allow',
-    ]
-    permission_text = "  bash:\n" + "\n".join(unsafe_lines[:-1]) + "\n  external_directory:\n" + unsafe_lines[-1] + "\n"
+@pytest.mark.parametrize(
+    "permission_text",
+    [
+        '  bash:\n    "git push origin main": allow\n',
+        "  bash:\n    'git push origin main': ask\n",
+        '  bash:\n    "git push *--force*": allow\n',
+        "  bash:\n    'git push -f *': ask\n",
+        '  bash:\n    "git commit --amend*": allow\n',
+        '  bash:\n    "git rebase*": allow\n',
+        "  bash:\n    'git rebase*': ask\n",
+        '  bash:\n    "git reset*": allow\n',
+        "  bash:\n    'git reset*': ask\n",
+        '  bash:\n    "git clean*": allow\n',
+        "  bash:\n    'git clean*': ask\n",
+        '  bash:\n    "git push origin --delete *": allow\n',
+        '  bash:\n    "rm -rf*": allow\n',
+        "  bash:\n    'rm -r*': ask\n",
+        '  bash:\n    "find * -delete*": allow\n',
+        '  bash:\n    "sudo *": allow\n',
+        "  bash:\n    'sudo *': ask\n",
+        '  bash:\n    "su *": allow\n',
+        '  bash:\n    "doas *": ask\n',
+        '  bash:\n    "apt *": allow\n',
+        "  bash:\n    'apt-get *': ask\n",
+        '  bash:\n    "dnf *": allow\n',
+        '  bash:\n    "pacman *": ask\n',
+        '  bash:\n    "brew *": allow\n',
+        '  bash:\n    "gh *": ask\n',
+        "  bash:\n    'gh *': allow\n",
+        '  external_directory:\n    "*": allow\n',
+        "  external_directory:\n    '~/**': ask\n",
+        '  external_directory:\n    "/**": allow\n',
+        '  external_directory:\n    "/home/**": ask\n',
+    ],
+)
+def test_each_unsafe_permission_pattern_fails_independently(tmp_path: Path, permission_text: str):
     repo = make_repo(tmp_path, agent_name="supervisor", permission_text=permission_text)
     codes = violation_codes(repo)
     assert "unsafe-permission" in codes

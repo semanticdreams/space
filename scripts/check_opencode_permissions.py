@@ -21,17 +21,8 @@ class PolicyViolation:
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
 CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor"}
-DESTRUCTIVE_PATTERNS = [
-    r'git push origin main"?:\s*allow',
-    r'git push \*--force\*"?:\s*allow',
-    r'git rebase\*"?:\s*ask',
-    r'git reset\*"?:\s*ask',
-    r'git clean\*"?:\s*allow',
-    r'sudo \*"?:\s*ask',
-    r'apt-get \*"?:\s*allow',
-    r'gh \*"?:\s*allow',
-]
 SECRET_EXTERNAL_PATTERNS = ("auth.json", "auth.jsonc", "secret", "token")
+BLOCKED_ACTIONS = {"allow", "ask"}
 
 
 def _rel(repo_root: Path, path: Path) -> str:
@@ -63,17 +54,67 @@ def _has_scalar_permission(raw: str, key: str, action: str) -> bool:
 
 
 def _has_mapping_action(raw: str, parent: str, pattern: str, action: str) -> bool:
+    return (pattern, action) in _mapping_entries(raw, parent)
+
+
+def _mapping_entries(raw: str, parent: str) -> list[tuple[str, str]]:
     parent_match = re.search(rf"(?m)^\s{{2}}{re.escape(parent)}:\s*$", raw)
     if not parent_match:
-        return False
+        return []
     tail = raw[parent_match.end() :]
     block_lines = []
     for line in tail.splitlines():
         if line.startswith("  ") and not line.startswith("    ") and line.strip():
             break
         block_lines.append(line)
-    block = "\n".join(block_lines)
-    return re.search(rf"(?m)^\s{{4}}[\"']?{re.escape(pattern)}[\"']?:\s*{re.escape(action)}\s*$", block) is not None
+    entries: list[tuple[str, str]] = []
+    for line in block_lines:
+        match = re.match(r"^\s{4}([\"']?)(.*?)\1:\s*(allow|ask|deny)\s*$", line)
+        if match:
+            entries.append((match.group(2), match.group(3)))
+    return entries
+
+
+def _normalized_command(pattern: str) -> str:
+    command = " ".join(pattern.strip().lower().split())
+    if command.startswith("git -c * "):
+        return command.removeprefix("git -c * ")
+    return command
+
+
+def _is_forbidden_bash_pattern(pattern: str) -> bool:
+    command = _normalized_command(pattern)
+    if command.startswith("git push origin main"):
+        return True
+    if command.startswith("git push origin --delete"):
+        return True
+    if command.startswith("git branch -d") or command.startswith("git branch --delete"):
+        return True
+    if command.startswith("git push") and ("--force" in command or re.search(r"(^|\s)-f($|\s|\*)", command)):
+        return True
+    if command.startswith(("git rebase", "git reset", "git clean", "git commit --amend")):
+        return True
+    if command.startswith(("rm -rf", "rm -fr", "rm -r")):
+        return True
+    if command.startswith("find ") and " -delete" in command:
+        return True
+    if command == "sudo" or command.startswith("sudo "):
+        return True
+    if command == "su" or command.startswith("su "):
+        return True
+    if command == "doas" or command.startswith("doas "):
+        return True
+    for manager in ("apt", "apt-get", "dnf", "pacman", "brew"):
+        if command == manager or command.startswith(f"{manager} "):
+            return True
+    return command in {"gh", "gh *", "gh*"}
+
+
+def _is_forbidden_external_pattern(pattern: str, action: str) -> bool:
+    normalized = pattern.strip().lower()
+    if action == "allow" and normalized in {"*", "**", "/*", "/**"}:
+        return True
+    return normalized in {"~", "~/", "~/*", "~/**", "/", "/*", "/**", "/home/*", "/home/**", "/users/*", "/users/**"}
 
 
 def _violation(path: Path, repo_root: Path, code: str, message: str) -> PolicyViolation:
@@ -94,13 +135,14 @@ def _check_opencode_json(repo_root: Path) -> list[PolicyViolation]:
 
 def _check_unsafe_text(path: Path, repo_root: Path, raw: str) -> list[PolicyViolation]:
     violations = []
-    for pattern in DESTRUCTIVE_PATTERNS:
-        if re.search(pattern, raw):
-            violations.append(_violation(path, repo_root, "unsafe-permission", f"Unsafe permission grant matched policy pattern: {pattern}"))
+    for pattern, action in _mapping_entries(raw, "bash"):
+        if action in BLOCKED_ACTIONS and _is_forbidden_bash_pattern(pattern):
+            violations.append(_violation(path, repo_root, "unsafe-permission", f"Unsafe bash permission must be denied: {pattern}: {action}"))
     if re.search(r'(?m)^\s+external_directory:\s*(allow|ask)\s*$', raw):
         violations.append(_violation(path, repo_root, "unsafe-permission", "external_directory must not be a broad scalar allow/ask"))
-    if _has_mapping_action(raw, "external_directory", "*", "allow"):
-        violations.append(_violation(path, repo_root, "unsafe-permission", "external_directory must not allow broad * access"))
+    for pattern, action in _mapping_entries(raw, "external_directory"):
+        if action in BLOCKED_ACTIONS and _is_forbidden_external_pattern(pattern, action):
+            violations.append(_violation(path, repo_root, "unsafe-permission", f"Unsafe external_directory permission must be denied: {pattern}: {action}"))
     return violations
 
 
