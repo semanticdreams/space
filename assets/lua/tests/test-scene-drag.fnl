@@ -259,16 +259,23 @@
 
 (fn assert-provider-grab-reaches-physics-drag-path [fixture]
       (local cuboid (assert fixture.cuboid "Physics provider test requires cuboid"))
+      (local starting-count (app.engine.physics:getNumConstraints))
       (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 0})
       (assert (= (and app.movables.drag app.movables.drag.entry.target) cuboid.layout)
               "Provider :grab should engage the cuboid movable target on mouse-down")
       (app.engine.events.mouse-motion.emit {:x 8.25 :y 9.25 :mod 0})
       (assert (app.movables:drag-active?)
               "Provider :grab should start physics-backed drag after motion threshold")
-      (assert app.movables.drag.relative-anchor
-              "Provider :grab should initialize the physics relative anchor path")
-      ;; Task 3 only routes to the physics drag path; Bullet constraint release is Task 5.
-      (set app.movables.drag nil)
+      (local point-grab (and app.movables.drag app.movables.drag.point-grab))
+      (assert point-grab
+              "Provider :grab should initialize the physics point-grab path")
+      (assert (point-grab:active?)
+              "Provider :grab point-grab session should be active")
+      (assert (= (app.engine.physics:getNumConstraints) (+ starting-count 1))
+              "Provider :grab should add one point-to-point constraint")
+      (app.engine.events.mouse-button-up.emit {:button 1 :mod 0})
+      (assert (= (app.engine.physics:getNumConstraints) starting-count)
+              "Provider :grab should remove the point-to-point constraint on mouse-up")
       true)
 
 (fn provider-grab-reaches-physics-drag-path []
