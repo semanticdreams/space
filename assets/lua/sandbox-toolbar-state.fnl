@@ -1,103 +1,94 @@
 (local Signal (require :signal))
 
-(local valid-camera-modes {:flight true :grounded true})
-(local valid-drag-attachments {:center true :anchor true})
+(local valid-interaction-modes {:flight true
+                                :walk true
+                                :move true
+                                :grab true})
+
+(fn assert-valid-interaction-mode [mode]
+  (when (not (. valid-interaction-modes mode))
+    (error (.. "Invalid interaction mode: " (tostring mode))))
+  mode)
+
+(fn legacy-payload-mode [payload]
+  (when (and (not (= payload.object-move-enabled? nil))
+             (not (= (type payload.object-move-enabled?) :boolean)))
+    (error (.. "object-move-enabled? must be boolean in restore payload, got "
+               (tostring (type payload.object-move-enabled?))
+               ": " (tostring payload.object-move-enabled?))))
+  (when (and (not (= payload.drag-attachment nil))
+             (not (= payload.drag-attachment "center"))
+             (not (= payload.drag-attachment "anchor")))
+    (error (.. "Invalid drag-attachment in restore payload: "
+               (tostring payload.drag-attachment))))
+  (when (and (not (= payload.camera-mode nil))
+             (not (= payload.camera-mode "flight"))
+             (not (= payload.camera-mode "grounded")))
+    (error (.. "Invalid camera-mode in restore payload: "
+               (tostring payload.camera-mode))))
+  (if (= payload.object-move-enabled? true)
+      (if (= payload.drag-attachment "anchor")
+          :grab
+          :move)
+      (= payload.camera-mode "grounded")
+      :walk
+      :flight))
 
 (fn SandboxToolbarState [opts]
-  (local options (or opts {}))
-  (var camera-mode (or options.camera-mode :flight))
-  (var object-move-enabled?
-    (if (= options.object-move-enabled? nil)
-        false
-        (= (type options.object-move-enabled?) :boolean)
-        options.object-move-enabled?
-        (error (.. "object-move-enabled? must be boolean, got "
-                   (tostring (type options.object-move-enabled?))
-                   ": " (tostring options.object-move-enabled?)))))
-  (var drag-attachment (or options.drag-attachment :center))
-
-  (when (not (. valid-camera-modes camera-mode))
-    (error (.. "Invalid camera mode: " (tostring camera-mode))))
-  (when (not (. valid-drag-attachments drag-attachment))
-    (error (.. "Invalid drag attachment: " (tostring drag-attachment))))
-
+  (local options (if (= opts nil) {} opts))
+  (when (not (= (type options) :table))
+    (error (.. "SandboxToolbarState opts must be a table or nil, got " (type options))))
+  (var interaction-mode
+    (assert-valid-interaction-mode
+      (if (= options.interaction-mode nil) :flight options.interaction-mode)))
   (local changed (Signal))
 
-  (fn set-camera-mode [self mode]
-    (when (not (. valid-camera-modes mode))
-      (error (.. "Invalid camera mode: " (tostring mode))))
-    (when (not (= camera-mode mode))
-      (set camera-mode mode)
+  (fn set-interaction-mode [self mode]
+    (assert-valid-interaction-mode mode)
+    (when (not (= interaction-mode mode))
+      (set interaction-mode mode)
       (changed:emit mode))
     mode)
 
-  (fn toggle-camera-mode [self]
-    (self:set-camera-mode (if (= camera-mode :flight)
-                              :grounded
-                              :flight)))
+  (fn navigation-mode [self]
+    (if (= interaction-mode :flight)
+        interaction-mode
+        (= interaction-mode :walk)
+        interaction-mode
+        nil))
 
-  (fn set-object-move-enabled! [self enabled?]
-    (when (not (= (type enabled?) :boolean))
-      (error (.. "object-move-enabled? must be boolean, got " (tostring (type enabled?)) ": " (tostring enabled?))))
-    (when (not (= object-move-enabled? enabled?))
-      (set object-move-enabled? enabled?)
-      (changed:emit enabled?))
-    enabled?)
-
-  (fn toggle-object-move-enabled! [self]
-    (self:set-object-move-enabled! (not object-move-enabled?)))
-
-  (fn set-drag-attachment [self mode]
-    (when (not (. valid-drag-attachments mode))
-      (error (.. "Invalid drag attachment: " (tostring mode))))
-    (when (not (= drag-attachment mode))
-      (set drag-attachment mode)
-      (changed:emit mode))
-    mode)
-
-  (fn toggle-drag-attachment [self]
-    (self:set-drag-attachment (if (= drag-attachment :center)
-                                  :anchor
-                                  :center)))
+  (fn object-drag-mode [self]
+    (if (= interaction-mode :move)
+        interaction-mode
+        (= interaction-mode :grab)
+        interaction-mode
+        nil))
 
   (fn capture-state [self]
-    {:camera-mode (if (= camera-mode :flight) "flight" "grounded")
-     :object-move-enabled? object-move-enabled?
-     :drag-attachment (if (= drag-attachment :center) "center" "anchor")})
+    {:interaction-mode (tostring interaction-mode)})
 
   (fn restore-state [self payload]
     (when (not (= payload nil))
       (when (not (= (type payload) :table))
         (error (.. "restore-state payload must be a table or nil, got " (type payload))))
-      (when (not (= (. payload :camera-mode) nil))
-        (let [value (. payload :camera-mode)]
-          (self:set-camera-mode (if (= value "flight") :flight
-                                    (= value "grounded") :grounded
-                                    (error (.. "Invalid camera mode in restore: " (tostring value)))))))
-      (when (not (= (. payload :object-move-enabled?) nil))
-        (self:set-object-move-enabled! (. payload :object-move-enabled?)))
-      (when (not (= (. payload :drag-attachment) nil))
-        (let [value (. payload :drag-attachment)]
-          (self:set-drag-attachment (if (= value "center") :center
-                                        (= value "anchor") :anchor
-                                        (error (.. "Invalid drag attachment in restore: " (tostring value))))))))
+      (self:set-interaction-mode
+        (if (not (= payload.interaction-mode nil))
+            (assert-valid-interaction-mode payload.interaction-mode)
+            (legacy-payload-mode payload))))
     true)
 
   (local state
     {: changed
-     : set-camera-mode
-     : toggle-camera-mode
-     : set-object-move-enabled!
-     : toggle-object-move-enabled!
-     : set-drag-attachment
-     : toggle-drag-attachment
+     : set-interaction-mode
+     : navigation-mode
+     : object-drag-mode
      : capture-state
      : restore-state})
 
   (fn state-index [self key]
-    (if (= key :camera-mode) camera-mode
-        (= key :object-move-enabled?) object-move-enabled?
-        (= key :drag-attachment) drag-attachment))
+    (if (= key :interaction-mode) interaction-mode))
 
   (setmetatable state {:__index state-index})
   state)
+
+SandboxToolbarState
