@@ -29,7 +29,12 @@
   (local (ok2 err2) (pcall SandboxToolbarState {:interaction-mode false}))
   (assert (not ok2) "false interaction-mode must be rejected")
   (assert (string.find (tostring err2) "Invalid interaction mode" 1 true)
-          (.. "error should mention invalid interaction mode, got " (tostring err2))))
+          (.. "error should mention invalid interaction mode, got " (tostring err2)))
+  (each [_ key (ipairs [:camera-mode :object-move-enabled? :drag-attachment])]
+    (local (legacy-ok legacy-err) (pcall SandboxToolbarState {key true}))
+    (assert (not legacy-ok) (.. "constructor must reject legacy key " (tostring key)))
+    (assert (string.find (tostring legacy-err) (tostring key) 1 true)
+            (.. "error should mention legacy key " (tostring key) ", got " (tostring legacy-err)))))
 
 (fn sandbox-toolbar-state-captures-canonical-payload []
   (local state (SandboxToolbarState {:interaction-mode :grab}))

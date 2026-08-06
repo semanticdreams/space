@@ -10,6 +10,11 @@
     (error (.. "Invalid interaction mode: " (tostring mode))))
   mode)
 
+(fn assert-canonical-options [options]
+  (each [key _ (pairs options)]
+    (when (not (= key :interaction-mode))
+      (error (.. "Invalid SandboxToolbarState option: " (tostring key))))))
+
 (fn legacy-payload-mode [payload]
   (when (and (not (= payload.object-move-enabled? nil))
              (not (= (type payload.object-move-enabled?) :boolean)))
@@ -38,6 +43,7 @@
   (local options (if (= opts nil) {} opts))
   (when (not (= (type options) :table))
     (error (.. "SandboxToolbarState opts must be a table or nil, got " (type options))))
+  (assert-canonical-options options)
   (var interaction-mode
     (assert-valid-interaction-mode
       (if (= options.interaction-mode nil) :flight options.interaction-mode)))
