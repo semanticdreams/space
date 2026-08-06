@@ -33,18 +33,38 @@
     graph-view-root
     (fs.join-path lua-root "graph-view-control-view.fnl")])
 
+(fn active-graph-view []
+  (local world-runtime app.active-world-runtime)
+  (if (and world-runtime world-runtime.graph-view)
+      world-runtime.graph-view
+      app.graph-view))
+
+(fn selected-graph-node-count []
+  (if (and app.graph-view app.graph-view.selection app.graph-view.selection.selected-nodes)
+      (length app.graph-view.selection.selected-nodes)
+      0))
+
+(fn reveal-sidebar-node [node _event]
+  (local graph-view (assert (active-graph-view)
+                            "Graph sidebar reveal requires active graph view"))
+  (graph-view:reveal-node node {:select? true :focus? true :center? true}))
+
+(fn open-sidebar-node [node _event]
+  (local graph-view (assert (active-graph-view)
+                            "Graph sidebar open requires active graph view"))
+  (graph-view:open-node node {:select? true :focus? true :center? true}))
+
+(fn graph-sidebar-options [manager]
+  {:manager manager
+   :selected-count-provider selected-graph-node-count
+   :node-reveal-handler reveal-sidebar-node
+   :node-open-handler open-sidebar-node})
+
 (fn graph-left-dock-builder [ctx]
   (local world-runtime app.active-world-runtime)
   (local manager (and world-runtime world-runtime.graph-map-manager))
   (when manager
-    ((GraphMapSidebar.GraphMapSidebar
-       {:manager manager
-        :selected-count-provider
-        (fn []
-          (if (and app.graph-view app.graph-view.selection app.graph-view.selection.selected-nodes)
-              (length app.graph-view.selection.selected-nodes)
-              0))})
-     ctx)))
+    ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx)))
 
 (fn active-graph-map []
   (local world-runtime app.active-world-runtime)
