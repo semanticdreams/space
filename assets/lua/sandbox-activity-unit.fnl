@@ -164,8 +164,7 @@
   (ctx:set-update! sandbox-activity-update)
   ;; Install toolbar hooks
   (ctx:set-top-toolbar-builder! (SandboxToolbarView toolbar-state))
-  (ctx:set-object-move-predicate! (fn [] (= toolbar-state.object-move-enabled? true)))
-  (ctx:set-drag-attachment-provider! (fn [] toolbar-state.drag-attachment))
+  (ctx:set-object-drag-mode-provider! (fn [] (toolbar-state:object-drag-mode)))
   {:activity-id "sandbox"})
 
 (fn slice-array-from [entries start-index]
