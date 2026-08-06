@@ -16,6 +16,8 @@ from opencode_capabilities import CapabilityError, ensure_space_repo, failure, h
 SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
+DEFAULT_POLL_TIMEOUT_SECONDS = 7200
+DEFAULT_POLL_INTERVAL_SECONDS = 100
 
 
 def _exit_code_for(result: dict[str, object]) -> int:
@@ -31,6 +33,14 @@ def _safe_branch(action: str, branch: str) -> tuple[str | None, dict[str, object
         return validate_branch_name(branch), None
     except CapabilityError as error:
         return None, human_decision(action, error.message, {"code": error.code, "details": error.details, "branch": branch})
+
+
+def _current_branch(repo: Path) -> str:
+    return run_command(["git", "branch", "--show-current"], repo).stdout.strip()
+
+
+def _safe_current_branch(action: str, repo: Path) -> tuple[str | None, dict[str, object] | None]:
+    return _safe_branch(action, _current_branch(repo))
 
 
 def _json_loads(text: str) -> Any:
@@ -167,6 +177,19 @@ def create_pr(repo_root: Path, head: str) -> dict[str, object]:
         return human_decision(action, error.message, {"code": error.code, "details": error.details, "branch": branch})
 
 
+def create_current_pr(repo_root: Path) -> dict[str, object]:
+    action = "create_pr"
+    try:
+        repo = ensure_space_repo(repo_root)
+        branch, unsafe = _safe_current_branch(action, repo)
+        if unsafe is not None:
+            return unsafe
+        result = run_command(["gh", "pr", "create", "--base", "main", "--head", branch, "--fill"], repo)
+        return success(action, "Created pull request targeting main", {"branch": branch, "url": result.stdout.strip(), "args": result.args})
+    except CapabilityError as error:
+        return human_decision(action, error.message, {"code": error.code, "details": error.details})
+
+
 def enable_auto_merge(repo_root: Path, branch: str) -> dict[str, object]:
     action = "enable_auto_merge"
     try:
@@ -189,6 +212,18 @@ def enable_auto_merge(repo_root: Path, branch: str) -> dict[str, object]:
         return human_decision(action, error.message, {"code": error.code, "details": error.details, "branch": safe})
 
 
+def enable_auto_merge_current(repo_root: Path) -> dict[str, object]:
+    action = "enable_auto_merge"
+    try:
+        repo = ensure_space_repo(repo_root)
+        safe, unsafe = _safe_current_branch(action, repo)
+        if unsafe is not None:
+            return unsafe
+        return enable_auto_merge(repo_root, safe)
+    except CapabilityError as error:
+        return failure(action, error.message, {"code": error.code, "details": error.details})
+
+
 def view_pr(repo_root: Path, branch: str) -> dict[str, object]:
     action = "view_pr"
     try:
@@ -206,6 +241,18 @@ def view_pr(repo_root: Path, branch: str) -> dict[str, object]:
         return success(action, "Loaded pull request status", {"branch": safe, "pr": data})
     except (CapabilityError, json.JSONDecodeError) as error:
         return human_decision(action, "Could not load pull request status safely", {"error_type": type(error).__name__, "error": str(error), "branch": safe})
+
+
+def view_current_pr(repo_root: Path) -> dict[str, object]:
+    action = "view_pr"
+    try:
+        repo = ensure_space_repo(repo_root)
+        safe, unsafe = _safe_current_branch(action, repo)
+        if unsafe is not None:
+            return unsafe
+        return view_pr(repo_root, safe)
+    except CapabilityError as error:
+        return failure(action, error.message, {"code": error.code, "details": error.details})
 
 
 def _failed_rollup(data: dict[str, Any]) -> bool:
@@ -258,10 +305,22 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
         return human_decision(action, "Could not poll merge queue safely", {"error_type": type(error).__name__, "error": str(error), "branch": safe})
 
 
+def poll_current_merge_queue(repo_root: Path) -> dict[str, object]:
+    action = "poll_merge_queue"
+    try:
+        repo = ensure_space_repo(repo_root)
+        safe, unsafe = _safe_current_branch(action, repo)
+        if unsafe is not None:
+            return unsafe
+        return poll_merge_queue(repo_root, safe, DEFAULT_POLL_TIMEOUT_SECONDS, DEFAULT_POLL_INTERVAL_SECONDS)
+    except CapabilityError as error:
+        return failure(action, error.message, {"code": error.code, "details": error.details})
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("auth-status", "check-main-protection"):
+    for command in ("auth-status", "check-main-protection", "create-current", "enable-auto-merge-current", "view-current", "poll-merge-queue-current"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--repo-root", required=True, type=Path)
     create = subparsers.add_parser("create")
@@ -286,6 +345,14 @@ def main(argv: list[str] | None = None) -> int:
             result = pr_auth_status(args.repo_root)
         elif args.command == "check-main-protection":
             result = check_main_protection(args.repo_root)
+        elif args.command == "create-current":
+            result = create_current_pr(args.repo_root)
+        elif args.command == "enable-auto-merge-current":
+            result = enable_auto_merge_current(args.repo_root)
+        elif args.command == "view-current":
+            result = view_current_pr(args.repo_root)
+        elif args.command == "poll-merge-queue-current":
+            result = poll_current_merge_queue(args.repo_root)
         elif args.command == "create":
             result = create_pr(args.repo_root, args.head)
         elif args.command == "enable-auto-merge":

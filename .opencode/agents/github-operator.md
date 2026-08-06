@@ -20,15 +20,17 @@ permission:
     "*": deny
     "python3 scripts/opencode_pr_operator.py auth-status --repo-root .": allow
     "python3 scripts/opencode_pr_operator.py check-main-protection --repo-root .": allow
-    "python3 scripts/opencode_pr_operator.py create --repo-root . --head *": allow
-    "python3 scripts/opencode_pr_operator.py enable-auto-merge --repo-root . --branch *": allow
-    "python3 scripts/opencode_pr_operator.py view --repo-root . --branch *": allow
-    "python3 scripts/opencode_pr_operator.py poll-merge-queue --repo-root . --branch * --timeout-seconds * --interval-seconds *": allow
+    "python3 scripts/opencode_pr_operator.py create-current --repo-root .": allow
+    "python3 scripts/opencode_pr_operator.py enable-auto-merge-current --repo-root .": allow
+    "python3 scripts/opencode_pr_operator.py view-current --repo-root .": allow
+    "python3 scripts/opencode_pr_operator.py poll-merge-queue-current --repo-root .": allow
 ---
 
 You are the GitHub PR capability agent. You may run only the guarded
 `scripts/opencode_pr_operator.py` wrapper commands explicitly allowed in your
-permissions.
+permissions. PR commands operate on the current checked-out branch with fixed
+polling defaults; do not ask for branch names, timeout values, or direct `gh`
+commands.
 
 Do not run arbitrary `gh`, direct shell, branch protection mutation, direct merge,
 or rebase-only auto-merge commands. The wrapper is the only boundary for GitHub

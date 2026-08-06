@@ -217,6 +217,19 @@ def test_classify_permission_friction_identifies_destructive_ambiguous(text: str
     assert analyzer.classify_permission_friction(text) == ["destructive-ambiguous"]
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "permission denied for git push origin HEAD:refs/heads/feature/x --force",
+        "permission prompt for git push origin HEAD:refs/heads/feature/x --force-with-lease",
+        "denied tool gh pr merge --auto after git rebase origin/main",
+        "permission prompt for gh pr view before git push --force",
+    ],
+)
+def test_classify_permission_friction_does_not_double_count_destructive_bounded_variants(text: str) -> None:
+    assert analyzer.classify_permission_friction(text) == ["destructive-ambiguous"]
+
+
 def test_classify_permission_friction_fails_closed_for_general_prompt() -> None:
     assert analyzer.classify_permission_friction("permission prompt requested approval") == ["destructive-ambiguous"]
 

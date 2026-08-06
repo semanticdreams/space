@@ -86,6 +86,33 @@ def test_create_always_targets_base_main_validates_head_and_rejects_invalid_bran
     ]
 
 
+def test_create_current_uses_validated_current_branch_without_cli_branch_argument(monkeypatch, trusted_repo: Path) -> None:
+    runner = GhRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            (
+                "gh",
+                "pr",
+                "create",
+                "--base",
+                "main",
+                "--head",
+                "feature/opencode-capabilities",
+                "--fill",
+            ): "https://github.com/semanticdreams/space2/pull/123\n",
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.create_current_pr(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert runner.calls == [
+        ["git", "branch", "--show-current"],
+        ["gh", "pr", "create", "--base", "main", "--head", "feature/opencode-capabilities", "--fill"],
+    ]
+
+
 def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch, trusted_repo: Path) -> None:
     protection = json.dumps({"required_status_checks": {"contexts": ["test"]}})
     rulesets = json.dumps(
@@ -276,3 +303,21 @@ def test_cli_emits_json_and_returns_human_decision_for_invalid_branch(monkeypatc
     assert exit_code == 2
     assert payload["status"] == "human_decision_required"
     assert set(payload) == {"status", "action", "message", "evidence"}
+
+
+def test_cli_current_branch_operations_take_no_untrusted_branch_or_timeout_arguments(monkeypatch, trusted_repo: Path, capsys) -> None:
+    calls = []
+
+    def fake_create_current(repo_root: Path):
+        calls.append(repo_root)
+        return {"status": "pass", "action": "create_pr", "message": "ok", "evidence": {}}
+
+    monkeypatch.setattr(pr_operator, "create_current_pr", fake_create_current)
+
+    exit_code = pr_operator.main(["create-current", "--repo-root", str(trusted_repo)])
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "pass"
+    assert calls == [trusted_repo]

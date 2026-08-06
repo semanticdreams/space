@@ -109,6 +109,12 @@ def test_capability_agent_with_edit_allow_fails(tmp_path: Path):
     [
         '  bash:\n    "git push origin main": allow\n',
         '  bash:\n    "git -C * push origin main": allow\n',
+        '  bash:\n    "git push origin HEAD:refs/heads/main": allow\n',
+        '  bash:\n    "git push origin HEAD:main": allow\n',
+        '  bash:\n    "git push origin refs/heads/main": allow\n',
+        '  bash:\n    "git -C * push origin HEAD:refs/heads/main": ask\n',
+        '  bash:\n    "git -C * push origin HEAD:main": ask\n',
+        '  bash:\n    "git -C * push origin refs/heads/main": ask\n',
         "  bash:\n    'git push origin main': ask\n",
         '  bash:\n    "git push *--force*": allow\n',
         '  bash:\n    "git -C * push *--force*": allow\n',
@@ -166,3 +172,21 @@ def test_agent_and_skill_frontmatter_required(tmp_path: Path):
     codes = violation_codes(repo)
     assert "agent-frontmatter" in codes
     assert "skill-frontmatter" in codes
+
+
+@pytest.mark.parametrize(
+    "permission_text",
+    [
+        '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py create --repo-root . --head *": allow\n',
+        '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py enable-auto-merge --repo-root . --branch *": allow\n',
+        '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py poll-merge-queue --repo-root . --branch * --timeout-seconds * --interval-seconds *": allow\n',
+    ],
+)
+def test_github_operator_rejects_wrapper_bash_permissions_with_untrusted_suffix_wildcards(
+    tmp_path: Path, permission_text: str
+):
+    repo = make_repo(tmp_path, agent_name="github-operator", permission_text=permission_text)
+
+    codes = violation_codes(repo)
+
+    assert "capability-boundary" in codes

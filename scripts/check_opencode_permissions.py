@@ -85,7 +85,7 @@ def _normalized_command(pattern: str) -> str:
 
 def _is_forbidden_bash_pattern(pattern: str) -> bool:
     command = _normalized_command(pattern)
-    if command.startswith("git push origin main"):
+    if _pushes_to_main(command):
         return True
     if command.startswith("git push origin --delete"):
         return True
@@ -109,6 +109,31 @@ def _is_forbidden_bash_pattern(pattern: str) -> bool:
         if command == manager or command.startswith(f"{manager} "):
             return True
     return command in {"gh", "gh *", "gh*"}
+
+
+def _pushes_to_main(command: str) -> bool:
+    tokens = command.split()
+    if len(tokens) < 4 or tokens[0] != "git" or tokens[1] != "push":
+        return False
+    remote_index = 2
+    while remote_index < len(tokens) and tokens[remote_index].startswith("-"):
+        remote_index += 1
+    if remote_index >= len(tokens) or tokens[remote_index] != "origin":
+        return False
+    for refspec in tokens[remote_index + 1 :]:
+        if refspec.startswith("-"):
+            continue
+        target = refspec.rsplit(":", 1)[-1]
+        if target.startswith("refs/heads/"):
+            target = target.removeprefix("refs/heads/")
+        if target == "main":
+            return True
+    return False
+
+
+def _has_untrusted_suffix_wildcard(pattern: str) -> bool:
+    command = _normalized_command(pattern)
+    return command.startswith("python3 scripts/opencode_pr_operator.py ") and command.rstrip().endswith("*")
 
 
 def _is_forbidden_external_pattern(pattern: str, action: str) -> bool:
@@ -183,6 +208,10 @@ def _check_capability_boundary(path: Path, repo_root: Path, name: str, raw: str)
         for secret in SECRET_EXTERNAL_PATTERNS:
             if secret not in raw:
                 violations.append(_violation(path, repo_root, "capability-boundary", f"config-auditor must deny {secret}-looking OpenCode home paths"))
+    if name == "github-operator":
+        for pattern, action in _mapping_entries(raw, "bash"):
+            if action in BLOCKED_ACTIONS and _has_untrusted_suffix_wildcard(pattern):
+                violations.append(_violation(path, repo_root, "capability-boundary", f"github-operator wrapper permission must not end in an untrusted wildcard: {pattern}: {action}"))
     return violations
 
 

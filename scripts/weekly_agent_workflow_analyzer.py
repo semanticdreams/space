@@ -125,6 +125,8 @@ def classify_permission_friction(text: str) -> list[str]:
     for class_id, patterns in PERMISSION_CLASS_PATTERNS.items():
         if any(pattern.search(text) for pattern in patterns):
             classes.append(class_id)
+    if "destructive-ambiguous" in classes:
+        classes = [class_id for class_id in classes if class_id != "privileged-bounded"]
     if not classes and PERMISSION_RE.search(text):
         return ["destructive-ambiguous"]
     return classes
