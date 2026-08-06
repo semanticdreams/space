@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import sys
 import time
@@ -36,27 +37,74 @@ def _json_loads(text: str) -> Any:
     return json.loads(text) if text.strip() else None
 
 
-def _contains_test_status(value: Any) -> bool:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            lowered = str(key).lower()
-            if lowered in {"contexts", "checks", "required_status_checks"} and _contains_test_status(item):
+def _required_checks_include_test(required_checks: Any) -> bool:
+    if not isinstance(required_checks, dict):
+        return False
+    contexts = required_checks.get("contexts")
+    if isinstance(contexts, list) and "test" in contexts:
+        return True
+    checks = required_checks.get("checks")
+    if isinstance(checks, list):
+        for check in checks:
+            if isinstance(check, dict) and check.get("context") == "test":
                 return True
-            if isinstance(item, str) and item == "test":
-                return True
-            if _contains_test_status(item):
-                return True
-    if isinstance(value, list):
-        return any(_contains_test_status(item) for item in value)
-    return value == "test"
-
-
-def _contains_merge_queue(value: Any) -> bool:
-    if isinstance(value, dict):
-        return any("merge_queue" in str(item).lower() or "merge queue" in str(item).lower() or _contains_merge_queue(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_merge_queue(item) for item in value)
     return False
+
+
+def _classic_protection_requires_test(protection: Any) -> bool:
+    if not isinstance(protection, dict):
+        return False
+    return _required_checks_include_test(protection.get("required_status_checks"))
+
+
+def _ruleset_applies_to_main(ruleset: dict[str, Any]) -> bool:
+    if ruleset.get("enforcement") != "active":
+        return False
+    ref_name = ruleset.get("conditions", {}).get("ref_name", {})
+    if not isinstance(ref_name, dict):
+        return False
+    include = ref_name.get("include")
+    exclude = ref_name.get("exclude", [])
+    if not isinstance(include, list) or not isinstance(exclude, list):
+        return False
+    main_ref = "refs/heads/main"
+    aliases = {"main", "refs/heads/main", "~DEFAULT_BRANCH"}
+    included = any(pattern in aliases or fnmatch.fnmatch(main_ref, str(pattern)) for pattern in include)
+    excluded = any(pattern in aliases or fnmatch.fnmatch(main_ref, str(pattern)) for pattern in exclude)
+    return included and not excluded
+
+
+def _ruleset_rule_requires_test(rule: Any) -> bool:
+    if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+        return False
+    parameters = rule.get("parameters")
+    if not isinstance(parameters, dict):
+        return False
+    required = parameters.get("required_status_checks")
+    if not isinstance(required, list):
+        return False
+    for check in required:
+        if check == "test":
+            return True
+        if isinstance(check, dict) and check.get("context") == "test":
+            return True
+    return False
+
+
+def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
+    if not isinstance(rulesets, list):
+        return False, False
+    requires_test = False
+    has_merge_queue = False
+    for ruleset in rulesets:
+        if not isinstance(ruleset, dict) or not _ruleset_applies_to_main(ruleset):
+            continue
+        rules = ruleset.get("rules")
+        if not isinstance(rules, list):
+            continue
+        requires_test = requires_test or any(_ruleset_rule_requires_test(rule) for rule in rules)
+        has_merge_queue = has_merge_queue or any(isinstance(rule, dict) and rule.get("type") == "merge_queue" for rule in rules)
+    return requires_test, has_merge_queue
 
 
 def pr_auth_status(repo_root: Path) -> dict[str, object]:
@@ -85,11 +133,16 @@ def check_main_protection(repo_root: Path) -> dict[str, object]:
             details = {"code": error.code, "details": error.details}
         return human_decision(action, "Could not prove required main protection and merge queue from GitHub responses", details)
 
-    has_test = _contains_test_status(protection) or _contains_test_status(rulesets)
-    has_queue = _contains_merge_queue(protection) or _contains_merge_queue(rulesets)
+    classic_has_test = _classic_protection_requires_test(protection)
+    ruleset_has_test, ruleset_has_queue = _active_main_ruleset_proofs(rulesets)
+    has_test = classic_has_test or ruleset_has_test
+    has_queue = ruleset_has_queue
     evidence = {
         "classic_protection_available": protection is not None,
         "rulesets_available": rulesets is not None,
+        "classic_required_test_check_proven": classic_has_test,
+        "active_main_ruleset_required_test_check_proven": ruleset_has_test,
+        "active_main_ruleset_merge_queue_proven": ruleset_has_queue,
         "required_test_check_proven": has_test,
         "merge_queue_proven": has_queue,
     }

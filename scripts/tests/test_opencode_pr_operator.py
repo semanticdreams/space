@@ -88,7 +88,15 @@ def test_create_always_targets_base_main_validates_head_and_rejects_invalid_bran
 
 def test_enable_auto_merge_checks_main_protection_before_auto_merge(monkeypatch, trusted_repo: Path) -> None:
     protection = json.dumps({"required_status_checks": {"contexts": ["test"]}})
-    rulesets = json.dumps([{"rules": [{"type": "merge_queue"}]}])
+    rulesets = json.dumps(
+        [
+            {
+                "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
+                "rules": [{"type": "merge_queue"}],
+            }
+        ]
+    )
     runner = GhRunner(
         {
             ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): protection,
@@ -129,6 +137,82 @@ def test_check_main_protection_requires_test_status_and_merge_queue(monkeypatch,
     result = pr_operator.check_main_protection(trusted_repo)
 
     assert result["status"] == "human_decision_required"
+
+
+@pytest.mark.parametrize(
+    "ruleset",
+    [
+        {
+            "name": "test",
+            "enforcement": "disabled",
+            "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
+            "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}, {"type": "merge_queue"}],
+        },
+        {
+            "name": "test",
+            "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["refs/heads/dev"]}},
+            "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "test"}]}}, {"type": "merge_queue"}],
+        },
+        {
+            "name": "test",
+            "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
+            "rules": [{"type": "merge_queue"}],
+        },
+    ],
+)
+def test_check_main_protection_ignores_disabled_non_main_and_unrelated_test_strings(
+    monkeypatch,
+    trusted_repo: Path,
+    ruleset: dict[str, object],
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps([ruleset]),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "human_decision_required"
+
+
+def test_check_main_protection_accepts_active_main_ruleset_with_required_test_and_merge_queue(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+                [
+                    {
+                        "enforcement": "active",
+                        "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
+                        "rules": [
+                            {
+                                "type": "required_status_checks",
+                                "parameters": {"required_status_checks": [{"context": "test"}]},
+                            },
+                            {"type": "merge_queue"},
+                        ],
+                    }
+                ]
+            ),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "pass"
 
 
 def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monkeypatch, trusted_repo: Path) -> None:
