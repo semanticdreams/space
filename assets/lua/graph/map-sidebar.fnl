@@ -7,6 +7,7 @@
 (local Button (require :button))
 (local SearchView (require :search-view))
 (local Text (require :text))
+(local GraphViewUtils (require :graph/view/utils))
 
 (var compare-node-items nil)
 (var active-map-change-handler nil)
@@ -23,6 +24,10 @@
 (var background-builder nil)
 (var content-flex-builder nil)
 (var content-children nil)
+
+(local sidebar-width 14.0)
+(local map-label-max-length 27)
+(local finder-label-max-length 26)
 
 (fn record-label [state label]
     (table.insert state.visible-labels label)
@@ -142,6 +147,16 @@
     (local marker (if is-active? " *" ""))
     (.. map-name marker "  " entry.node-count "n/" entry.edge-count "e"))
 
+(fn ellipsize [label max-length]
+    (local safe-label (if label label ""))
+    (GraphViewUtils.truncate-with-ellipsis (tostring safe-label) max-length))
+
+(fn map-row-display-label [entry active-id]
+    (ellipsize (map-row-label entry active-id) map-label-max-length))
+
+(fn finder-display-label [label]
+    (ellipsize label finder-label-max-length))
+
 (fn build-map-row-button [state entry label is-active? ic]
     ((Button {:text label
               :padding [0.2 0.25]
@@ -157,7 +172,7 @@
              (state.manager:switch-map! entry.id))))
 
 (fn build-map-row [state entry active-id]
-    (local label (record-label state (map-row-label entry active-id)))
+    (local label (record-label state (map-row-display-label entry active-id)))
     (local is-active? (= entry.id active-id))
     (fn [ic]
         ((Padding {:edge-insets [0.15 0.25 0.15 0.25]
@@ -210,7 +225,7 @@
 
 (set handle-new-map
      (fn [state]
-    (local sid (.. "map-" (tostring state.manager.next-map-id)))
+    (local sid (string.format "map-%d" (math.floor state.manager.next-map-id)))
     (state.manager:create-map! sid sid)
     (state.manager:switch-map! sid)))
 
@@ -286,7 +301,8 @@
 
 (fn build-node-row [state item ic]
     (local node (. item 1))
-    (local label (record-label state (tostring (. item 2))))
+    (local full-label (tostring (. item 2)))
+    (local label (record-label state (finder-display-label full-label)))
     ((Button {:text label
               :padding [0.2 0.25]
               :focusable? true
@@ -318,10 +334,34 @@
                   :builder (node-row-builder state)})
      ic))
 
+(fn fixed-width-child [name width child-builder]
+    (fn [ic]
+        (local child (child-builder ic))
+        (fn measurer [self]
+            (child.layout:measurer)
+            (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
+        (fn layouter [self]
+            (set child.layout.position self.position)
+            (set child.layout.size (glm.vec3 width self.size.y self.size.z))
+            (set child.layout.rotation self.rotation)
+            (set child.layout.clip-region self.clip-region)
+            (set child.layout.depth-offset-index self.depth-offset-index)
+            (child.layout:layouter))
+        (local layout (Layout {:name name
+                               :measurer measurer
+                               :layouter layouter
+                               :children [child.layout]}))
+        {:layout layout
+         :drop (fn [_self]
+                 (layout:drop)
+                 (child:drop))}))
+
 (fn build-finder [state]
     (fn [ic]
         ((Padding {:edge-insets [0.15 0.25 0.25 0.25]
-                   :child (search-view-builder state)})
+                   :child (fixed-width-child "graph-map-sidebar-finder-width"
+                                             (- sidebar-width 0.5)
+                                             (search-view-builder state))})
          ic)))
 
 (set search-view-builder
@@ -335,6 +375,7 @@
 (fn build-content-flex [state maps selected-count ic]
     ((Flex {:axis 2
             :spacing 0.0
+            :xalign :stretch
             :children (content-children state
                                         maps
                                         state.manager.active-map-id
@@ -393,13 +434,15 @@
     (if state.content-entity
         (do
             (state.content-entity.layout:measurer)
-            (set self.measure state.content-entity.layout.measure))
-        (set self.measure (glm.vec3 0 0 0))))
+            (set self.measure (glm.vec3 sidebar-width
+                                        state.content-entity.layout.measure.y
+                                        state.content-entity.layout.measure.z)))
+        (set self.measure (glm.vec3 sidebar-width 0 0))))
 
 (fn sidebar-layouter [state self]
     (local self-size (if self.size self.size (glm.vec3 0 0 0)))
     (local allocated-size
-        (glm.vec3 (math.max self.measure.x self-size.x)
+        (glm.vec3 sidebar-width
                   (math.max self.measure.y self-size.y)
                   (math.max self.measure.z self-size.z)))
     (set self.size allocated-size)
