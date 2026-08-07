@@ -775,8 +775,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+      :activity-object-drag-mode-provider
      :sandbox-toolbar-state]
     (fn []
       (ensure-built-in-activities!)
@@ -810,8 +809,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+      :activity-object-drag-mode-provider
      :sandbox-toolbar-state]
     (fn []
       (ensure-built-in-activities!)
@@ -827,8 +825,8 @@
               "Sandbox activation must install activity-top-toolbar-builder")
       true)))
 
-(fn sandbox-activation-installs-object-move-predicate []
-  "Sandbox activation must install object move predicate returning state value."
+(fn sandbox-activation-installs-object-drag-mode-provider []
+  "Sandbox activation must install object drag mode provider returning toolbar mode."
   (with-restored-app
     [:active-world-runtime
      :scene
@@ -841,8 +839,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+      :activity-object-drag-mode-provider
      :sandbox-toolbar-state]
     (fn []
       (ensure-built-in-activities!)
@@ -854,70 +851,42 @@
       (when (= (Activities.active-activity-id) "sandbox")
         (Activities.deactivate-active-activity))
       (Activities.activate-activity "sandbox")
-      (assert (= (type app.activity-object-move-predicate) :function)
-              "Sandbox activation must install object move predicate")
-      (assert (= (app.activity-object-move-predicate) false)
-              "Object move predicate must return false by default")
+      (assert (= (type app.activity-object-drag-mode-provider) :function)
+              "Sandbox activation must install object drag mode provider")
+      (assert (= (app.activity-object-drag-mode-provider) nil)
+              "Object drag mode provider must return nil by default")
+      (app.active-world-runtime.sandbox-toolbar-state:set-interaction-mode :move)
+      (assert (= (app.activity-object-drag-mode-provider) :move)
+              "Object drag mode provider must return :move in Move mode")
+      (app.active-world-runtime.sandbox-toolbar-state:set-interaction-mode :grab)
+      (assert (= (app.activity-object-drag-mode-provider) :grab)
+              "Object drag mode provider must return :grab in Grab mode")
       true)))
 
-(fn sandbox-activation-installs-drag-attachment-provider []
-  "Sandbox activation must install drag attachment provider returning state value."
-  (with-restored-app
-    [:active-world-runtime
-     :scene
-     :activity-root-actions
-     :activity-target-enabled?
-     :activity-update
-     :activity-preferred-interaction-surface
-     :activity-surface-state
-     :canvas-surface-interactive?
-     :activity-context-enricher
-     :active-activity-id
-     :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
-     :sandbox-toolbar-state]
-    (fn []
-      (ensure-built-in-activities!)
-      (local mock-scene (make-mock-scene))
-      (set app.active-world-runtime {:scene mock-scene
-                                      :activity-session-state
-                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
-      (set app.scene mock-scene)
-      (when (= (Activities.active-activity-id) "sandbox")
-        (Activities.deactivate-active-activity))
-      (Activities.activate-activity "sandbox")
-      (assert (= (type app.activity-drag-attachment-provider) :function)
-              "Sandbox activation must install drag attachment provider")
-      (assert (= (app.activity-drag-attachment-provider) :center)
-              "Drag attachment provider must return :center by default")
-      true)))
-
-;; R1-3: Runtime.drag-attachment-mode returns correct mode
-(fn runtime-drag-attachment-mode-respects-provider []
-  "Runtime.drag-attachment-mode must return :center when no provider
-  installed, :anchor when provider returns :anchor, and :center when
-  provider returns nil or non-anchor value."
+(fn runtime-object-drag-mode-respects-provider []
+  "Runtime.activity-object-drag-mode must return nil, :move, or :grab and reject invalid provider values."
   (local Runtime (require :state-runtime))
   (with-restored-app
-    [:activity-drag-attachment-provider]
+    [:activity-object-drag-mode-provider]
     (fn []
-      ;; No provider installed
-      (set app.activity-drag-attachment-provider nil)
-      (assert (= (Runtime.drag-attachment-mode) :center)
-              "drag-attachment-mode must return :center when no provider")
-      ;; Provider returns :anchor
-      (set app.activity-drag-attachment-provider (fn [] :anchor))
-      (assert (= (Runtime.drag-attachment-mode) :anchor)
-              "drag-attachment-mode must return :anchor when provider returns :anchor")
-      ;; Provider returns :center
-      (set app.activity-drag-attachment-provider (fn [] :center))
-      (assert (= (Runtime.drag-attachment-mode) :center)
-              "drag-attachment-mode must return :center when provider returns :center")
-      ;; Provider returns some other value
-      (set app.activity-drag-attachment-provider (fn [] :other))
-      (assert (= (Runtime.drag-attachment-mode) :center)
-              "drag-attachment-mode must return :center for non-anchor provider value")
+      (set app.activity-object-drag-mode-provider nil)
+      (assert (= (Runtime.activity-object-drag-mode) nil)
+              "activity-object-drag-mode must return nil when no provider is installed")
+      (set app.activity-object-drag-mode-provider (fn [] :move))
+      (assert (= (Runtime.activity-object-drag-mode) :move)
+              "activity-object-drag-mode must return :move when provider returns :move")
+      (set app.activity-object-drag-mode-provider (fn [] :grab))
+      (assert (= (Runtime.activity-object-drag-mode) :grab)
+              "activity-object-drag-mode must return :grab when provider returns :grab")
+      (set app.activity-object-drag-mode-provider (fn [] nil))
+      (assert (= (Runtime.activity-object-drag-mode) nil)
+              "activity-object-drag-mode must return nil when provider returns nil")
+      (set app.activity-object-drag-mode-provider (fn [] :invalid))
+      (local (ok err) (pcall Runtime.activity-object-drag-mode))
+      (assert (not ok)
+              "activity-object-drag-mode must fail loudly on invalid provider values")
+      (assert (string.find (tostring err) "Invalid activity object drag mode")
+              (.. "Invalid drag mode error should name invalid mode, got: " (tostring err)))
       true)))
 
 (fn sandbox-snapshot-includes-toolbar-state []
@@ -934,8 +903,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+     :activity-object-drag-mode-provider
      :sandbox-toolbar-state
      :engine]
     (fn []
@@ -965,12 +933,8 @@
       (assert snapshot-result.scene "Snapshot must have scene")
       (assert (= (type snapshot-result.scene.toolbar) :table)
               (.. "Snapshot scene must include toolbar, got " (tostring (type snapshot-result.scene.toolbar))))
-      (assert (= snapshot-result.scene.toolbar.camera-mode "flight")
-              "Snapshot toolbar camera-mode must be 'flight'")
-      (assert (= snapshot-result.scene.toolbar.object-move-enabled? false)
-              "Snapshot toolbar object-move-enabled? must be false")
-      (assert (= snapshot-result.scene.toolbar.drag-attachment "center")
-              "Snapshot toolbar drag-attachment must be 'center'")
+      (assert (= snapshot-result.scene.toolbar.interaction-mode "flight")
+              "Snapshot toolbar interaction-mode must be 'flight'")
       true)))
 
 (fn sandbox-restore-includes-toolbar-state []
@@ -987,8 +951,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+     :activity-object-drag-mode-provider
      :sandbox-toolbar-state
      :engine]
     (fn []
@@ -1006,20 +969,14 @@
       ;; Verify default state
       (local toolbar-state app.active-world-runtime.sandbox-toolbar-state)
       (assert toolbar-state "Toolbar state must exist")
-      (assert (= toolbar-state.camera-mode :flight)
-              "Default camera-mode must be :flight")
+      (assert (= toolbar-state.interaction-mode :flight)
+              "Default interaction-mode must be :flight")
       ;; Restore with custom toolbar state
       (local session {:scene {:panels []
-                              :toolbar {:camera-mode "grounded"
-                                        :object-move-enabled? true
-                                        :drag-attachment "anchor"}}})
+                              :toolbar {:interaction-mode :grab}}})
       (sandbox-unit.restore-sandbox-activity! nil session session)
-      (assert (= toolbar-state.camera-mode :grounded)
-              "After restore, camera-mode must be :grounded")
-      (assert (= toolbar-state.object-move-enabled? true)
-              "After restore, object-move-enabled? must be true")
-      (assert (= toolbar-state.drag-attachment :anchor)
-              "After restore, drag-attachment must be :anchor")
+      (assert (= toolbar-state.interaction-mode :grab)
+              "After restore, interaction-mode must be :grab")
       true)))
 
 (fn sandbox-activation-reuses-previous-raw-controls []
@@ -1040,8 +997,7 @@
      :activity-context-enricher
      :active-activity-id
      :activity-top-toolbar-builder
-     :activity-object-move-predicate
-     :activity-drag-attachment-provider
+     :activity-object-drag-mode-provider
      :sandbox-toolbar-state]
     (fn []
       (ensure-built-in-activities!)
@@ -1104,12 +1060,10 @@
                       :fn sandbox-activation-creates-toolbar-state})
 (table.insert tests {:name "sandbox activation installs toolbar builder"
                       :fn sandbox-activation-installs-toolbar-builder})
-(table.insert tests {:name "sandbox activation installs object move predicate"
-                      :fn sandbox-activation-installs-object-move-predicate})
-(table.insert tests {:name "sandbox activation installs drag attachment provider"
-                      :fn sandbox-activation-installs-drag-attachment-provider})
-(table.insert tests {:name "Runtime.drag-attachment-mode respects provider"
-                      :fn runtime-drag-attachment-mode-respects-provider})
+(table.insert tests {:name "sandbox activation installs object drag mode provider"
+                      :fn sandbox-activation-installs-object-drag-mode-provider})
+(table.insert tests {:name "Runtime.activity-object-drag-mode respects provider"
+                      :fn runtime-object-drag-mode-respects-provider})
 (table.insert tests {:name "snapshot includes toolbar state"
                       :fn sandbox-snapshot-includes-toolbar-state})
 (table.insert tests {:name "restore includes toolbar state"

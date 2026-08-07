@@ -93,6 +93,7 @@ _BRANCH_PATTERNS = [
     re.compile(r"^opencode/workflow-debug/[A-Za-z0-9][A-Za-z0-9._-]*$"),
     re.compile(r"^opencode/workflow-debug-pr/[A-Za-z0-9][A-Za-z0-9._-]*$"),
     re.compile(r"^(feature|fix|docs|chore)/[A-Za-z0-9][A-Za-z0-9._/-]*$"),
+    re.compile(r"^juicyrebel/[A-Za-z0-9][A-Za-z0-9._/-]*$"),
 ]
 
 

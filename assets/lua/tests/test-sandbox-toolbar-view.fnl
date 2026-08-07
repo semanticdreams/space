@@ -75,140 +75,48 @@
   (walk root)
   found)
 
-(fn sandbox-toolbar-view-creates-camera-mode-button []
-  "The toolbar view must create a button named sandbox-toolbar-camera-mode."
-  (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (assert entity "Toolbar view must return an entity")
-  (assert entity.children "Toolbar view must have children")
-  (local camera-btn (find-entity-by-layout-name entity "sandbox-toolbar-camera-mode"))
-  (assert camera-btn
-          "Toolbar view must contain a button named sandbox-toolbar-camera-mode"))
+(local mode-button-specs [{:name "sandbox-toolbar-mode-flight" :mode :flight}
+                          {:name "sandbox-toolbar-mode-walk" :mode :walk}
+                          {:name "sandbox-toolbar-mode-move" :mode :move}
+                          {:name "sandbox-toolbar-mode-grab" :mode :grab}])
 
-(fn sandbox-toolbar-view-creates-object-move-button []
-  "The toolbar view must create a button named sandbox-toolbar-object-move."
+(fn sandbox-toolbar-view-clicking-each-mode-selects-mode []
   (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local move-btn (find-entity-by-layout-name entity "sandbox-toolbar-object-move"))
-  (assert move-btn
-          "Toolbar view must contain a button named sandbox-toolbar-object-move"))
+  (local entity ((SandboxToolbarView state) (make-test-ctx)))
+  (each [_ pair (ipairs mode-button-specs)]
+    (local btn (find-entity-by-layout-name entity pair.name))
+    (assert btn (.. "missing button " pair.name))
+    (btn:on-click {})
+    (assert (= state.interaction-mode pair.mode)
+            (.. pair.name " should select " (tostring pair.mode)))))
 
-(fn sandbox-toolbar-view-creates-drag-attachment-button []
-  "The toolbar view must create a button named sandbox-toolbar-drag-attachment."
+(fn sandbox-toolbar-view-clicking-active-fly-does-not-emit-change []
   (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local drag-btn (find-entity-by-layout-name entity "sandbox-toolbar-drag-attachment"))
-  (assert drag-btn
-          "Toolbar view must contain a button named sandbox-toolbar-drag-attachment"))
+  (var changed-count 0)
+  (state.changed:connect (fn [_mode]
+                           (set changed-count (+ changed-count 1))))
+  (local entity ((SandboxToolbarView state) (make-test-ctx)))
+  (local flight-btn (find-entity-by-layout-name entity "sandbox-toolbar-mode-flight"))
+  (assert flight-btn "missing button sandbox-toolbar-mode-flight")
+  (assert (= state.interaction-mode :flight) "initial interaction mode must be :flight")
+  (flight-btn:on-click {})
+  (assert (= changed-count 0)
+          (.. "clicking active Fly must not emit, emitted " (tostring changed-count) " times")))
 
-(fn sandbox-toolbar-view-camera-mode-click-toggles-state []
-  "Clicking the camera mode button must toggle state.camera-mode."
+(fn sandbox-toolbar-view-only-active-mode-button-is-primary []
   (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local camera-btn (find-entity-by-layout-name entity "sandbox-toolbar-camera-mode"))
-  (assert camera-btn.on-click "Camera mode button must have on-click handler")
-  (assert (= state.camera-mode :flight)
-          "Camera mode must start as :flight")
-  (camera-btn:on-click {})
-  (assert (= state.camera-mode :grounded)
-          "Camera mode must be :grounded after click"))
-
-(fn sandbox-toolbar-view-object-move-click-toggles-state []
-  "Clicking the object move button must toggle state.object-move-enabled?."
-  (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local move-btn (find-entity-by-layout-name entity "sandbox-toolbar-object-move"))
-  (assert move-btn.on-click "Object move button must have on-click handler")
-  (assert (= state.object-move-enabled? false)
-          "Object move must start as false")
-  (move-btn:on-click {})
-  (assert (= state.object-move-enabled? true)
-          "Object move must be true after click"))
-
-(fn sandbox-toolbar-view-drag-attachment-click-toggles-state []
-  "Clicking the drag attachment button must toggle state.drag-attachment."
-  (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local drag-btn (find-entity-by-layout-name entity "sandbox-toolbar-drag-attachment"))
-  (assert drag-btn.on-click "Drag attachment button must have on-click handler")
-  (assert (= state.drag-attachment :center)
-          "Drag attachment must start as :center")
-  (drag-btn:on-click {})
-  (assert (= state.drag-attachment :anchor)
-          "Drag attachment must be :anchor after click"))
-
-(fn find-text-widget [widget]
-  "Walk from a widget to find a Text widget with set-text method."
-  (when widget
-    (if widget.set-text
-        widget
-        (= widget.__type :text-widget) ;; next-app text widget
-        widget
-        (and widget.children (= (type widget.children) :table))
-        (do
-          (var found nil)
-          (each [_ child (ipairs widget.children)]
-            (when (not found)
-              (local candidate
-                (if (and (= (type child) :table) child.element)
-                    (find-text-widget child.element)
-                    (find-text-widget child)))
-              (when candidate
-                (set found candidate))))
-          found)
-        nil)))
-
-(fn sandbox-toolbar-view-camera-button-text-updates-on-toggle []
-  "Camera mode button text must show Flight or Grounded based on state."
-  (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local camera-btn (find-entity-by-layout-name entity "sandbox-toolbar-camera-mode"))
-  (local text-widget (find-text-widget camera-btn.text))
-  (assert text-widget "Camera button must have a text widget")
-  ;; Codepoints for "Flight": [70, 108, 105, 103, 104, 116]
-  (local initial-cp (text-widget:get-codepoints))
-  (assert (= (. initial-cp 1) 70)
-          (.. "Camera button text must start with 'Flight', got first codepoint " (tostring (. initial-cp 1))))
-  ;; Toggle to grounded and update — text must change to "Grounded"
-  (state:toggle-camera-mode)
-  (entity:update)
-  (local updated-cp (text-widget:get-codepoints))
-  (assert (= (. updated-cp 1) 71)
-          (.. "Camera button text must change to 'Grounded' after toggle, got first codepoint " (tostring (. updated-cp 1)))))
-
-(fn sandbox-toolbar-view-variant-changes-background-color []
-  "Variant changes must update background-color and related color fields."
-  (local state (SandboxToolbarState {}))
-  (local builder (SandboxToolbarView state))
-  (local ctx (make-test-ctx))
-  (local entity (builder ctx))
-  (local camera-btn (find-entity-by-layout-name entity "sandbox-toolbar-camera-mode"))
-  (assert camera-btn.variant "Camera button must have a variant")
-  (local initial-background camera-btn.background-color)
-  (assert initial-background "Camera button must have background-color")
-  ;; Toggle camera mode and update
-  (state:toggle-camera-mode)
-  (entity:update)
-  ;; Variant must have changed
-  (assert (not (= camera-btn.variant (if (= state.camera-mode :grounded) :secondary :primary)))
-          "Camera button variant must have changed")
-  ;; Background color must have changed (variant re-resolution)
-  (assert (not (= camera-btn.background-color initial-background))
-          "Camera button background-color must change when variant changes"))
+  (local entity ((SandboxToolbarView state) (make-test-ctx)))
+  (each [_ active-pair (ipairs mode-button-specs)]
+    (state:set-interaction-mode active-pair.mode)
+    (entity:update)
+    (each [_ pair (ipairs mode-button-specs)]
+      (local btn (find-entity-by-layout-name entity pair.name))
+      (assert btn (.. "missing button " pair.name))
+      (local expected (if (= pair.mode active-pair.mode) :primary :secondary))
+      (assert (= btn.variant expected)
+              (.. pair.name " variant should be " (tostring expected)
+                  " when active mode is " (tostring active-pair.mode)
+                  ", got " (tostring btn.variant))))))
 
 (fn sandbox-toolbar-view-drop-disconnects-from-state-changed []
   "Calling root:drop() must disconnect from state.changed so stale callbacks
@@ -234,22 +142,12 @@
   (assert (not ok)
           (.. "After drop, state.changed handler must be disconnected, but disconnect succeeded. Error: " (tostring err))))
 
-(table.insert tests {:name "sandbox toolbar view creates camera mode button"
-                      :fn sandbox-toolbar-view-creates-camera-mode-button})
-(table.insert tests {:name "sandbox toolbar view creates object move button"
-                      :fn sandbox-toolbar-view-creates-object-move-button})
-(table.insert tests {:name "sandbox toolbar view creates drag attachment button"
-                      :fn sandbox-toolbar-view-creates-drag-attachment-button})
-(table.insert tests {:name "sandbox toolbar view camera mode click toggles state"
-                      :fn sandbox-toolbar-view-camera-mode-click-toggles-state})
-(table.insert tests {:name "sandbox toolbar view object move click toggles state"
-                      :fn sandbox-toolbar-view-object-move-click-toggles-state})
-(table.insert tests {:name "sandbox toolbar view drag attachment click toggles state"
-                      :fn sandbox-toolbar-view-drag-attachment-click-toggles-state})
-(table.insert tests {:name "sandbox toolbar view camera button text updates on toggle"
-                      :fn sandbox-toolbar-view-camera-button-text-updates-on-toggle})
-(table.insert tests {:name "sandbox toolbar view variant changes background color"
-                      :fn sandbox-toolbar-view-variant-changes-background-color})
+(table.insert tests {:name "sandbox toolbar view clicking each mode selects mode"
+                      :fn sandbox-toolbar-view-clicking-each-mode-selects-mode})
+(table.insert tests {:name "sandbox toolbar view clicking active fly does not emit change"
+                      :fn sandbox-toolbar-view-clicking-active-fly-does-not-emit-change})
+(table.insert tests {:name "sandbox toolbar view only active mode button is primary"
+                      :fn sandbox-toolbar-view-only-active-mode-button-is-primary})
 (table.insert tests {:name "sandbox toolbar view drop disconnects from state changed"
                       :fn sandbox-toolbar-view-drop-disconnects-from-state-changed})
 

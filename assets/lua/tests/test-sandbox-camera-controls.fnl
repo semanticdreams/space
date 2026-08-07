@@ -85,7 +85,7 @@
 
 (fn flight-mode-delegates-update []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
@@ -100,7 +100,7 @@
 
 (fn grounded-mode-skips-flight-update []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 0))
   (local controls (SandboxCameraControls {:camera camera
@@ -116,7 +116,7 @@
 (fn grounded-wheel-is-noop []
   "In grounded mode, on-mouse-wheel must not mutate inner flight controls."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 0))
   (local controls (SandboxCameraControls {:camera camera
@@ -132,7 +132,7 @@
 
 (fn flight-mode-delegates-mouse []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
@@ -151,7 +151,7 @@
 
 (fn flight-mode-delegates-gamepad []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
@@ -170,16 +170,16 @@
 
 (fn flight-to-grounded-without-sampler-errors []
   "When controls are constructed in :flight without a terrain sampler,
-  then the toolbar toggles to :grounded and update is called, it must error."
+  then the toolbar switches to :walk and update is called, it must error."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   ;; Construct without terrain-sampler (valid in flight mode)
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  ;; Toggle to grounded
-  (toolbar-state:toggle-camera-mode)
+  ;; Toggle to walk
+  (toolbar-state:set-interaction-mode :walk)
   ;; Update must error because terrain-sampler is missing
   (local (ok err) (pcall controls.update controls 16))
   (assert (not ok)
@@ -192,7 +192,7 @@
 
 (fn grounded-mode-requires-terrain-sampler []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local (ok err) (pcall SandboxCameraControls
                           {:camera camera
@@ -207,7 +207,7 @@
 
 (fn grounded-mouse-look-clamps-pitch []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 0))
   (local controls (SandboxCameraControls {:camera camera
@@ -245,7 +245,7 @@
 
 (fn grounded-space-jumps []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 0))
   (local controls (SandboxCameraControls {:camera camera
@@ -274,7 +274,7 @@
 (fn gravity-lands-at-terrain-plus-eye-height []
   (local camera (make-fake-camera))
   (camera:set-position (glm.vec3 0 10 0))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 3.0))
   (local controls (SandboxCameraControls {:camera camera
@@ -294,7 +294,7 @@
 (fn terrain-follow-uses-scaling-channel []
   (local camera (make-fake-camera))
   (camera:set-position (glm.vec3 0 10 0))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler {:height-at-world-point (fn [_self world-point] 3.0)})
   (local controls (SandboxCameraControls {:camera camera
@@ -315,7 +315,7 @@
 
 (fn drop-delegates-to-flight-controls []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
@@ -329,7 +329,7 @@
 
 (fn flight-mode-delegates-key-handlers []
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
@@ -343,17 +343,155 @@
   (controls:drop)
   true)
 
+(fn walk-wasd-uses-canonical-keys []
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler
+                                           :movement-speed 10.0}))
+  (controls:on-key-down {:key 119})
+  (controls:update 1000)
+  (controls:on-key-up {:key 119})
+  (assert (< camera.position.z -9.9)
+          (.. "W must move the walk camera forward, got z=" (tostring camera.position.z)))
+  (controls:on-key-down {:key 100})
+  (controls:update 1000)
+  (controls:on-key-up {:key 100})
+  (assert (> camera.position.x 9.9)
+          (.. "D must move the walk camera right, got x=" (tostring camera.position.x)))
+  (assert (not flight-controls.last-update-delta)
+          "Walk WASD must not delegate update to flight controls")
+  (controls:drop)
+  true)
+
+(fn walk-space-does-not-boost-horizontal-speed []
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler
+                                           :movement-speed 10.0
+                                           :jump-speed 0.0
+                                           :gravity 0.0}))
+  (controls:on-key-down {:key 119})
+  (controls:update 1000)
+  (local forward-without-space (- camera.position.z))
+  (camera:set-position (glm.vec3 0 0 0))
+  (controls:on-key-down {:key 32})
+  (controls:update 1000)
+  (local forward-with-space (- camera.position.z))
+  (assert (< (math.abs (- forward-with-space forward-without-space)) 0.01)
+          (.. "Space must not multiply walk horizontal speed; without="
+              (tostring forward-without-space) " with=" (tostring forward-with-space)))
+  (controls:drop)
+  true)
+
+(fn walk-arrow-keys-yaw-and-clamp-pitch []
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler
+                                           :pitch-min -0.5
+                                           :pitch-max 0.5}))
+  (controls:on-key-down {:key 1073741904})
+  (controls:update 1000)
+  (controls:on-key-up {:key 1073741904})
+  (assert (< (. camera.yaw-calls 1) 0)
+          "Left arrow must yaw left with a negative delta")
+  (controls:on-key-down {:key 1073741903})
+  (controls:update 1000)
+  (controls:on-key-up {:key 1073741903})
+  (assert (> (. camera.yaw-calls 2) 0)
+          "Right arrow must yaw right with a positive delta")
+  (controls:on-key-down {:key 1073741906})
+  (for [_ 1 4]
+    (controls:update 1000))
+  (var accumulated 0.0)
+  (each [_ delta (ipairs camera.pitch-calls)]
+    (set accumulated (+ accumulated delta)))
+  (assert (<= accumulated 0.5)
+          (.. "Up arrow pitch must clamp to max, got " (tostring accumulated)))
+  (controls:drop)
+  true)
+
+(fn object-modes-ignore-camera-controls []
+  (each [_ mode (ipairs [:move :grab])]
+    (local camera (make-fake-camera))
+    (local toolbar-state (SandboxToolbarState {:interaction-mode mode}))
+    (local flight-controls (make-fake-flight-controls camera))
+    (local fake-sampler (make-fake-terrain-sampler 0))
+    (local controls (SandboxCameraControls {:camera camera
+                                             :toolbar-state toolbar-state
+                                             :flight-controls flight-controls
+                                             :terrain-sampler fake-sampler}))
+    (controls:on-key-down {:key 119})
+    (controls:on-key-down {:key 1073741904})
+    (controls:update 1000)
+    (assert (= camera.position.x 0)
+            (.. (tostring mode) " must not mutate camera x"))
+    (assert (= camera.position.y 0)
+            (.. (tostring mode) " must not mutate camera y"))
+    (assert (= camera.position.z 0)
+            (.. (tostring mode) " must not mutate camera z"))
+    (assert (= (length flight-controls.key-calls) 0)
+            (.. (tostring mode) " must not delegate key events to flight controls"))
+    (assert (not flight-controls.last-update-delta)
+            (.. (tostring mode) " must not delegate update to flight controls"))
+    (controls:drop))
+  true)
+
+(fn object-mode-releases-clear-walk-input-state []
+  (each [_ mode (ipairs [:move :grab])]
+    (local camera (make-fake-camera))
+    (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
+    (local flight-controls (make-fake-flight-controls camera))
+    (local fake-sampler (make-fake-terrain-sampler 0))
+    (local controls (SandboxCameraControls {:camera camera
+                                             :toolbar-state toolbar-state
+                                             :flight-controls flight-controls
+                                             :terrain-sampler fake-sampler
+                                             :eye-height 0.0
+                                             :gravity 0.0
+                                             :movement-speed 10.0}))
+    (controls:on-key-down {:key 119})
+    (controls:on-mouse-button-down {:button 1 :x 0 :y 0})
+    (toolbar-state:set-interaction-mode mode)
+    (controls:on-key-up {:key 119})
+    (controls:on-mouse-button-up {:button 1 :x 0 :y 0})
+    (toolbar-state:set-interaction-mode :walk)
+    (controls:update 1000)
+    (controls:on-mouse-motion {:x 100 :y 0})
+    (assert (= camera.position.z 0)
+            (.. (tostring mode) " release must clear stale Walk W state"))
+    (assert (= (length camera.yaw-calls) 0)
+            (.. (tostring mode) " release must clear stale Walk mouse-look state"))
+    (assert (= (length flight-controls.key-calls) 0)
+            (.. (tostring mode) " release must not delegate to flight controls"))
+    (controls:drop))
+  true)
+
 (fn flight-to-grounded-on-key-down-without-sampler-errors []
   "When toggled to grounded without terrain sampler, on-key-down must error
   before mutating any grounded state."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  ;; Toggle to grounded
-  (toolbar-state:toggle-camera-mode)
+  ;; Toggle to walk
+  (toolbar-state:set-interaction-mode :walk)
   ;; Store pre-call camera position to verify no mutation
   (local pre-y (glm.vec3 camera.position.x camera.position.y camera.position.z))
   (local (ok err) (pcall controls.on-key-down controls {:key 32}))
@@ -373,13 +511,13 @@
   "When toggled to grounded without terrain sampler, on-mouse-button-down must
   error before mutating any grounded state."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  ;; Toggle to grounded
-  (toolbar-state:toggle-camera-mode)
+  ;; Toggle to walk
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-mouse-button-down controls {:button 1 :x 100 :y 200}))
   (assert (not ok)
           "on-mouse-button-down must error when toggled to grounded without terrain sampler")
@@ -393,13 +531,13 @@
   "When toggled to grounded without terrain sampler, on-mouse-motion must error
   before mutating the camera, even when no drag is active."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  ;; Toggle to grounded
-  (toolbar-state:toggle-camera-mode)
+  ;; Toggle to walk
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-mouse-motion controls {:x 110 :y 210}))
   (assert (not ok)
           "on-mouse-motion must error when toggled to grounded without terrain sampler")
@@ -416,7 +554,7 @@
   current camera Y (20), not from the Y value captured at construction (0)."
   (local camera (make-fake-camera))
   (camera:set-position (glm.vec3 0 20 0))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 0))
   ;; Construct controls in flight mode at camera Y=0 (construction time)
@@ -427,8 +565,8 @@
                                            :terrain-sampler fake-sampler}))
   ;; Move camera to Y=20 while in flight mode
   (camera:set-position (glm.vec3 0 20 0))
-  ;; Toggle to grounded
-  (toolbar-state:toggle-camera-mode)
+  ;; Toggle to walk
+  (toolbar-state:set-interaction-mode :walk)
   ;; First grounded update: should start smoothing from current Y (20),
   ;; not from the Y at construction (0). With terrain=0, eye-height=2,
   ;; target = 2. Smoothing should move from 20 toward 2 without jumping.
@@ -451,7 +589,7 @@
   dipping below it."
   (local camera (make-fake-camera))
   (camera:set-position (glm.vec3 0 10 0))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :walk}))
   (local flight-controls (make-fake-flight-controls camera))
   (local fake-sampler (make-fake-terrain-sampler 3.0))
   (local controls (SandboxCameraControls {:camera camera
@@ -478,12 +616,12 @@
 (fn grounded-wheel-errors-without-terrain-sampler []
   "When toggled to grounded without terrain sampler, on-mouse-wheel must error."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  (toolbar-state:toggle-camera-mode)
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-mouse-wheel controls {:x 0 :y 5}))
   (assert (not ok)
           "on-mouse-wheel must error when toggled to grounded without terrain sampler")
@@ -496,12 +634,12 @@
 (fn grounded-gamepad-button-down-errors-without-terrain-sampler []
   "When toggled to grounded without terrain sampler, on-gamepad-button-down must error."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  (toolbar-state:toggle-camera-mode)
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-gamepad-button-down controls {:button 0 :which 0}))
   (assert (not ok)
           "on-gamepad-button-down must error when toggled to grounded without terrain sampler")
@@ -514,12 +652,12 @@
 (fn grounded-gamepad-axis-motion-errors-without-terrain-sampler []
   "When toggled to grounded without terrain sampler, on-gamepad-axis-motion must error."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  (toolbar-state:toggle-camera-mode)
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-gamepad-axis-motion controls {:axis 0 :value 0.5 :which 0}))
   (assert (not ok)
           "on-gamepad-axis-motion must error when toggled to grounded without terrain sampler")
@@ -532,12 +670,12 @@
 (fn grounded-gamepad-removed-errors-without-terrain-sampler []
   "When toggled to grounded without terrain sampler, on-gamepad-removed must error."
   (local camera (make-fake-camera))
-  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local toolbar-state (SandboxToolbarState {:interaction-mode :flight}))
   (local flight-controls (make-fake-flight-controls camera))
   (local controls (SandboxCameraControls {:camera camera
                                            :toolbar-state toolbar-state
                                            :flight-controls flight-controls}))
-  (toolbar-state:toggle-camera-mode)
+  (toolbar-state:set-interaction-mode :walk)
   (local (ok err) (pcall controls.on-gamepad-removed controls {:which 0}))
   (assert (not ok)
           "on-gamepad-removed must error when toggled to grounded without terrain sampler")
@@ -578,9 +716,19 @@
 (table.insert tests {:name "drop delegates to flight controls"
                      :fn drop-delegates-to-flight-controls})
 (table.insert tests {:name "flight mode delegates key handlers"
-                      :fn flight-mode-delegates-key-handlers})
+                       :fn flight-mode-delegates-key-handlers})
+(table.insert tests {:name "walk WASD uses canonical key codes"
+                       :fn walk-wasd-uses-canonical-keys})
+(table.insert tests {:name "walk Space does not boost horizontal speed"
+                       :fn walk-space-does-not-boost-horizontal-speed})
+(table.insert tests {:name "walk arrow keys yaw and clamp pitch"
+                       :fn walk-arrow-keys-yaw-and-clamp-pitch})
+(table.insert tests {:name "object modes ignore camera controls"
+                       :fn object-modes-ignore-camera-controls})
+(table.insert tests {:name "object-mode releases clear Walk input state"
+                       :fn object-mode-releases-clear-walk-input-state})
 (table.insert tests {:name "flight to grounded syncs y-channel from current camera Y"
-                      :fn flight-to-grounded-syncs-y-channel-from-current-camera-y})
+                       :fn flight-to-grounded-syncs-y-channel-from-current-camera-y})
 (table.insert tests {:name "grounded landing snaps channel to target-y not below terrain"
                       :fn grounded-landing-snaps-channel-to-target-y-not-below-terrain})
 (table.insert tests {:name "grounded wheel errors without terrain sampler"

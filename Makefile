@@ -1,4 +1,4 @@
-.PHONY: build build-full cmake cmake-minimal cmake-full debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release fennel-check constraints test test-e2e test-live-hot-reload test-slow test-integration test-all-lua profile commit prof download-models-data resize-logo docs devlog test-windows-wine
+.PHONY: build build-full cmake cmake-minimal cmake-full debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release opencode-check fennel-check constraints test test-e2e test-live-hot-reload test-slow test-integration test-all-lua profile commit prof download-models-data resize-logo docs devlog test-windows-wine
 
 SPACE_TEST_ENV = SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(CURDIR)/assets
 SPACE_FENNEL_ENV = FENNEL_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl FENNEL_MACRO_PATH=$(CURDIR)/assets/lua/?.fnl\;$(CURDIR)/assets/lua/?/init.fnl
@@ -139,6 +139,10 @@ release:
 	echo "Creating new annotated tag $$new_version"; \
 	git tag -a $$new_version -m "$$new_version"; \
 	git push origin $$new_version
+
+opencode-check:
+	python3 scripts/check_opencode_permissions.py --repo-root .
+	python3 -m pytest scripts/tests/test_check_opencode_permissions.py scripts/tests/test_opencode_capabilities.py scripts/tests/test_opencode_git_integrate.py scripts/tests/test_opencode_pr_operator.py
 
 download-models-data:
 	wget -O assets/data/models-dot-dev.json https://models.dev/api.json

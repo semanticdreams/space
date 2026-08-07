@@ -192,11 +192,63 @@
   (assert (= (body:getActivationState) bt.ACTIVE_TAG) "Rigid body should expose activation state")
   (assert (body:isActive) "Rigid body should report active state"))
 
+(fn physics-bindings-point-to-point-constraint []
+  (assert bt "Physics bindings require the bt module")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+
+  (var body nil)
+  (var constraint nil)
+  (local starting-count (app.engine.physics:getNumConstraints))
+
+  (fn cleanup []
+    (when constraint
+      (app.engine.physics:removeConstraint constraint)
+      (set constraint nil))
+    (when body
+      (app.engine.physics:removeRigidBody body)
+      (set body nil)))
+
+  (local result
+    (table.pack
+      (pcall
+        (fn []
+          (local shape (bt.BoxShape (bt.Vector3 1 1 1)))
+          (local transform (bt.Transform))
+          (transform:setIdentity)
+          (local motion (bt.DefaultMotionState transform))
+          (local inertia (bt.Vector3 0 0 0))
+          (shape:calculateLocalInertia 1.0 inertia)
+          (local info (bt.RigidBodyConstructionInfo 1.0 motion shape inertia))
+          (set body (bt.RigidBody info))
+          (app.engine.physics:addRigidBody body)
+
+          (set constraint (bt.Point2PointConstraint body (bt.Vector3 0.25 0.5 0.75)))
+          (app.engine.physics:addConstraint constraint true)
+          (assert (= (app.engine.physics:getNumConstraints) (+ starting-count 1))
+                  "Physics constraint count should increase after adding point constraint")
+          (assert-vec3= (constraint:getPivotInA) (bt.Vector3 0.25 0.5 0.75)
+                        "Point constraint pivot A should round-trip")
+
+          (constraint:setPivotB (bt.Vector3 3 4 5))
+          (assert-vec3= (constraint:getPivotInB) (bt.Vector3 3 4 5)
+                        "Point constraint pivot B should round-trip")))))
+  (local ok (. result 1))
+  (local err (. result 2))
+
+  (cleanup)
+  (assert (= (app.engine.physics:getNumConstraints) starting-count)
+          "Physics constraint count should return to its starting value after cleanup")
+  (when (not ok)
+    (error err)))
+
 (table.insert tests {:name "Physics updates rigid bodies via Bullet bindings"
                      :fn physics-bindings-step})
 
 (table.insert tests {:name "Physics exposes Bullet rigid-body tuning controls"
-                     :fn physics-bindings-expose-rigid-body-controls})
+                      :fn physics-bindings-expose-rigid-body-controls})
+
+(table.insert tests {:name "Physics binds Bullet point-to-point constraints"
+                     :fn physics-bindings-point-to-point-constraint})
 
 (local main
   (fn []

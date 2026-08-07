@@ -75,6 +75,9 @@ jobs:
           echo "GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-unset}"
           echo "HOME=$HOME"
 
+      - name: Check OpenCode capability wiring
+        run: make opencode-check
+
       - name: Build
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache

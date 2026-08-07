@@ -17,6 +17,9 @@ public:
     void syncMovedRigidBody(btRigidBody* body);
     void addAction(btActionInterface* action);
     void removeAction(btActionInterface* action);
+    void addConstraint(btTypedConstraint* constraint, bool disableCollisionsBetweenLinkedBodies);
+    void removeConstraint(btTypedConstraint* constraint);
+    int getNumConstraints() const;
     btDiscreteDynamicsWorld* getWorld() const { return dynamicsWorld; }
 
 

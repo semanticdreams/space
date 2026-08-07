@@ -62,9 +62,8 @@
      (local mouse-down (and app.movables app.movables.on-mouse-button-down))
      (when (and (not ((. ctx :event-consumed?)))
                 mouse-down
-                (= payload.button SDL_BUTTON_LEFT)
-                (or (Runtime.alt-held? payload)
-                    (Runtime.activity-object-move-enabled? payload)))
+                 (= payload.button SDL_BUTTON_LEFT)
+                 (Runtime.activity-object-drag-mode))
        (mouse-down app.movables payload)))})
 
 (local SelectionMouseButtonDown

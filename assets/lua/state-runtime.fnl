@@ -22,15 +22,16 @@
 (fn alt-held? [payload]
   (Modifiers.alt-held? (and payload payload.mod)))
 
-(fn activity-object-move-enabled? [_payload]
-  (and app.activity-object-move-predicate
-       (= (app.activity-object-move-predicate) true)))
-
-(fn drag-attachment-mode []
-  (if (and app.activity-drag-attachment-provider
-           (= (app.activity-drag-attachment-provider) :anchor))
-      :anchor
-      :center))
+(fn activity-object-drag-mode []
+  (if app.activity-object-drag-mode-provider
+      (do
+        (local mode (app.activity-object-drag-mode-provider))
+        (if (or (= mode nil)
+                (= mode :move)
+                (= mode :grab))
+            mode
+            (error (.. "Invalid activity object drag mode: " (tostring mode)))))
+      nil))
 
 (fn clickables-active? []
   (assert app.clickables "state runtime requires app.clickables")
@@ -176,8 +177,7 @@
 {:shift-held? shift-held?
  :ctrl-held? ctrl-held?
  :alt-held? alt-held?
- :activity-object-move-enabled? activity-object-move-enabled?
- :drag-attachment-mode drag-attachment-mode
+ :activity-object-drag-mode activity-object-drag-mode
  :active-controls active-controls
  :clickables-active? clickables-active?
  :movables-active? movables-active?

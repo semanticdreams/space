@@ -18,24 +18,22 @@
 (local {: FirstPersonControls} (require :first-person-controls))
 
 (local tests [])
+(local approx MathUtils.approx)
 
-(local approx (. MathUtils :approx))
- 
-(local reset-engine-events
-  (fn []
-    (when _G.reset-engine-events
-      (_G.reset-engine-events))))
+(fn reset-engine-events []
+  (when _G.reset-engine-events
+    (_G.reset-engine-events)))
 
-(fn approx-vec3 [a b]
-  (and a b
-       (approx a.x b.x)
-       (approx a.y b.y)
-       (approx a.z b.z)))
+(fn command-hints-handle-toggle-key [_manager _payload]
+  true)
+
+(fn command-hints-close-on-handled-event [_manager _route-key _payload]
+  false)
 
 (fn command-hints-hud-provider [_self]
   {:command-hints
-   {:handle-toggle-key (fn [_manager _payload] true)
-    :close-on-handled-event (fn [_manager _route-key _payload] false)}})
+   {:handle-toggle-key command-hints-handle-toggle-key
+    :close-on-handled-event command-hints-close-on-handled-event}})
 
 (fn bind-normal-state! [state]
   (local states (States {:hud_provider command-hints-hud-provider}))
@@ -48,1214 +46,315 @@
   (StateSystemBindings.bind-states-host states)
   (set app.states states))
 
-(fn drag-through-normal-state-moves-scene-entity []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-hoverables (assert app.hoverables "Scene entity drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "Scene entity drag test requires app.clickables"))
-  (local original-runtime app.active-world-runtime)
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var target-layout nil)
+(fn provider-move [] :move)
+(fn provider-grab [] :grab)
+(fn provider-nil [] nil)
 
-  (fn cleanup [] (assert app.hoverables "Scene entity drag cleanup requires app.hoverables") (assert app.clickables "Scene entity drag cleanup requires app.clickables")
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?))
+(fn snapshot-app []
+  (local keys [:scene :canvas :layout-root :movables :intersectables :camera
+               :first-person-controls :active-world-runtime :hoverables :clickables
+               :engine :states :viewport :create-default-projection
+               :active-interaction-surface :preferred-interaction-surface
+               :scene-interactive? :canvas-interactive? :canvas-visible?
+               :canvas-controls :active-pointer-controls :workspace-shell-changed
+               :set-canvas-visible :set-active-interaction-surface
+               :activity-object-drag-mode-provider])
+  (local snapshot {:keys keys :values {}})
+  (each [_ key (ipairs keys)]
+    (set (. snapshot.values key) (. app key)))
+  snapshot)
 
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (assert (Clickables {:intersectables intersector}) "Scene entity drag test requires clickables"))
-            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene entity drag test requires hoverables"))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-            (scene:ensure-activity-slot "sandbox")
-            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-            (assert sandbox-slot "Entity drag test requires a valid sandbox slot")
-            (scene:build
-              (fn [_ctx]
-                (set target-layout
-                     (Layout {:name "integration-drag-target"
-                              :measurer (fn [self]
-                                          (set self.measure (glm.vec3 1 1 1)))
-                              :layouter (fn [self]
-                                          (set self.size self.measure))}))
-                {:layout target-layout
-                 :drop (fn [_] (target-layout:drop))}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 10)
-                    :direction (glm.vec3 0 0 -1)}))
+(fn restore-app! [snapshot]
+  (each [_ key (ipairs snapshot.keys)]
+    (set (. app key) (. snapshot.values key)))
+  true)
 
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
+(fn measure-unit-layout [self]
+  (set self.measure (glm.vec3 1 1 1)))
 
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 256})
-            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75})
-            (assert (app.movables:drag-active?) "Drag should begin after motion threshold")
+(fn layout-to-measure [self]
+  (set self.size self.measure))
 
-            (assert target-layout "Scene should create a target layout")
-            (assert (approx target-layout.position.x 5.0) "Drag should update layout X position")
-            (assert (approx target-layout.position.y 5.5) "Drag should update layout Y position")
-            (assert (approx target-layout.position.z 0.0) "Drag should keep layout on the ground plane")
-             (local active-root sandbox-slot.layout-root)
-             (assert active-root "Active sandbox slot should expose a layout root")
-             (assert (. active-root.layout-dirt.lookup target-layout) "Drag should mark layout node dirty")
+(fn make-target-layout [name]
+  (Layout {:name name
+           :measurer measure-unit-layout
+           :layouter layout-to-measure}))
 
-            (app.engine.events.mouse-button-up.emit {:button 1})
-            (assert (not (app.movables:drag-active?)) "Drag should end on mouse-up")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
+(fn add-layout-target! [scene fixture name]
+  (scene:build
+    (fn [_ctx]
+      (local target (make-target-layout name))
+      (set fixture.target-layout target)
+      {:layout target
+       :drop (fn [_]
+               (target:drop))}))
+  (scene:update)
+  fixture.target-layout)
 
-(fn drag-through-normal-state-moves-scene-ball []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-hoverables (assert app.hoverables "Scene ball drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "Scene ball drag test requires app.clickables"))
-  (local original-runtime app.active-world-runtime)
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var ball nil)
+(fn add-ball-target! [scene fixture]
+  (app.engine.physics:setGravity 0 -25 0)
+  (scene:build-default {:terrains []})
+  (set fixture.ball
+       (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
+                         {:position (glm.vec3 0 0 0)}))
+  (scene:update)
+  fixture.ball)
 
-  (fn cleanup [] (assert app.hoverables "Scene ball drag cleanup requires app.hoverables") (assert app.clickables "Scene ball drag cleanup requires app.clickables")
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?))
+(fn add-physics-target! [scene fixture]
+  (app.engine.physics:setGravity 0 -25 0)
+  (scene:build-default {:terrains []})
+  (set fixture.cuboid
+       (scene:add-physics-body {:position (glm.vec3 0 0 0)
+                                :size (glm.vec3 6 6 6)}))
+  (scene:update)
+  fixture.cuboid)
 
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (assert (Clickables {:intersectables intersector}) "Scene ball drag test requires clickables"))
-            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene ball drag test requires hoverables"))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-             (app.engine.physics:setGravity 0 -25 0)
-             (scene:ensure-activity-slot "sandbox")
-             (scene:activate-activity-slot "sandbox")
-             (scene:build-default {:terrains []})
-             (set ball (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
-                                        {:position (glm.vec3 0 0 0)}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 5)
-                    :direction (glm.vec3 0 0 -1)}))
+(fn install-canvas-hidden-shell! [fixture]
+  (set fixture.canvas-camera (Camera {:position (glm.vec3 0 0 100)}))
+  (set fixture.canvas (Canvas {:camera fixture.canvas-camera
+                               :states app.states
+                               :movables fixture.movables}))
+  (set fixture.canvas-controls (CanvasControls {:canvas fixture.canvas
+                                                :camera fixture.canvas-camera}))
+  (set app.canvas fixture.canvas)
+  (set app.canvas-controls fixture.canvas-controls)
+  (Main.install-app-shell!)
+  (app.set-active-interaction-surface :canvas)
+  (app.set-canvas-visible false)
+  (assert (= app.active-interaction-surface :scene)
+          "Hidden canvas should fall back to scene interaction")
+  true)
 
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
+(fn start-normal-state! [fixture provider]
+  (set fixture.state (NormalState))
+  (bind-normal-state! fixture.state)
+  (fixture.state.on-enter)
+  (set app.activity-object-drag-mode-provider provider)
+  true)
 
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 256})
-            (app.engine.events.mouse-motion.emit {:x 7.25 :y 9.25})
-            (assert (app.movables:drag-active?) "Ball drag should begin after motion threshold")
-            (assert ball.dragging "Ball movable should enter dragging mode")
-            (scene:update)
+(fn fixture-input-controls [self]
+  self.fixture.controls)
 
-            (assert ball "Scene should create a ball")
-            (assert (> ball.layout.position.x 3.5)
-                    (string.format
-                      "Ball drag should move layout along X (x=%.3f)"
-                      ball.layout.position.x))
-            (assert (> ball.layout.position.y 5.5)
-                    (string.format
-                      "Ball drag should move layout along Y (y=%.3f)"
-                      ball.layout.position.y))
-            (assert (< (math.abs ball.layout.position.z) 1.0)
-                    (string.format
-                      "Ball drag should keep layout near the drag plane (z=%.3f)"
-                      ball.layout.position.z))
+(fn fixture-camera-provider [self _opts]
+  self.fixture.camera)
 
-            (app.engine.events.mouse-button-up.emit {:button 1})
-            (assert (not (app.movables:drag-active?)) "Ball drag should end on mouse-up")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
+(fn fixture-screen-pos-ray [_self pointer _opts]
+  {:origin (glm.vec3 pointer.x pointer.y 10)
+   :direction (glm.vec3 0 0 -1)})
 
-(fn drag-through-normal-state-moves-scene-physics-body []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-hoverables (assert app.hoverables "Scene physics body drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "Scene physics body drag test requires app.clickables"))
-  (local original-runtime app.active-world-runtime)
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var cuboid nil)
+(fn setup-scene-drag-fixture! [fixture options]
+  (reset-engine-events)
+  (set fixture.intersector (Intersectables))
+  (set fixture.clickables (assert (Clickables {:intersectables fixture.intersector})
+                                  "Scene drag fixture requires clickables"))
+  (set fixture.hoverables (assert (Hoverables {:intersectables fixture.intersector})
+                                  "Scene drag fixture requires hoverables"))
+  (set fixture.movables (Movables {:intersectables fixture.intersector}))
+  (set fixture.camera (Camera {:position (glm.vec3 0 0 10)}))
+  (set fixture.controls (FirstPersonControls {:camera fixture.camera}))
+  (set app.active-world-runtime
+       {:presentation {:fixture fixture
+                       :input-controls fixture-input-controls
+                       :camera fixture-camera-provider}})
+  (set app.camera nil)
+  (set app.first-person-controls nil)
+  (set app.create-default-projection AppProjection.create-default-projection)
+  (set fixture.scene (Scene {:position (glm.vec3 0 0 0)
+                             :rotation (glm.quat 1 0 0 0)
+                             :camera fixture.camera}))
+  (set app.intersectables fixture.intersector)
+  (set app.clickables fixture.clickables)
+  (set app.hoverables fixture.hoverables)
+  (set app.movables fixture.movables)
+  (set app.scene fixture.scene)
+  (set app.layout-root fixture.scene.layout-root)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (set app.scene-interactive? true)
+  (set app.canvas-interactive? false)
+  (fixture.scene:ensure-activity-slot "sandbox")
+  (set fixture.sandbox-slot (fixture.scene:activate-activity-slot "sandbox"))
+  (assert fixture.sandbox-slot "Scene drag fixture requires a sandbox slot")
+  (if (= options.target :ball)
+      (add-ball-target! fixture.scene fixture)
+      (= options.target :physics)
+      (add-physics-target! fixture.scene fixture)
+      (add-layout-target! fixture.scene fixture (or options.name "scene-drag-target")))
+  (set fixture.scene.screen-pos-ray fixture-screen-pos-ray)
+  (when options.hidden-canvas?
+    (install-canvas-hidden-shell! fixture))
+  (start-normal-state! fixture options.provider)
+  true)
 
-  (fn cleanup [] (assert app.hoverables "Scene physics body drag cleanup requires app.hoverables") (assert app.clickables "Scene physics body drag cleanup requires app.clickables")
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?))
+(fn run-scene-drag-fixture! [fixture options f]
+  (setup-scene-drag-fixture! fixture options)
+  (f fixture))
 
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (assert (Clickables {:intersectables intersector}) "Scene physics body drag test requires clickables"))
-            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene physics body drag test requires hoverables"))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-             (app.engine.physics:setGravity 0 -25 0)
-             (scene:ensure-activity-slot "sandbox")
-             (scene:activate-activity-slot "sandbox")
-             (scene:build-default {:terrains []})
-             (set cuboid (scene:add-physics-body {:position (glm.vec3 0 0 0)
-                                                 :size (glm.vec3 6 6 6)}))
-            (assert cuboid "Scene should create a runtime physics body")
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 5)
-                    :direction (glm.vec3 0 0 -1)}))
+(fn with-scene-drag-fixture [opts f]
+  (local options (or opts {}))
+  (local snapshot (snapshot-app))
+  (local fixture {})
+  (local (ok result) (pcall run-scene-drag-fixture! fixture options f))
+  (when fixture.state
+    (fixture.state.on-leave))
+  (when fixture.canvas-controls (fixture.canvas-controls:drop))
+  (when fixture.canvas (fixture.canvas:drop))
+  (when fixture.scene (fixture.scene:drop))
+  (when fixture.movables (fixture.movables:drop))
+  (when fixture.intersector (fixture.intersector:drop))
+  (when fixture.clickables
+    (local clickables (assert fixture.clickables "Scene drag fixture cleanup requires clickables"))
+    (clickables:drop))
+  (when fixture.hoverables
+    (local hoverables (assert fixture.hoverables "Scene drag fixture cleanup requires hoverables"))
+    (hoverables:drop))
+  (when fixture.controls (fixture.controls:drop))
+  (when fixture.canvas-camera (fixture.canvas-camera:drop))
+  (when fixture.camera (fixture.camera:drop))
+  (restore-states! (. snapshot.values :states))
+  (restore-app! snapshot)
+  (if ok result (error result)))
 
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
+(fn assert-drag-layout-with-provider-move [fixture]
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+      (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+      (assert (app.movables:drag-active?)
+              "Provider :move should start direct object drag without Alt")
+      (assert (approx fixture.target-layout.position.x 5.0)
+              "Provider :move should update layout X position")
+      (assert (approx fixture.target-layout.position.y 5.5)
+              "Provider :move should update layout Y position")
+      (app.engine.events.mouse-button-up.emit {:button 1})
+      (assert (not (app.movables:drag-active?)) "Drag should end on mouse-up")
+      true)
 
-            (local initial-selection
-              (app.movables.intersector:select-entry app.movables.objects
-                                                     {:x 3.25 :y 3.25}
-                                                     {:include-point true}))
-            (assert initial-selection
-                    "Physics body drag test expected a movable selection at the cuboid screen point")
-            (local selected-entry (. app.movables.entry-map initial-selection.object))
-            (assert (= (and selected-entry selected-entry.target) cuboid.layout)
-                    "Physics body drag should select the cuboid movable target")
+(fn drag-layout-with-provider-move []
+  (with-scene-drag-fixture
+    {:provider provider-move :name "provider-move-drag-target"}
+    assert-drag-layout-with-provider-move))
 
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 256})
-            (assert (= (and app.movables.drag app.movables.drag.entry.target) cuboid.layout)
-                    "Physics body drag should engage the cuboid movable target on mouse-down")
-            (app.engine.events.mouse-motion.emit {:x 8.25 :y 9.25 :mod 256})
-            (assert (app.movables:drag-active?)
-                    "Physics body drag should begin after motion threshold")
-            (local during-motion-x cuboid.layout.position.x)
-            (local during-motion-y cuboid.layout.position.y)
-            (scene:update)
+(fn assert-alt-drag-without-provider-is-blocked [_fixture]
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 256})
+      (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 256})
+      (assert (not (app.movables:drag-active?))
+              "Alt must not start object drag when the provider is nil")
+      true)
 
-            (assert (> cuboid.layout.position.x 4.0)
-                    (string.format
-                      "Physics body drag should move layout along X (during_motion_x=%.3f after_update_x=%.3f)"
-                      during-motion-x
-                      cuboid.layout.position.x))
-            (assert (> cuboid.layout.position.y 5.0)
-                    (string.format
-                      "Physics body drag should move layout along Y (during_motion_y=%.3f after_update_y=%.3f)"
-                      during-motion-y
-                      cuboid.layout.position.y))
+(fn alt-drag-without-provider-is-blocked []
+  (with-scene-drag-fixture
+    {:provider nil :name "alt-without-provider-target"}
+    assert-alt-drag-without-provider-is-blocked))
 
-            (app.engine.events.mouse-button-up.emit {:button 1 :mod 256})
-            (scene:update)
+(fn assert-provider-nil-is-blocked [_fixture]
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+      (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+      (assert (not (app.movables:drag-active?))
+              "Provider nil should not start object drag")
+      true)
 
-            (assert (> cuboid.layout.position.x 4.0)
-                    (string.format
-                      "Physics body drag should keep X after release (x=%.3f)"
-                      cuboid.layout.position.x))
-            (assert (> cuboid.layout.position.y 5.0)
-                    (string.format
-                      "Physics body drag should keep Y after release (y=%.3f)"
-                      cuboid.layout.position.y))))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
+(fn provider-nil-is-blocked []
+  (with-scene-drag-fixture
+    {:provider provider-nil :name "provider-nil-target"}
+    assert-provider-nil-is-blocked))
 
-(fn drag-through-normal-state-moves-scene-entity-when-canvas-hidden []
-  (local original-scene app.scene)
-  (local original-canvas app.canvas)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-runtime app.active-world-runtime)
-  (local original-canvas-controls app.canvas-controls)
-  (local original-active-pointer-controls app.active-pointer-controls)
-  (local original-hoverables (assert app.hoverables "Canvas-hidden scene drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "Canvas-hidden scene drag test requires app.clickables"))
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-preferred-surface app.preferred-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (local original-canvas-visible? app.canvas-visible?)
-  (local original-workspace-shell-changed app.workspace-shell-changed)
-  (local original-set-canvas-visible app.set-canvas-visible)
-  (local original-set-active-interaction-surface app.set-active-interaction-surface)
-  (var scene nil)
-  (var canvas nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var canvas-camera nil)
-  (var controls nil)
-  (var canvas-controls nil)
-  (var state nil)
-  (var target-layout nil)
+(fn assert-provider-grab-reaches-physics-drag-path [fixture]
+      (local cuboid (assert fixture.cuboid "Physics provider test requires cuboid"))
+      (local starting-count (app.engine.physics:getNumConstraints))
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 0})
+      (assert (= (and app.movables.drag app.movables.drag.entry.target) cuboid.layout)
+              "Provider :grab should engage the cuboid movable target on mouse-down")
+      (app.engine.events.mouse-motion.emit {:x 8.25 :y 9.25 :mod 0})
+      (assert (app.movables:drag-active?)
+              "Provider :grab should start physics-backed drag after motion threshold")
+      (local point-grab (and app.movables.drag app.movables.drag.point-grab))
+      (assert point-grab
+              "Provider :grab should initialize the physics point-grab path")
+      (assert (point-grab:active?)
+              "Provider :grab point-grab session should be active")
+      (assert (= (app.engine.physics:getNumConstraints) (+ starting-count 1))
+              "Provider :grab should add one point-to-point constraint")
+      (app.engine.events.mouse-button-up.emit {:button 1 :mod 0})
+      (assert (= (app.engine.physics:getNumConstraints) starting-count)
+              "Provider :grab should remove the point-to-point constraint on mouse-up")
+      true)
 
-  (fn cleanup [] (assert app.hoverables "Canvas-hidden scene drag cleanup requires app.hoverables") (assert app.clickables "Canvas-hidden scene drag cleanup requires app.clickables")
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when canvas-controls
-      (canvas-controls:drop)
-      (set canvas-controls nil))
-    (when canvas
-      (canvas:drop)
-      (set canvas nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when canvas-camera
-      (canvas-camera:drop)
-      (set canvas-camera nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.canvas original-canvas)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.canvas-controls original-canvas-controls)
-    (set app.active-pointer-controls original-active-pointer-controls)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.viewport original-viewport)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.preferred-interaction-surface original-preferred-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?)
-    (set app.canvas-visible? original-canvas-visible?)
-    (set app.workspace-shell-changed original-workspace-shell-changed)
-    (set app.set-canvas-visible original-set-canvas-visible)
-    (set app.set-active-interaction-surface original-set-active-interaction-surface))
+(fn provider-grab-reaches-physics-drag-path []
+  (with-scene-drag-fixture
+    {:provider provider-grab :target :physics}
+    assert-provider-grab-reaches-physics-drag-path))
 
-  (local (ok err)
-    (pcall
-      (fn []
-        (reset-engine-events)
-        (set intersector (Intersectables))
-        (set clickables (assert (Clickables {:intersectables intersector}) "Canvas-hidden scene drag test requires clickables"))
-        (set hoverables (assert (Hoverables {:intersectables intersector}) "Canvas-hidden scene drag test requires hoverables"))
-        (set movables (Movables {:intersectables intersector}))
-        (set app.intersectables intersector)
-        (set app.clickables clickables)
-        (set app.hoverables hoverables)
-        (set app.movables movables)
-        (set camera (Camera {:position (glm.vec3 0 0 10)}))
-        (set canvas-camera (Camera {:position (glm.vec3 0 0 100)}))
-        (set controls (FirstPersonControls {:camera camera}))
-        (set app.create-default-projection AppProjection.create-default-projection)
-        (set scene (Scene {:position (glm.vec3 0 0 0)
-                           :rotation (glm.quat 1 0 0 0)
-                           :camera camera}))
-        (set canvas (Canvas {:camera canvas-camera
-                             :states app.states
-                             :movables movables}))
-         (set canvas-controls (CanvasControls {:canvas canvas
-                                              :camera canvas-camera}))
-         (set app.active-world-runtime
-              {:presentation {:input-controls (fn [_self] controls)
-                              :camera (fn [_self _opts] camera)}})
-         (set app.camera nil)
-         (set app.first-person-controls nil)
-         (set app.canvas-controls canvas-controls)
-        (set app.scene scene)
-        (set app.canvas canvas)
-        (set app.layout-root scene.layout-root)
-        (assert Main.install-app-shell!
-                "scene drag regression test requires Main.install-app-shell!")
-        (Main.install-app-shell!)
-        (scene:ensure-activity-slot "sandbox")
-        (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-        (assert sandbox-slot "Canvas-hidden drag test requires a valid sandbox slot")
-        (scene:build
-          (fn [_ctx]
-            (set target-layout
-                 (Layout {:name "integration-drag-target-hidden-canvas"
-                          :measurer (fn [self]
-                                      (set self.measure (glm.vec3 1 1 1)))
-                          :layouter (fn [self]
-                                      (set self.size self.measure))}))
-            {:layout target-layout
-             :drop (fn [_] (target-layout:drop))}))
-        (scene:update)
-        (set scene.screen-pos-ray
-             (fn [_self pointer _opts]
-               {:origin (glm.vec3 pointer.x pointer.y 10)
-                :direction (glm.vec3 0 0 -1)}))
+(fn assert-provider-move-drags-ball [fixture]
+      (local ball (assert fixture.ball "Ball provider test requires ball"))
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 0})
+      (app.engine.events.mouse-motion.emit {:x 7.25 :y 9.25 :mod 0})
+      (assert (app.movables:drag-active?) "Provider :move should drag scene balls")
+      (assert ball.dragging "Ball movable should enter dragging mode")
+      (fixture.scene:update)
+      (assert (> ball.layout.position.x 3.5) "Ball drag should move along X")
+      (assert (> ball.layout.position.y 5.5) "Ball drag should move along Y")
+      (app.engine.events.mouse-button-up.emit {:button 1 :mod 0})
+      true)
 
-        (assert app.set-active-interaction-surface
-                "scene drag regression test requires app.set-active-interaction-surface")
-        (assert app.set-canvas-visible
-                "scene drag regression test requires app.set-canvas-visible")
-        (app.set-active-interaction-surface :canvas)
-        (assert (= app.preferred-interaction-surface :canvas)
-                "canvas preference should track explicit canvas activation")
-        (assert (= app.active-interaction-surface :canvas)
-                "canvas should become active when it is visible")
-        (app.set-canvas-visible false)
-        (assert (= app.preferred-interaction-surface :canvas)
-                "hiding canvas should preserve the preferred surface")
-        (assert (= app.active-interaction-surface :scene)
-                "hiding canvas should fall back to scene interaction")
-        (assert (= app.scene-interactive? true)
-                "scene should remain interactive while canvas is hidden")
-        (assert (= app.canvas-interactive? false)
-                "hidden canvas should not remain interactive")
-        (assert (= app.active-pointer-controls controls)
-                "scene controls should be restored when canvas is hidden")
-        (app.set-canvas-visible true)
-        (assert (= app.active-interaction-surface :canvas)
-                "restoring canvas visibility should restore the preferred canvas surface")
-        (app.set-canvas-visible false)
+(fn provider-move-drags-ball []
+  (with-scene-drag-fixture
+    {:provider provider-move :target :ball}
+    assert-provider-move-drags-ball))
 
-        (set state (NormalState))
-        (bind-normal-state! state)
-        (state.on-enter)
+(fn assert-hidden-canvas-does-not-block-provider-move [fixture]
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+      (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+      (assert (app.movables:drag-active?)
+              "Hidden canvas should not block provider-enabled scene drag")
+      (assert (approx fixture.target-layout.position.x 5.0)
+              "Hidden canvas drag should update layout X")
+      (assert (approx fixture.target-layout.position.y 5.5)
+              "Hidden canvas drag should update layout Y")
+      (app.engine.events.mouse-button-up.emit {:button 1 :mod 0})
+      true)
 
-        (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 256})
-        (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75})
-        (assert (app.movables:drag-active?)
-                "Scene drag should still begin when canvas is hidden")
+(fn hidden-canvas-does-not-block-provider-move []
+  (with-scene-drag-fixture
+    {:provider provider-move
+     :hidden-canvas? true
+     :name "hidden-canvas-provider-move-target"}
+    assert-hidden-canvas-does-not-block-provider-move))
 
-        (assert target-layout "Scene should create a target layout")
-        (assert (approx target-layout.position.x 5.0)
-                "Hidden canvas should not block scene drag X updates")
-        (assert (approx target-layout.position.y 5.5)
-                "Hidden canvas should not block scene drag Y updates")
-        (assert (approx target-layout.position.z 0.0)
-                "Hidden canvas drag should stay on the ground plane")
-
-        (app.engine.events.mouse-button-up.emit {:button 1})
-        (assert (not (app.movables:drag-active?))
-                "Scene drag should end on mouse-up with hidden canvas"))))
-  (cleanup)
-  (when (not ok)
-    (error err)))
-
-(fn no-alt-drag-blocked-without-predicate []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-runtime app.active-world-runtime)
-  (local original-hoverables (assert app.hoverables "scene drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "scene drag test requires app.clickables"))
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (local original-predicate app.activity-object-move-predicate)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var target-layout nil)
-
-  (fn cleanup []
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?)
-    (set app.activity-object-move-predicate original-predicate))
-
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-            (scene:ensure-activity-slot "sandbox")
-            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-            (assert sandbox-slot "No-Alt drag test requires a valid sandbox slot")
-            (scene:build
-              (fn [_ctx]
-                (set target-layout
-                     (Layout {:name "no-alt-drag-target"
-                              :measurer (fn [self]
-                                          (set self.measure (glm.vec3 1 1 1)))
-                              :layouter (fn [self]
-                                          (set self.size self.measure))}))
-                {:layout target-layout
-                 :drop (fn [_] (target-layout:drop))}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 10)
-                    :direction (glm.vec3 0 0 -1)}))
-
-            ;; Ensure no predicate is installed
-            (set app.activity-object-move-predicate nil)
-
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
-
-            ;; Fire mouse-down without Alt modifier (mod 0)
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
-            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
-
-            (assert (not (app.movables:drag-active?))
-                    "No-Alt drag should NOT start when predicate is nil")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
-
-(fn no-alt-drag-blocked-when-predicate-returns-false []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-runtime app.active-world-runtime)
-  (local original-hoverables (assert app.hoverables "scene drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "scene drag test requires app.clickables"))
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (local original-predicate app.activity-object-move-predicate)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var target-layout nil)
-
-  (fn cleanup []
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?)
-    (set app.activity-object-move-predicate original-predicate))
-
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-            (scene:ensure-activity-slot "sandbox")
-            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-            (assert sandbox-slot "Predicate-false drag test requires a valid sandbox slot")
-            (scene:build
-              (fn [_ctx]
-                (set target-layout
-                     (Layout {:name "predicate-false-drag-target"
-                              :measurer (fn [self]
-                                          (set self.measure (glm.vec3 1 1 1)))
-                              :layouter (fn [self]
-                                          (set self.size self.measure))}))
-                {:layout target-layout
-                 :drop (fn [_] (target-layout:drop))}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 10)
-                    :direction (glm.vec3 0 0 -1)}))
-
-            ;; Install predicate returning false
-            (set app.activity-object-move-predicate (fn [] false))
-
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
-
-            ;; Fire mouse-down without Alt modifier
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
-            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
-
-            (assert (not (app.movables:drag-active?))
-                    "No-Alt drag should NOT start when predicate returns false")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
-
-(fn no-alt-drag-enabled-when-predicate-returns-true []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-runtime app.active-world-runtime)
-  (local original-hoverables (assert app.hoverables "scene drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "scene drag test requires app.clickables"))
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (local original-predicate app.activity-object-move-predicate)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var target-layout nil)
-
-  (fn cleanup []
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?)
-    (set app.activity-object-move-predicate original-predicate))
-
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-            (scene:ensure-activity-slot "sandbox")
-            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-            (assert sandbox-slot "Predicate-true drag test requires a valid sandbox slot")
-            (scene:build
-              (fn [_ctx]
-                (set target-layout
-                     (Layout {:name "predicate-true-drag-target"
-                              :measurer (fn [self]
-                                          (set self.measure (glm.vec3 1 1 1)))
-                              :layouter (fn [self]
-                                          (set self.size self.measure))}))
-                {:layout target-layout
-                 :drop (fn [_] (target-layout:drop))}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 10)
-                    :direction (glm.vec3 0 0 -1)}))
-
-            ;; Install predicate returning true
-            (set app.activity-object-move-predicate (fn [] true))
-
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
-
-            ;; Fire mouse-down without Alt modifier
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
-            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
-
-            (assert (app.movables:drag-active?)
-                    "No-Alt drag should start when predicate returns true")
-            (assert target-layout "Scene should create a target layout")
-            (assert (approx target-layout.position.x 5.0)
-                    "No-Alt drag should update layout X position when predicate allows")
-            (assert (approx target-layout.position.y 5.5)
-                    "No-Alt drag should update layout Y position when predicate allows")
-
-            (app.engine.events.mouse-button-up.emit {:button 1})
-            (assert (not (app.movables:drag-active?))
-                    "Drag should end on mouse-up")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
+(fn assert-click-without-drag-threshold-remains-click [fixture]
+      (local initial-x fixture.target-layout.position.x)
+      (local initial-y fixture.target-layout.position.y)
+      (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+      (app.engine.events.mouse-motion.emit {:x 0.26 :y 0.26 :mod 0})
+      (assert (not (app.movables:drag-active?))
+              "Tiny motion below threshold should not start drag")
+      (assert (approx fixture.target-layout.position.x initial-x)
+              "Click without drag should not move layout X")
+      (assert (approx fixture.target-layout.position.y initial-y)
+              "Click without drag should not move layout Y")
+      (app.engine.events.mouse-button-up.emit {:button 1 :mod 0})
+      true)
 
 (fn click-without-drag-threshold-remains-click []
-  (local original-scene app.scene)
-  (local original-layout-root app.layout-root)
-  (local original-movables app.movables)
-  (local original-intersectables app.intersectables)
-  (local original-camera app.camera)
-  (local original-controls app.first-person-controls)
-  (local original-runtime app.active-world-runtime)
-  (local original-hoverables (assert app.hoverables "scene drag test requires app.hoverables"))
-  (local original-clickables (assert app.clickables "scene drag test requires app.clickables"))
-  (local original-events app.engine.events)
-  (local original-states app.states)
-  (local original-viewport app.viewport)
-  (local original-create-default-projection app.create-default-projection)
-  (local original-active-surface app.active-interaction-surface)
-  (local original-scene-interactive? app.scene-interactive?)
-  (local original-canvas-interactive? app.canvas-interactive?)
-  (local original-predicate app.activity-object-move-predicate)
-  (var scene nil)
-  (var movables nil)
-  (var intersector nil)
-  (var clickables nil)
-  (var hoverables nil)
-  (var camera nil)
-  (var controls nil)
-  (var state nil)
-  (var target-layout nil)
+  (with-scene-drag-fixture
+    {:provider provider-move :name "click-without-drag-target"}
+    assert-click-without-drag-threshold-remains-click))
 
-  (fn cleanup []
-    (when state
-      (state.on-leave)
-      (set state nil))
-    (when scene
-      (scene:drop)
-      (set scene nil))
-    (when movables
-      (movables:drop)
-      (set movables nil))
-    (when intersector
-      (intersector:drop)
-      (set intersector nil))
-    (when clickables
-      (clickables:drop)
-      (set clickables nil))
-    (when hoverables
-      (hoverables:drop)
-      (set hoverables nil))
-    (when controls
-      (controls:drop)
-      (set controls nil))
-    (when camera
-      (camera:drop)
-      (set camera nil))
-    (set app.scene original-scene)
-    (set app.layout-root original-layout-root)
-    (set app.movables original-movables)
-    (set app.intersectables original-intersectables)
-    (set app.camera original-camera)
-    (set app.first-person-controls original-controls)
-    (set app.active-world-runtime original-runtime)
-    (set app.hoverables original-hoverables)
-    (set app.clickables original-clickables)
-    (set app.engine.events original-events)
-    (restore-states! original-states)
-    (set app.create-default-projection original-create-default-projection)
-    (set app.active-interaction-surface original-active-surface)
-    (set app.scene-interactive? original-scene-interactive?)
-    (set app.canvas-interactive? original-canvas-interactive?)
-    (set app.activity-object-move-predicate original-predicate))
-
-  (let [(ok err)
-        (pcall
-          (fn []
-            (reset-engine-events)
-            (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
-            (set movables (Movables {:intersectables intersector}))
-            (set camera (Camera {:position (glm.vec3 0 0 10)}))
-            (set controls (FirstPersonControls {:camera camera}))
-            (set app.active-world-runtime
-                 {:presentation {:input-controls (fn [_self] controls)
-                                 :camera (fn [_self _opts] camera)}})
-            (set app.camera nil)
-            (set app.first-person-controls nil)
-            (set app.create-default-projection AppProjection.create-default-projection)
-            (set scene (Scene {:position (glm.vec3 0 0 0)
-                               :rotation (glm.quat 1 0 0 0)
-                               :camera camera}))
-            (set app.intersectables intersector)
-            (set app.clickables clickables)
-            (set app.hoverables hoverables)
-            (set app.movables movables)
-            (set app.scene scene)
-            (set app.layout-root scene.layout-root)
-            (set app.active-interaction-surface :scene)
-            (set app.scene-interactive? true)
-            (set app.canvas-interactive? false)
-            (scene:ensure-activity-slot "sandbox")
-            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
-            (assert sandbox-slot "Click-without-drag test requires a valid sandbox slot")
-            (scene:build
-              (fn [_ctx]
-                (set target-layout
-                     (Layout {:name "click-without-drag-target"
-                              :measurer (fn [self]
-                                          (set self.measure (glm.vec3 1 1 1)))
-                              :layouter (fn [self]
-                                          (set self.size self.measure))}))
-                {:layout target-layout
-                 :drop (fn [_] (target-layout:drop))}))
-            (scene:update)
-            (set scene.screen-pos-ray
-                 (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 10)
-                    :direction (glm.vec3 0 0 -1)}))
-
-            ;; Install predicate returning true (so no-Alt drag is allowed)
-            (set app.activity-object-move-predicate (fn [] true))
-
-            (set state (NormalState))
-            (bind-normal-state! state)
-            (state.on-enter)
-
-            ;; Record initial position
-            (local initial-x target-layout.position.x)
-            (local initial-y target-layout.position.y)
-
-            ;; Fire mouse-down without Alt, but mouse-motion is tiny (within threshold)
-            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
-            (app.engine.events.mouse-motion.emit {:x 0.26 :y 0.26 :mod 0})
-
-            (assert (not (app.movables:drag-active?))
-                    "Tiny motion below threshold should not start drag")
-            (assert (approx target-layout.position.x initial-x)
-                    "Click without drag should not move layout X")
-            (assert (approx target-layout.position.y initial-y)
-                    "Click without drag should not move layout Y")
-
-            (app.engine.events.mouse-button-up.emit {:button 1})))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
-
-(table.insert tests {:name "Normal state drags real scene entity" :fn drag-through-normal-state-moves-scene-entity})
-(table.insert tests {:name "Normal state drags scene ball" :fn drag-through-normal-state-moves-scene-ball})
-(table.insert tests {:name "Normal state drags runtime physics body"
-                     :fn drag-through-normal-state-moves-scene-physics-body})
-(table.insert tests {:name "Normal state keeps scene alt-drag when canvas is hidden"
-                     :fn drag-through-normal-state-moves-scene-entity-when-canvas-hidden})
-(table.insert tests {:name "No-Alt drag blocked without predicate"
-                     :fn no-alt-drag-blocked-without-predicate})
-(table.insert tests {:name "No-Alt drag blocked when predicate returns false"
-                     :fn no-alt-drag-blocked-when-predicate-returns-false})
-(table.insert tests {:name "No-Alt drag enabled when predicate returns true"
-                     :fn no-alt-drag-enabled-when-predicate-returns-true})
+(table.insert tests {:name "Provider move drags real scene entity"
+                     :fn drag-layout-with-provider-move})
+(table.insert tests {:name "Alt drag blocked without object drag provider"
+                     :fn alt-drag-without-provider-is-blocked})
+(table.insert tests {:name "Object drag blocked when provider returns nil"
+                     :fn provider-nil-is-blocked})
+(table.insert tests {:name "Provider grab reaches physics drag path"
+                     :fn provider-grab-reaches-physics-drag-path})
+(table.insert tests {:name "Provider move drags scene ball"
+                     :fn provider-move-drags-ball})
+(table.insert tests {:name "Hidden canvas does not block provider move"
+                     :fn hidden-canvas-does-not-block-provider-move})
 (table.insert tests {:name "Click without drag threshold remains click"
                      :fn click-without-drag-threshold-remains-click})
 
 (local main
   (fn []
-    ;; The test module's top-level (require :main) caches main.fnl before the runner's
-    ;; setup-test-env creates a fresh app global. Clear the cache so setup-test-env
-    ;; re-executes main.fnl and installs the production wrapper functions on the new app.
     (set (. package.loaded :main) nil)
     (local runner (require :tests/runner))
     (runner.run-tests {:name "scene-drag" :tests tests})))

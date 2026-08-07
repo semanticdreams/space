@@ -81,8 +81,7 @@
   (set app.activity-preferred-interaction-surface nil)
   (set app.activity-surface-state nil)
   (set app.activity-top-toolbar-builder nil)
-  (set app.activity-object-move-predicate nil)
-  (set app.activity-drag-attachment-provider nil)
+  (set app.activity-object-drag-mode-provider nil)
   (set app.canvas-surface-interactive? true)
   true)
 
@@ -101,8 +100,7 @@
    :preferred-interaction-surface nil
    :surface-state nil
    :top-toolbar-builder nil
-   :object-move-predicate nil
-   :drag-attachment-provider nil})
+   :object-drag-mode-provider nil})
 
 (fn apply-activity-surface-policy! [hooks]
   (local surface-state hooks.surface-state)
@@ -141,8 +139,7 @@
   (set app.activity-target-enabled? hooks.target-enabled?)
   (set app.activity-update hooks.update)
   (set app.activity-top-toolbar-builder hooks.top-toolbar-builder)
-  (set app.activity-object-move-predicate hooks.object-move-predicate)
-  (set app.activity-drag-attachment-provider hooks.drag-attachment-provider)
+  (set app.activity-object-drag-mode-provider hooks.object-drag-mode-provider)
   (if hook-state
       (apply-activity-surface-policy! hooks)
       (do
@@ -243,8 +240,7 @@
                                           (set-staged-hook! :preferred-interaction-surface value))
     :set-surface-state! (fn [_self value] (set-staged-hook! :surface-state value))
     :set-top-toolbar-builder! (fn [_self value] (set-staged-hook! :top-toolbar-builder value))
-    :set-object-move-predicate! (fn [_self value] (set-staged-hook! :object-move-predicate value))
-    :set-drag-attachment-provider! (fn [_self value] (set-staged-hook! :drag-attachment-provider value))})
+    :set-object-drag-mode-provider! (fn [_self value] (set-staged-hook! :object-drag-mode-provider value))})
 
 (fn run-cleanup-stack! [cleanup-stack]
   (var first-err nil)
