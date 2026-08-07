@@ -1,5 +1,8 @@
 # Devlog
 
+## 2026-08-07
+Space's graph workspace became easier to recover, search, and trust in motion: the [Graph Sidebar Node Finder](/specs/2026-08-06-graph-sidebar-node-finder-design) added Add Start recovery and Find Node rows that reveal or open graph-addressable objects through activity callbacks while keeping GraphMap as the interaction-context owner, and [Graph UX Polish](/specs/2026-08-07-graph-ux-polish-design) stabilized sidebar width, restored-map identity, truncation, and theme-resolved graph/chrome backgrounds so the graph view can stay a visual navigation surface instead of absorbing domain ownership. In parallel, weekly-agent workflow hardening tightened OpenCode capability boundaries and PR-protection polling, making the scheduled-agent path safer as graph work accelerates.
+
 ## 2026-08-05
 The HUD chrome work moved from broad visual alignment into sharper layout contracts: real Material icon metrics now shape the chrome instead of idealized icon boxes, toolbar and rail rows share natural height, [HUD-scoped control and world-selector spacing](/specs/2026-08-04-hud-control-button-spacing-design) removes stray gaps without changing global widget defaults, and the [right rail now reserves only rail width](/specs/2026-08-04-hud-right-rail-transparent-strip-design) while projecting terminal/chat panels below the toolbar reserve so expanded side panels no longer steal transparent render space. Together these refinements keep Space's HUD polish tied to measurable widget behavior, making future layout changes easier to validate instead of hand-tune.
 
