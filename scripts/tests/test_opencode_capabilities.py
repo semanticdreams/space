@@ -61,6 +61,8 @@ def test_ensure_space_repo_rejects_repo_without_space_markers(tmp_path: Path) ->
         "fix/permission-capabilities",
         "docs/opencode-capabilities",
         "chore/opencode-capabilities",
+        "juicyrebel/weever",
+        "juicyrebel/hud-right-rail-strip-fix",
     ],
 )
 def test_validate_branch_name_accepts_allowed_policy(branch: str) -> None:
@@ -69,7 +71,19 @@ def test_validate_branch_name_accepts_allowed_policy(branch: str) -> None:
 
 @pytest.mark.parametrize(
     "branch",
-    ["main", "origin/main", "feature/../main", "feature/bad lock", "feature/name.lock", ""],
+    [
+        "main",
+        "origin/main",
+        "feature/../main",
+        "feature/bad lock",
+        "feature/name.lock",
+        "",
+        "juicyrebel/../main",
+        "juicyrebel/bad lock",
+        "juicyrebel/name.lock",
+        "juicyrebel/",
+        "other/weever",
+    ],
 )
 def test_validate_branch_name_rejects_unsafe_names(branch: str) -> None:
     with pytest.raises(capabilities.CapabilityError):
