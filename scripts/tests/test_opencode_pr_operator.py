@@ -282,6 +282,54 @@ def test_check_main_protection_accepts_effective_main_rules_when_ruleset_list_is
     assert result["evidence"]["effective_branch_rules_merge_queue_proven"] is True
 
 
+def test_check_main_protection_accepts_detailed_ruleset_when_effective_rules_are_unavailable(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+                [
+                    {
+                        "id": 20232493,
+                        "enforcement": "active",
+                        "conditions": None,
+                    }
+                ]
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): command_result(
+                ["gh", "api", "repos/semanticdreams/space2/rules/branches/main"],
+                returncode=404,
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets/20232493"): json.dumps(
+                {
+                    "id": 20232493,
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                    "rules": [
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {"required_status_checks": [{"context": "test"}]},
+                        },
+                        {"type": "merge_queue"},
+                    ],
+                }
+            ),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["detailed_rulesets_available"] is True
+    assert result["evidence"]["detailed_rulesets_required_test_check_proven"] is True
+    assert result["evidence"]["detailed_rulesets_merge_queue_proven"] is True
+
+
 def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monkeypatch, trusted_repo: Path) -> None:
     states = iter(
         [

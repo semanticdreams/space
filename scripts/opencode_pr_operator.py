@@ -18,6 +18,7 @@ PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,sta
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
 DEFAULT_POLL_INTERVAL_SECONDS = 100
+MAX_RULESET_DETAIL_FETCHES = 5
 
 
 def _exit_code_for(result: dict[str, object]) -> int:
@@ -126,6 +127,41 @@ def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
     return requires_test, has_merge_queue
 
 
+def _ruleset_detail_path(ruleset: dict[str, Any]) -> str | None:
+    ruleset_id = ruleset.get("id")
+    if isinstance(ruleset_id, int) or (isinstance(ruleset_id, str) and ruleset_id.isdigit()):
+        return f"repos/{SPACE_REPO}/rulesets/{ruleset_id}"
+    links = ruleset.get("_links")
+    self_link = links.get("self") if isinstance(links, dict) else None
+    href = self_link.get("href") if isinstance(self_link, dict) else self_link
+    if not isinstance(href, str):
+        return None
+    api_prefix = "https://api.github.com/"
+    path = href.removeprefix(api_prefix)
+    allowed_prefix = f"repos/{SPACE_REPO}/rulesets/"
+    if path.startswith(allowed_prefix):
+        return path
+    return None
+
+
+def _ruleset_detail_paths(rulesets: Any) -> list[str]:
+    if not isinstance(rulesets, list):
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for ruleset in rulesets:
+        if not isinstance(ruleset, dict):
+            continue
+        path = _ruleset_detail_path(ruleset)
+        if path is None or path in seen:
+            continue
+        paths.append(path)
+        seen.add(path)
+        if len(paths) >= MAX_RULESET_DETAIL_FETCHES:
+            break
+    return paths
+
+
 def pr_auth_status(repo_root: Path) -> dict[str, object]:
     action = "pr_auth_status"
     try:
@@ -162,17 +198,32 @@ def check_main_protection(repo_root: Path) -> dict[str, object]:
         except (CapabilityError, json.JSONDecodeError):
             effective_rules = None
     effective_has_test, effective_has_queue = _rule_list_proofs(effective_rules)
-    has_test = classic_has_test or ruleset_has_test or effective_has_test
-    has_queue = ruleset_has_queue or effective_has_queue
+    detailed_rulesets: list[dict[str, Any]] = []
+    if not (classic_has_test or ruleset_has_test or effective_has_test) or not (ruleset_has_queue or effective_has_queue):
+        for path in _ruleset_detail_paths(rulesets):
+            try:
+                detail_result = run_command(["gh", "api", path], repo, check=False)
+                detail = _json_loads(detail_result.stdout) if detail_result.returncode == 0 else None
+            except (CapabilityError, json.JSONDecodeError):
+                detail = None
+            if isinstance(detail, dict):
+                detailed_rulesets.append(detail)
+    detailed_has_test, detailed_has_queue = _active_main_ruleset_proofs(detailed_rulesets)
+    has_test = classic_has_test or ruleset_has_test or effective_has_test or detailed_has_test
+    has_queue = ruleset_has_queue or effective_has_queue or detailed_has_queue
     evidence = {
         "classic_protection_available": protection is not None,
         "rulesets_available": rulesets is not None,
         "effective_branch_rules_available": effective_rules is not None,
+        "detailed_rulesets_available": len(detailed_rulesets) > 0,
+        "detailed_rulesets_checked": len(detailed_rulesets),
         "classic_required_test_check_proven": classic_has_test,
         "active_main_ruleset_required_test_check_proven": ruleset_has_test,
         "active_main_ruleset_merge_queue_proven": ruleset_has_queue,
         "effective_branch_rules_required_test_check_proven": effective_has_test,
         "effective_branch_rules_merge_queue_proven": effective_has_queue,
+        "detailed_rulesets_required_test_check_proven": detailed_has_test,
+        "detailed_rulesets_merge_queue_proven": detailed_has_queue,
         "required_test_check_proven": has_test,
         "merge_queue_proven": has_queue,
     }
