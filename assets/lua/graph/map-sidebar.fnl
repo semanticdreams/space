@@ -30,6 +30,12 @@
 (local map-label-max-length 27)
 (local finder-label-max-length 26)
 
+(fn current-sidebar-width [state]
+    (if state.resolved-sidebar-width state.resolved-sidebar-width sidebar-width))
+
+(fn finder-content-width-provider [state]
+    (fn [] (- (current-sidebar-width state) 0.5)))
+
 (fn record-label [state label]
     (table.insert state.visible-labels label)
     label)
@@ -331,13 +337,15 @@
                   :builder (node-row-builder state)})
      ic))
 
-(fn fixed-width-child [name width child-builder]
+(fn fixed-width-child [name width-provider child-builder]
     (fn [ic]
         (local child (child-builder ic))
         (fn measurer [self]
+            (local width (width-provider))
             (child.layout:measurer)
             (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
         (fn layouter [self]
+            (local width (width-provider))
             (set child.layout.position self.position)
             (set child.layout.size (glm.vec3 width self.size.y self.size.z))
             (set child.layout.rotation self.rotation)
@@ -356,9 +364,9 @@
 (fn build-finder [state]
     (fn [ic]
         ((Padding {:edge-insets [0.15 0.25 0.25 0.25]
-                   :child (fixed-width-child "graph-map-sidebar-finder-width"
-                                             (- sidebar-width 0.5)
-                                             (search-view-builder state))})
+                    :child (fixed-width-child "graph-map-sidebar-finder-width"
+                                              (finder-content-width-provider state)
+                                              (search-view-builder state))})
          ic)))
 
 (set search-view-builder
@@ -430,16 +438,23 @@
 (fn sidebar-measurer [state self]
     (if state.content-entity
         (do
+            (set state.resolved-sidebar-width sidebar-width)
             (state.content-entity.layout:measurer)
-            (set self.measure (glm.vec3 sidebar-width
+            (set state.resolved-sidebar-width
+                 (math.max sidebar-width state.content-entity.layout.measure.x))
+            (state.content-entity.layout:measurer)
+            (set self.measure (glm.vec3 (current-sidebar-width state)
                                         state.content-entity.layout.measure.y
                                         state.content-entity.layout.measure.z)))
-        (set self.measure (glm.vec3 sidebar-width 0 0))))
+        (do
+            (set state.resolved-sidebar-width sidebar-width)
+            (set self.measure (glm.vec3 sidebar-width 0 0)))))
 
 (fn sidebar-layouter [state self]
     (local self-size (if self.size self.size (glm.vec3 0 0 0)))
+    (local resolved-width (current-sidebar-width state))
     (local allocated-size
-        (glm.vec3 sidebar-width
+        (glm.vec3 resolved-width
                   (math.max self.measure.y self-size.y)
                   (math.max self.measure.z self-size.z)))
     (set self.size allocated-size)
@@ -510,6 +525,7 @@
                   :node-open-handler options.node-open-handler
                   :theme (and ctx ctx.theme)
                   :content-entity nil
+                  :resolved-sidebar-width sidebar-width
                   :rebuild-requested? false
                   :maps-changed-handler nil
                   :active-map nil

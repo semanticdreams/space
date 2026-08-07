@@ -139,6 +139,14 @@
     (local flex-layout (. stack-layout.children 2))
     (. flex-layout.children (length flex-layout.children)))
 
+(fn content-flex-layout [entity]
+    (local stack-layout (. entity.layout.children 1))
+    (. stack-layout.children 2))
+
+(fn actions-layout [entity]
+    (local flex-layout (content-flex-layout entity))
+    (. flex-layout.children 2))
+
 (local long-sidebar-node-label
        "A graph node label that is deliberately long enough to exceed the sidebar width by many characters")
 
@@ -430,7 +438,29 @@
     (manager:drop)
     (graph:drop))
 
-(fn sidebar-width-stays-fixed-with-long-labels []
+(fn sidebar-width-includes-static-action-controls []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (entity.layout:measurer)
+    (local action-row (actions-layout entity))
+    (assert (>= entity.layout.measure.x action-row.measure.x)
+            (.. "Sidebar measure width " (tostring entity.layout.measure.x)
+                " should include static action-row intrinsic width "
+                (tostring action-row.measure.x)))
+    (layout-sidebar! entity entity.layout.measure.x 24.0)
+    (assert (>= entity.layout.size.x action-row.size.x)
+            (.. "Sidebar layout width " (tostring entity.layout.size.x)
+                " should include static action-row layout width "
+                (tostring action-row.size.x)))
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-width-stays-bounded-with-long-labels []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "test" long-sidebar-node-loader)
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
@@ -442,11 +472,19 @@
     (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
     (entity:update)
     (entity.layout:measurer)
-    (assert (approx entity.layout.measure.x 14.0)
-            (.. "Sidebar measure should be fixed at 14.0, got " (tostring entity.layout.measure.x)))
-    (layout-sidebar! entity 14.0 24.0)
-    (assert (approx entity.layout.size.x 14.0)
-            "Sidebar layout width should stay fixed at 14.0")
+    (local action-row (actions-layout entity))
+    (assert (>= entity.layout.measure.x 14.0)
+            (.. "Sidebar measure should stay at/above preferred width, got " (tostring entity.layout.measure.x)))
+    (assert (>= entity.layout.measure.x action-row.measure.x)
+            "Sidebar measure should still include static action controls")
+    (assert (< entity.layout.measure.x 30.0)
+            (.. "Sidebar measure should remain bounded below raw long-label expansion, got "
+                (tostring entity.layout.measure.x)))
+    (layout-sidebar! entity entity.layout.measure.x 24.0)
+    (assert (>= entity.layout.size.x 14.0)
+            "Sidebar layout width should stay at/above preferred width")
+    (assert (< entity.layout.size.x 30.0)
+            "Sidebar layout width should remain bounded below raw long-label expansion")
     (entity:drop)
     (manager:drop)
     (graph:drop))
@@ -481,17 +519,19 @@
     (manager:drop)
     (graph:drop))
 
-(fn sidebar-empty-finder-fills-fixed-content-width []
+(fn sidebar-empty-finder-fills-resolved-content-width []
     (local graph (Graph {:with-start false}))
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
                               :hoverables (make-hoverables-stub)}))
     (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
     (entity:update)
-    (layout-sidebar! entity 14.0 24.0)
+    (entity.layout:measurer)
+    (layout-sidebar! entity entity.layout.measure.x 24.0)
     (local layout (finder-layout entity))
-    (assert (> layout.size.x 13.0)
-            (.. "Finder area should fill fixed sidebar content width, got " (tostring layout.size.x)))
+    (assert (approx layout.size.x entity.layout.size.x)
+            (.. "Finder area should fill resolved sidebar content width "
+                (tostring entity.layout.size.x) ", got " (tostring layout.size.x)))
     (entity:drop)
     (manager:drop)
     (graph:drop))
@@ -519,12 +559,14 @@
                       :fn sidebar-node-finder-clicks-route_callbacks})
 (table.insert tests {:name "GraphMap sidebar New uses integer map id after restored float"
                      :fn sidebar-new-button-uses-integer-map-id-after-restored-float})
-(table.insert tests {:name "GraphMap sidebar width stays fixed with long labels"
-                     :fn sidebar-width-stays-fixed-with-long-labels})
+(table.insert tests {:name "GraphMap sidebar width includes static action controls"
+                     :fn sidebar-width-includes-static-action-controls})
+(table.insert tests {:name "GraphMap sidebar width stays bounded with long labels"
+                     :fn sidebar-width-stays-bounded-with-long-labels})
 (table.insert tests {:name "GraphMap sidebar truncates display labels and preserves finder data"
                      :fn sidebar-truncates-display-labels-and-preserves-finder-data})
-(table.insert tests {:name "GraphMap sidebar empty finder fills fixed content width"
-                     :fn sidebar-empty-finder-fills-fixed-content-width})
+(table.insert tests {:name "GraphMap sidebar empty finder fills resolved content width"
+                     :fn sidebar-empty-finder-fills-resolved-content-width})
 
 (local main
     (fn []
