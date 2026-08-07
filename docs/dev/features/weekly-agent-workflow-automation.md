@@ -35,6 +35,19 @@ Agents consume the analyzer's sanitized evidence JSON, not raw OpenCode database
 
 The analyzer excludes `auth.json`, credential tables, account tables, token/secret/auth-related data, and unrelated projects. Reports may include short sanitized excerpts only when they materially justify a finding.
 
+Raw OpenCode database rows, raw logs, raw tool-output dumps, credential files, auth files, tokens, and secret-bearing material remain out of bounds for weekly automation. If sanitized analyzer evidence is insufficient to justify a finding, defer the recommendation instead of browsing raw sources.
+
+## Weekly permission-friction classes
+
+The analyzer classifies `permission-friction` findings into four permission-friction classes so reports can distinguish safe capability gaps from requests that should remain blocked:
+
+- `routine-project-scoped`: normal in-repository checks and inspection, such as `make test`, `pytest`, `ctest`, `git status`, or `git diff`.
+- `privileged-bounded`: guarded Git and GitHub operations that should route through `git-integrator` or `github-operator`, such as fetching or merging `origin/main`, pushing a feature branch, creating/viewing/auto-merging a PR, or checking/watching GitHub runs.
+- `role-mismatch`: requests that would break role boundaries, such as reviewer edit/bash, implementer push/external access, or web-researcher local read/bash.
+- `destructive-ambiguous`: destructive, credentialed, cross-project, broad, or ambiguous requests, including force-push, rebase, reset/clean, `rm -rf`, sudo/package-manager operations, direct `origin/main` push, auth/token material, broad home/root access, and any general permission prompt with no specific safe match.
+
+Weekly reports use sanitized analyzer evidence only. They may include bounded redacted excerpts and session refs from the analyzer output, but never raw session IDs or unsanitized OpenCode data.
+
 ## Weekly Reports
 
 Weekly reports are published under [Agent Workflow Reports](/dev/reports/agent-workflow/). Each report records the analyzed date range, data sources and redaction status, summarized session signals, top findings with sanitized evidence, implemented changes, deferred recommendations, validation, risks, and signals to re-check next week.

@@ -343,6 +343,10 @@ Initial sidebar contents:
 - `Delete` action for active map, disabled if only one map exists.
 - Active map stats: node count and edge count.
 - Selected count.
+- `Add Start` action, always visible and idempotent; it adds the `start` node to the active map when absent and does not duplicate it when present.
+- `Find Node` search/list for nodes in the active map.
+- Finder single-click reveals a node by selecting, focusing, and centering it in the active GraphView.
+- Finder double-click opens the node panel/view after reveal behavior.
 
 Do not include layer-like controls initially:
 
@@ -371,6 +375,8 @@ Destructive object actions should remain explicit and node-specific:
 - future `Delete Underlying Object` only if backed by a declared capability.
 
 Do not silently delete backing objects when removing from a map.
+
+`Add Start` is map membership recovery, not automatic start-node re-seeding. It uses the `start` key loader through the active `GraphMap` and does not delete or mutate backing domain objects.
 
 ## Migration Phases
 

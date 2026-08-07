@@ -1061,9 +1061,10 @@
             (focus-node:request-focus)))
 
     (local view {:graph-map graph-map
-                 :ctx ctx
-                 :layout layout
-                 :points registry.points
+                  :ctx ctx
+                  :camera options.camera
+                  :layout layout
+                  :points registry.points
                  :node-by-point node-by-point
                  :movables movables
                  :movable-targets (and movables-handler movables-handler.targets)
@@ -1218,17 +1219,64 @@
                                                           :node-key entry.node-key
                                                           :graph-map-id entry.graph-map-id
                                                           :target target
-                                                          :element element}))
-             entry))
+                                                           :element element}))
+              entry))
+
+    (fn resolve-view-node [node-or-key]
+        (local node
+            (if (= (type node-or-key) :string)
+                (graph-map:lookup node-or-key)
+                node-or-key))
+        (assert node "GraphView reveal/open requires an existing graph-map node")
+        (assert (. registry.points node)
+                (.. "GraphView reveal/open requires mounted node: " (tostring node.key)))
+        node)
+
+    (fn presentation-center [presentation]
+        (local bounds (bounds-for-presentation presentation))
+        (assert bounds "GraphView reveal/open requires presentation bounds")
+        (local position bounds.position)
+        (local size bounds.size)
+        (glm.vec3 (+ position.x (* size.x 0.5))
+                  (+ position.y (* size.y 0.5))
+                  (+ position.z (* size.z 0.5))))
+
+    (fn center-camera-on-node! [node]
+        (local camera options.camera)
+        (assert camera "GraphView reveal-node requires :camera")
+        (assert camera.position "GraphView reveal-node requires camera.position")
+        (assert camera.set-position "GraphView reveal-node requires camera:set-position")
+        (local center (presentation-center (. registry.points node)))
+        (camera:set-position (glm.vec3 center.x center.y camera.position.z)))
 
     (set view.remove-nodes (fn [_self nodes-to-remove]
-                               (assert-not-dropped "remove-nodes")
-                               (graph-map:remove-nodes nodes-to-remove)))
+                                (assert-not-dropped "remove-nodes")
+                                (graph-map:remove-nodes nodes-to-remove)))
     (set view.remove-selected-nodes (fn [_self]
-                                        (assert-not-dropped "remove-selected-nodes")
-                                        (graph-map:remove-nodes selected-nodes)))
+                                         (assert-not-dropped "remove-selected-nodes")
+                                         (graph-map:remove-nodes selected-nodes)))
+    (set view.reveal-node
+         (fn [_self node-or-key opts]
+             (assert-not-dropped "reveal-node")
+             (local reveal-options (or opts {}))
+             (local node (resolve-view-node node-or-key))
+             (when (not (= reveal-options.select? false))
+                 (selection:set-selection [node]))
+             (when (not (= reveal-options.focus? false))
+                 (local focus-node (. focus-nodes node))
+                 (assert focus-node "GraphView reveal-node requires focus node")
+                 (focus-node:request-focus))
+             (when (not (= reveal-options.center? false))
+                 (center-camera-on-node! node))
+             node))
+    (set view.open-node
+         (fn [self node-or-key opts]
+             (assert-not-dropped "open-node")
+             (local node (self:reveal-node node-or-key opts))
+             (views:open node)
+             true))
     (set view.open-focused-node (fn [_self]
-                                   (assert-not-dropped "open-focused-node")
+                                    (assert-not-dropped "open-focused-node")
                                    (when focused-node
                                        (views:open focused-node)
                                        true)))

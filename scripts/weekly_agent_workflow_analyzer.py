@@ -83,6 +83,67 @@ VALIDATION_RE = re.compile(r"(?i)\b(make test|pytest|ctest|fennel-check|constrai
 REVIEW_FIX_RE = re.compile(r"(?is)reviewer finding|finding.+(?:follow-up|fix|fixed|addressed)")
 PERMISSION_RE = re.compile(r"(?i)permission (?:prompt|denied)|denied tool|tool .* denied")
 SKILL_RE = re.compile(r"(?i)missing skill|wrong skill|should have used .*skill|skill routing")
+PERMISSION_CLASS_PATTERNS = {
+    "routine-project-scoped": [
+        re.compile(r"(?i)\bmake\s+test\b"),
+        re.compile(r"(?i)\bpytest\b"),
+        re.compile(r"(?i)\bctest\b"),
+        re.compile(r"(?i)\bgit\s+status\b"),
+        re.compile(r"(?i)\bgit\s+diff\b"),
+    ],
+    "privileged-bounded": [
+        re.compile(r"(?i)\bgit\s+fetch\s+origin\s+main\b"),
+        re.compile(r"(?i)\bgit\s+merge\s+--no-edit\s+origin/main\b"),
+        re.compile(r"(?i)\bgit\s+push\s+origin\s+HEAD:refs/heads/(?!main\b)\S+"),
+        re.compile(r"(?i)\bgh\s+pr\s+create\b"),
+        re.compile(r"(?i)\bgh\s+pr\s+view\b"),
+        re.compile(r"(?i)\bgh\s+pr\s+merge\s+--auto\b"),
+        re.compile(r"(?i)\bgh\s+run\s+list\b"),
+        re.compile(r"(?i)\bgh\s+run\s+watch\b"),
+    ],
+    "role-mismatch": [
+        re.compile(r"(?i)\breviewer\b.*\b(?:edit|bash)\b|\b(?:edit|bash)\b.*\breviewer\b"),
+        re.compile(r"(?i)\bimplementer\b.*\b(?:push|external)\b|\b(?:push|external)\b.*\bimplementer\b"),
+        re.compile(r"(?i)\bweb-researcher\b.*\b(?:local\s+read|read\s+local|local|bash)\b"),
+    ],
+    "destructive-ambiguous": [
+        re.compile(r"(?i)\b(?:force-push|force\s+push)\b|\bgit\s+push\b[^\n]*\s--force\b|\s--force-with-lease\b"),
+        re.compile(r"(?i)\bgit\s+rebase\b"),
+        re.compile(r"(?i)\bgit\s+reset\b"),
+        re.compile(r"(?i)\bgit\s+clean\b"),
+        re.compile(r"(?i)\brm\s+-[A-Za-z]*r[A-Za-z]*f\b|\brm\s+-[A-Za-z]*f[A-Za-z]*r\b"),
+        re.compile(r"(?i)\bsudo\b|\b(?:apt|apt-get|dnf|yum|pacman|brew)\s+(?:install|remove|upgrade|update)\b|package\s+manager"),
+        re.compile(r"(?i)\bgit\s+push\s+origin\s+(?:main|HEAD:refs/heads/main)\b"),
+        re.compile(r"(?i)\bauth(?:\.json|\s+file|\s+files)?\b|\bcredential\b|\btoken\b"),
+        re.compile(r"(?i)\bbroad\s+(?:home|root)\b|\bhome\s+access\b|\bhome\s+directory\b|\broot\s+(?:access|directory)\b|/(?:home|root)\b"),
+    ],
+}
+
+
+def classify_permission_friction(text: str) -> list[str]:
+    classes: list[str] = []
+    for class_id, patterns in PERMISSION_CLASS_PATTERNS.items():
+        if any(pattern.search(text) for pattern in patterns):
+            classes.append(class_id)
+    if "destructive-ambiguous" in classes or "role-mismatch" in classes:
+        classes = [class_id for class_id in classes if class_id != "privileged-bounded"]
+    if not classes and PERMISSION_RE.search(text):
+        return ["destructive-ambiguous"]
+    return classes
+
+
+def _permission_friction_contexts(session: dict[str, Any]) -> list[str]:
+    contexts: list[str] = []
+    for text in session.get("evidence_texts", []):
+        if isinstance(text, str) and PERMISSION_RE.search(text):
+            contexts.append(text)
+    for excerpt in session.get("excerpts", []):
+        if excerpt.get("source") == "database":
+            continue
+        text = excerpt.get("text", "")
+        if PERMISSION_RE.search(text):
+            contexts.append(text)
+    return contexts
 
 
 def redact_text(text: str) -> tuple[str, list[str]]:
@@ -190,12 +251,16 @@ def analyze(config: AnalyzerConfig) -> dict[str, Any]:
                 "redactions": sorted(set(title_redactions + model_redactions)),
                 "excerpts": excerpts[:3],
                 "evidence_text": text_blob,
+                "evidence_texts": evidence_texts,
+                "_raw_session_id": row["id"],
             }
         )
 
     findings = _findings(sessions)
     for session in sessions:
         del session["evidence_text"]
+        del session["evidence_texts"]
+        del session["_raw_session_id"]
     result = {
         "schema_version": 1,
         "sources": {
@@ -468,17 +533,28 @@ def _findings(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if matches:
                 count += len(matches)
                 refs.append(session["session_ref"])
-                safe, _ = _sanitized_excerpt(text, 200)
+                safe, _ = _sanitized_excerpt(text, 200, session.get("_raw_session_id"), session["session_ref"])
                 evidence.append(safe)
         if count >= threshold:
-            findings.append(
-                {
-                    "id": finding_id,
-                    "count": count,
-                    "session_refs": sorted(set(refs)),
-                    "evidence": evidence[:3],
+            finding = {
+                "id": finding_id,
+                "count": count,
+                "session_refs": sorted(set(refs)),
+                "evidence": evidence[:3],
+            }
+            if finding_id == "permission-friction":
+                classes: dict[str, int] = {}
+                refs_by_class: dict[str, set[str]] = {}
+                for session in sessions:
+                    for permission_text in _permission_friction_contexts(session):
+                        for class_id in classify_permission_friction(permission_text):
+                            classes[class_id] = classes.get(class_id, 0) + 1
+                            refs_by_class.setdefault(class_id, set()).add(session["session_ref"])
+                finding["classes"] = dict(sorted(classes.items()))
+                finding["session_refs_by_class"] = {
+                    class_id: sorted(class_refs) for class_id, class_refs in sorted(refs_by_class.items())
                 }
-            )
+            findings.append(finding)
     return findings
 
 

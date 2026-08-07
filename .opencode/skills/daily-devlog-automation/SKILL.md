@@ -13,30 +13,36 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 
 1. Verify a clean dedicated checkout with `git status --porcelain`; stop if dirty.
 2. Verify the checkout is on a branch that can safely create `automation/daily-devlog/YYYY-MM-DD` from `origin/main`.
-3. Verify `gh auth status` before relying on PR creation or auto-merge.
-4. Verify branch protection rules and required status checks are active on the target repository before attempting auto-merge; do not assume they are available just because `gh auth status` succeeds. Protection may come from classic branch protection (HTTP 200 on `gh api repos/<owner>/<repo>/branches/main/protection`) or GitHub rulesets (classic endpoint returns HTTP 404). When the classic endpoint returns 404, verify effective branch rules via `gh api repos/<owner>/<repo>/rules/branches/main`. Required status checks (for this repo: `test`), pull-request protection, and merge queue requirement must be present in the effective rules before auto-merge. If merge queue is not enabled or cannot be verified, report `HUMAN_DECISION_REQUIRED` — the automation relies on merge queue for post-PR freshness. If neither classic protection nor active effective branch rules can be confirmed, fail closed.
+3. Dispatch `github-operator` to verify GitHub authentication before relying on PR creation or auto-merge.
+4. Dispatch `github-operator` to verify branch protection rules and required status checks are active on the target repository before attempting auto-merge; do not assume they are available just because authentication succeeds. Required status checks (for this repo: `test`), pull-request protection, and merge queue requirement must be present in wrapper evidence before auto-merge. If merge queue is not enabled or cannot be verified, report `HUMAN_DECISION_REQUIRED` — the automation relies on merge queue for post-PR freshness. If protection cannot be confirmed, fail closed.
+
+## Capability Boundaries
+
+Safe base update and push steps dispatch `git-integrator`. PR creation,
+protection checks, auto-merge enablement, and merge-queue polling dispatch
+`github-operator`. OpenCode config verification, when needed, dispatches
+`config-auditor`. If a capability wrapper returns `human_decision_required`, the
+supervisor reports `HUMAN_DECISION_REQUIRED` with wrapper evidence and does not
+ask for a one-off broad command permission.
 
 ## Workflow
 
-1. Fetch `origin/main`.
+1. Fetch `origin/main` through `git-integrator`.
 2. Create or switch to `automation/daily-devlog/YYYY-MM-DD` from `origin/main`.
 3. Inspect the latest relevant journal entry or recent day boundary, docs notes, plans/specs, and `origin/main` mainline/first-parent history to identify work that landed since that boundary.
 4. Apply the meaningful-change filter.
 5. If no entry is warranted, stop without edits, commits, pushes, or PRs.
 6. If an entry is warranted, dispatch `implementer` to write/update the journal entry and regenerate indexes.
 7. Dispatch `reviewer` before commit and before push.
-8. Fetch `origin` and confirm the automation branch has accounted for current `origin/main`. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and rerun validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
+8. Dispatch `git-integrator` to fetch `origin` and confirm the automation branch has accounted for current `origin/main`. If the branch is behind, use the safe-merge wrapper when permitted, route conflicts or regenerated docs changes through `implementer` → `reviewer` → pass, and rerun validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
 9. Run validation.
 10. Commit only reviewed devlog automation files.
-11. Re-fetch `origin` and recheck current `origin/main` before push or PR creation. If the branch is behind, safe-merge `origin/main` when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
-12. Push only the dated automation branch.
-13. Open a PR, enable auto-merge (or queue the PR) when branch protection
+11. Re-fetch `origin` and recheck current `origin/main` through `git-integrator` before push or PR creation. If the branch is behind, use the safe-merge wrapper when permitted, route conflicts and fixes through `implementer` → `reviewer` → pass, and restart validation from a clean tree. Do not rebase or force-push unless the human explicitly requests it.
+12. Push only the dated automation branch through `git-integrator`.
+13. Open a PR, enable auto-merge (or queue the PR), and poll merge queue through `github-operator` when branch protection
     allows it. After the PR enters merge queue, poll with
-    `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url`
-    until `mergedAt` is present (PR merged). Inspect merge_group runs with
-    `gh run list --workflow test.yml --event merge_group --limit 20 --json databaseId,headBranch,headSha,status,conclusion,event,url,displayTitle,createdAt`
-    and `gh run watch <run-id> --exit-status --interval 100` when queue checks
-    are failing. Do not update
+    wrapper evidence until `mergedAt` is present (PR merged). Do not run direct
+    broad `gh pr`, `gh run list`, or `gh run watch` commands. Do not update
     the PR branch solely because origin/main advanced after PR creation —
     merge queue handles post-PR freshness. Resume only for actionable
     queue blockers: merge queue conflicts, merge-group `test` failures,
@@ -113,7 +119,7 @@ gathering, or a product/API/data/architecture choice.
 
 ## Commit, Push, and PR
 
-Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection, required status checks, pull-request protection, and merge queue requirement are active before attempting auto-merge (classic protection or rulesets). Inspect the effective branch rules for allowed merge methods, then use the corresponding flag: `gh pr merge --auto --merge automation/daily-devlog/YYYY-MM-DD` when rules allow merge commits (current for this repo) or `gh pr merge --auto --squash ...` when rules require squash. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`. After auto-merge is enabled, poll with `gh pr view <pr-or-branch> --json state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url` until `mergedAt` is present — later `origin/main` movement is handled by merge queue. Resume only for actionable queue blockers: merge queue conflicts, merge-group `test` failures, missing merge queue protection, permission blockers, closed-unmerged PRs, and queue timeouts. Invoke `systematic-debugging` for any queue failure and route repository fixes through `implementer` → `reviewer` → pass, commit reviewed fixes, validate from current `origin/main`, push, and requeue.
+Commit after review. Push only through `git-integrator`. Create the PR, verify branch protection, enable auto-merge, and poll for merge only through `github-operator`. If repository rules require a rebase-only merge method, do not enable auto-merge automatically. Report HUMAN_DECISION_REQUIRED because the agent must not rebase unless the human explicitly requests it. Never push directly to `origin/main`. Later `origin/main` movement is handled by merge queue. Resume only for actionable queue blockers: merge queue conflicts, merge-group `test` failures, missing merge queue protection, permission blockers, closed-unmerged PRs, and queue timeouts. Invoke `systematic-debugging` for any queue failure and route repository fixes through `implementer` → `reviewer` → pass, commit reviewed fixes, validate from current `origin/main`, push through `git-integrator`, and requeue through `github-operator`.
 
 ## Fail-Closed Cases
 

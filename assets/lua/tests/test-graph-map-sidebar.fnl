@@ -121,10 +121,16 @@
 
 (fn contains-label? [labels target]
     (var found? false)
-    (each [_ label (ipairs (or labels []))]
+    (each [_ label (ipairs (if labels labels []))]
         (when (= label target)
             (set found? true)))
     found?)
+
+(fn register-start-loader [graph]
+    (when (not (graph:has-key-loader-for-key "start"))
+        (graph:register-key-loader "start"
+            (fn [_key]
+                (Graph.GraphNode {:key "start" :label "start"})))))
 
 (fn sidebar-constructs-and-drops []
     (local graph (Graph {:with-start false}))
@@ -229,6 +235,32 @@
                 (set found obj))))
     found)
 
+(fn sidebar-add-start-is-visible-and-idempotent []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (register-start-loader graph)
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Add Start")
+            "Sidebar should expose Add Start")
+    (local button (find-clickable-by-label "Add Start"))
+    (assert button "Add Start should be a clickable button")
+    (local active (manager:get-active-map))
+    (assert (= (active:lookup "start") nil) "start should begin absent")
+    (button:on-click {})
+    (entity:update)
+    (assert (active:lookup "start") "Add Start should load start")
+    (local count-after-first (active:node-count))
+    (button:on-click {})
+    (entity:update)
+    (assert (= (active:node-count) count-after-first)
+            "Add Start should not duplicate existing start")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
 (fn sidebar-new-button-creates-map-without-crashing []
     (local graph (Graph {:with-start false}))
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
@@ -276,6 +308,65 @@
     (manager:drop)
     (graph:drop))
 
+(fn sidebar-node-finder-lists-active-map-nodes []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key :label (.. "Node " key)})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local active (manager:get-active-map))
+    (active:load-by-key "test:a")
+    (active:load-by-key "test:b")
+    (manager:create-map! "empty" "Empty")
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Find Node")
+            "Sidebar should expose Find Node")
+    (assert (contains-label? (entity:visible-labels) "Node test:a")
+            "Finder should include first active-map node")
+    (assert (contains-label? (entity:visible-labels) "Node test:b")
+            "Finder should include second active-map node")
+    (manager:switch-map! "empty")
+    (entity:update)
+    (assert (not (contains-label? (entity:visible-labels) "Node test:a"))
+            "Finder should drop nodes from previous active map")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-node-finder-clicks-route_callbacks []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key :label "Clickable Node"})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local active (manager:get-active-map))
+    (local node (active:load-by-key "test:click"))
+    (var revealed-key nil)
+    (var opened-key nil)
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity
+        ((GraphMapSidebar.GraphMapSidebar
+           {:manager manager
+            :node-reveal-handler (fn [clicked-node _event]
+                                   (set revealed-key clicked-node.key))
+            :node-open-handler (fn [clicked-node _event]
+                                 (set opened-key clicked-node.key))})
+         ctx))
+    (entity:update)
+    (local button (find-clickable-by-label "Clickable Node"))
+    (assert button "Finder row should render a clickable button")
+    (button:on-click {:button 1})
+    (assert (= revealed-key node.key) "Single click should route reveal callback")
+    (button:on-double-click {:button 1})
+    (assert (= opened-key node.key) "Double click should route open callback")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
 (table.insert tests {:name "GraphMapManager active-map-id updates after switch" :fn manager-active-map-id-updates-after-switch})
 (table.insert tests {:name "GraphMapManager rename updates active-map-name" :fn manager-rename-updates-active-map-name})
 (table.insert tests {:name "GraphMapManager active-map-status returns correct values" :fn manager-active-map-status-returns-correct-values})
@@ -289,8 +380,14 @@
 (table.insert tests {:name "GraphMap sidebar rebuilds on maps-changed" :fn sidebar-rebuilds-on-maps-changed})
 (table.insert tests {:name "GraphMap sidebar labels map actions and selected count" :fn sidebar-exposes-map-labels-and-selected-count})
 (table.insert tests {:name "GraphMap sidebar refreshes active map counts after map mutations" :fn sidebar-refreshes-active-map_counts_after_map_mutations})
+(table.insert tests {:name "GraphMap sidebar Add Start is visible and idempotent"
+                     :fn sidebar-add-start-is-visible-and-idempotent})
 (table.insert tests {:name "GraphMap sidebar New button creates map without crashing" :fn sidebar-new-button-creates-map-without-crashing})
 (table.insert tests {:name "GraphMap sidebar map rows do not stretch to full panel height" :fn sidebar-map-rows-do-not-stretch-to-full-panel-height})
+(table.insert tests {:name "GraphMap sidebar node finder lists active map nodes"
+                     :fn sidebar-node-finder-lists-active-map-nodes})
+(table.insert tests {:name "GraphMap sidebar node finder clicks route callbacks"
+                     :fn sidebar-node-finder-clicks-route_callbacks})
 
 (local main
     (fn []
