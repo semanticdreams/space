@@ -8,6 +8,7 @@
 (local SearchView (require :search-view))
 (local Text (require :text))
 (local GraphViewUtils (require :graph/view/utils))
+(local {: resolve-chrome-background} (require :widget-theme-utils))
 
 (var compare-node-items nil)
 (var active-map-change-handler nil)
@@ -55,11 +56,7 @@
          (< (tostring (. a 2)) (tostring (. b 2)))))
 
 (fn panel-bg [state]
-    (local theme state.theme)
-    (local card-theme (and theme theme.card))
-    (if (and card-theme card-theme.background)
-        card-theme.background
-        (glm.vec4 0.12 0.14 0.18 0.96)))
+    (resolve-chrome-background state.theme :panel))
 
 (fn text-builder [state label color scale]
     (record-label state label)

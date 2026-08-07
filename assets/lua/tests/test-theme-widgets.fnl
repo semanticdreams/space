@@ -4,7 +4,7 @@
 (local Text (require :text))
 (local TextStyle (require :text-style))
 (local MathUtils (require :math-utils))
-(local {: resolve-qr-colors} (require :widget-theme-utils))
+(local {: resolve-qr-colors : resolve-chrome-background} (require :widget-theme-utils))
 
 (local tests [])
 
@@ -81,6 +81,28 @@
   (assert (color= colors.foreground theme.qr-code.foreground))
   (assert (color= colors.background theme.qr-code.background)))
 
+(fn chrome-background-resolves-theme-tokens []
+  (local rail (glm.vec4 0.11 0.12 0.13 1))
+  (local panel (glm.vec4 0.21 0.22 0.23 1))
+  (local theme {:chrome {:rail-background rail
+                         :panel-background panel}
+                :card {:background (glm.vec4 0.31 0.32 0.33 1)}})
+  (local ctx (make-test-ctx {:theme theme}))
+  (assert (color= (resolve-chrome-background ctx :rail) rail)
+          "Rail background should use theme.chrome.rail-background")
+  (assert (color= (resolve-chrome-background ctx :panel) panel)
+          "Panel background should use theme.chrome.panel-background"))
+
+(fn chrome-background-falls-back-without-black []
+  (local card-bg (glm.vec4 0.4 0.41 0.42 1))
+  (local ctx (make-test-ctx {:theme {:card {:background card-bg}}}))
+  (local panel (resolve-chrome-background ctx :panel))
+  (local rail (resolve-chrome-background nil :rail))
+  (assert (color= panel card-bg)
+          "Panel fallback should use theme.card.background when present")
+  (assert (not (color= rail (glm.vec4 0 0 0 1)))
+          "Missing theme rail fallback should not be black"))
+
 (fn text-supports-scale-without-style []
   (local theme {:text {:foreground (glm.vec4 0.3 0.35 0.4 1)}})
   (local ctx (make-test-ctx {:theme theme}))
@@ -144,6 +166,10 @@
 (table.insert tests {:name "TextStyle prefers provided :theme over global" :fn text-style-prefers-provided-theme})
 (table.insert tests {:name "TextStyle falls back on partial theme" :fn text-style-falls-back-on-partial-theme})
 (table.insert tests {:name "QR colors default to theme values" :fn qr-colors-default-to-theme})
+(table.insert tests {:name "Chrome background resolves theme tokens"
+                     :fn chrome-background-resolves-theme-tokens})
+(table.insert tests {:name "Chrome background falls back without black"
+                     :fn chrome-background-falls-back-without-black})
 
 (local main
   (fn []

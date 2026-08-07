@@ -154,6 +154,29 @@
   {:background background
    :foreground foreground})
 
+(fn theme-from-ctx-or-theme [ctx-or-theme]
+  (if (and ctx-or-theme ctx-or-theme.theme)
+      ctx-or-theme.theme
+      ctx-or-theme))
+
+(fn resolve-chrome-background [ctx-or-theme kind opts]
+  (assert (or (= kind :rail) (= kind :panel))
+          "resolve-chrome-background requires kind :rail or :panel")
+  (local options (or opts {}))
+  (local theme (theme-from-ctx-or-theme ctx-or-theme))
+  (local chrome (and theme theme.chrome))
+  (local card (and theme theme.card))
+  (local token
+    (if (= kind :rail)
+        (and chrome chrome.rail-background)
+        (and chrome chrome.panel-background)))
+  (or options.background-color
+      token
+      (and card card.background)
+      (if (= kind :rail)
+          (glm.vec4 0.08 0.1 0.14 0.96)
+          (glm.vec4 0.12 0.14 0.18 0.96))))
+
 {:clamp01 clamp01
  :adjust adjust
  :make-button-variant make-button-variant
@@ -162,4 +185,5 @@
  :get-button-theme-colors get-button-theme-colors
  :resolve-button-colors resolve-button-colors
  :resolve-qr-colors resolve-qr-colors
+ :resolve-chrome-background resolve-chrome-background
  :resolve-card-colors resolve-card-colors}
