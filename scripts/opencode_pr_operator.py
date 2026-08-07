@@ -70,7 +70,10 @@ def _classic_protection_requires_test(protection: Any) -> bool:
 def _ruleset_applies_to_main(ruleset: dict[str, Any]) -> bool:
     if ruleset.get("enforcement") != "active":
         return False
-    ref_name = ruleset.get("conditions", {}).get("ref_name", {})
+    conditions = ruleset.get("conditions")
+    if not isinstance(conditions, dict):
+        return False
+    ref_name = conditions.get("ref_name", {})
     if not isinstance(ref_name, dict):
         return False
     include = ref_name.get("include")
@@ -101,6 +104,14 @@ def _ruleset_rule_requires_test(rule: Any) -> bool:
     return False
 
 
+def _rule_list_proofs(rules: Any) -> tuple[bool, bool]:
+    if not isinstance(rules, list):
+        return False, False
+    requires_test = any(_ruleset_rule_requires_test(rule) for rule in rules)
+    has_merge_queue = any(isinstance(rule, dict) and rule.get("type") == "merge_queue" for rule in rules)
+    return requires_test, has_merge_queue
+
+
 def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
     if not isinstance(rulesets, list):
         return False, False
@@ -109,11 +120,9 @@ def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
     for ruleset in rulesets:
         if not isinstance(ruleset, dict) or not _ruleset_applies_to_main(ruleset):
             continue
-        rules = ruleset.get("rules")
-        if not isinstance(rules, list):
-            continue
-        requires_test = requires_test or any(_ruleset_rule_requires_test(rule) for rule in rules)
-        has_merge_queue = has_merge_queue or any(isinstance(rule, dict) and rule.get("type") == "merge_queue" for rule in rules)
+        ruleset_requires_test, ruleset_has_merge_queue = _rule_list_proofs(ruleset.get("rules"))
+        requires_test = requires_test or ruleset_requires_test
+        has_merge_queue = has_merge_queue or ruleset_has_merge_queue
     return requires_test, has_merge_queue
 
 
@@ -145,14 +154,25 @@ def check_main_protection(repo_root: Path) -> dict[str, object]:
 
     classic_has_test = _classic_protection_requires_test(protection)
     ruleset_has_test, ruleset_has_queue = _active_main_ruleset_proofs(rulesets)
-    has_test = classic_has_test or ruleset_has_test
-    has_queue = ruleset_has_queue
+    effective_rules = None
+    if not (classic_has_test or ruleset_has_test) or not ruleset_has_queue:
+        try:
+            effective_rules_result = run_command(["gh", "api", f"repos/{SPACE_REPO}/rules/branches/main"], repo, check=False)
+            effective_rules = _json_loads(effective_rules_result.stdout) if effective_rules_result.returncode == 0 else None
+        except (CapabilityError, json.JSONDecodeError):
+            effective_rules = None
+    effective_has_test, effective_has_queue = _rule_list_proofs(effective_rules)
+    has_test = classic_has_test or ruleset_has_test or effective_has_test
+    has_queue = ruleset_has_queue or effective_has_queue
     evidence = {
         "classic_protection_available": protection is not None,
         "rulesets_available": rulesets is not None,
+        "effective_branch_rules_available": effective_rules is not None,
         "classic_required_test_check_proven": classic_has_test,
         "active_main_ruleset_required_test_check_proven": ruleset_has_test,
         "active_main_ruleset_merge_queue_proven": ruleset_has_queue,
+        "effective_branch_rules_required_test_check_proven": effective_has_test,
+        "effective_branch_rules_merge_queue_proven": effective_has_queue,
         "required_test_check_proven": has_test,
         "merge_queue_proven": has_queue,
     }

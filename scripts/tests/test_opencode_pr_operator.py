@@ -242,6 +242,46 @@ def test_check_main_protection_accepts_active_main_ruleset_with_required_test_an
     assert result["status"] == "pass"
 
 
+def test_check_main_protection_accepts_effective_main_rules_when_ruleset_list_is_summary_only(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+                [
+                    {
+                        "id": 20232493,
+                        "enforcement": "active",
+                        "conditions": None,
+                    }
+                ]
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): json.dumps(
+                [
+                    {"type": "pull_request"},
+                    {"type": "merge_queue"},
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {"required_status_checks": [{"context": "test"}]},
+                    },
+                ]
+            ),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["effective_branch_rules_available"] is True
+    assert result["evidence"]["effective_branch_rules_required_test_check_proven"] is True
+    assert result["evidence"]["effective_branch_rules_merge_queue_proven"] is True
+
+
 def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monkeypatch, trusted_repo: Path) -> None:
     states = iter(
         [
