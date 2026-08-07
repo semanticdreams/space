@@ -51,9 +51,41 @@ description: Use when testing {name}
 """
 
 
+def write_capability_files(root: Path) -> None:
+    write_file(
+        root / ".opencode" / "agents" / "git-integrator.md",
+        agent(
+            "git-integrator",
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_git_integrate.py status --repo-root .": allow\n',
+        ),
+    )
+    write_file(
+        root / ".opencode" / "agents" / "github-operator.md",
+        agent(
+            "github-operator",
+            '  edit: deny\n  task: deny\n  external_directory: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  bash:\n    "python3 scripts/opencode_pr_operator.py auth-status --repo-root .": allow\n',
+        ),
+    )
+    write_file(
+        root / ".opencode" / "agents" / "config-auditor.md",
+        agent(
+            "config-auditor",
+            '  edit: deny\n  task: deny\n  webfetch: deny\n  websearch: deny\n  question: deny\n  external_directory:\n    "~/.config/opencode/**": allow\n    "~/.config/opencode/**/*auth.json*": deny\n    "~/.config/opencode/**/*auth.jsonc*": deny\n    "~/.config/opencode/**/*secret*": deny\n    "~/.config/opencode/**/*token*": deny\n  bash:\n    "python3 scripts/verify_opencode_home_config.py --repo-root . --require-clean": allow\n',
+        ),
+    )
+    for script in [
+        "opencode_capabilities.py",
+        "opencode_git_integrate.py",
+        "opencode_pr_operator.py",
+        "verify_opencode_home_config.py",
+    ]:
+        write_file(root / "scripts" / script, "#!/usr/bin/env python3\n")
+
+
 def make_repo(tmp_path: Path, *, agent_name: str = "example-agent", permission_text: str = "  bash: deny\n") -> Path:
     root = tmp_path / "repo"
     write_file(root / ".opencode" / "opencode.json", json.dumps({"default_agent": "supervisor"}))
+    write_capability_files(root)
     write_file(root / ".opencode" / "agents" / f"{agent_name}.md", agent(agent_name, permission_text))
     write_file(root / ".opencode" / "skills" / "example" / "SKILL.md", skill("example"))
     return root
@@ -82,6 +114,57 @@ def test_cli_emits_pass_or_fail_json(tmp_path: Path):
     assert result.returncode == 0
     assert payload == {"status": "pass", "violations": []}
     assert result.stderr == ""
+
+
+def test_check_repo_fails_when_required_capability_agent_missing(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    (repo / ".opencode" / "agents" / "git-integrator.md").unlink()
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "capability-dependency"
+        and ".opencode/agents/git-integrator.md" in violation.message
+        for violation in issues
+    )
+
+
+def test_check_repo_fails_when_required_wrapper_missing(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    (repo / "scripts" / "opencode_git_integrate.py").unlink()
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "capability-dependency"
+        and "scripts/opencode_git_integrate.py" in violation.message
+        for violation in issues
+    )
+
+
+def test_check_repo_fails_when_agent_allowlist_references_missing_wrapper(tmp_path: Path):
+    repo = make_repo(tmp_path)
+    agent_path = repo / ".opencode" / "agents" / "git-integrator.md"
+    agent_text = agent_path.read_text(encoding="utf-8")
+    agent_path.write_text(
+        agent_text.replace(
+            '    "python3 scripts/opencode_git_integrate.py status --repo-root .": allow\n',
+            '    "python3 scripts/opencode_git_integrate.py status --repo-root .": allow\n    "python3 scripts/missing_wrapper.py status --repo-root .": allow\n',
+        ),
+        encoding="utf-8",
+    )
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "capability-dependency"
+        and "missing wrapper script" in violation.message
+        and "scripts/missing_wrapper.py" in violation.message
+        for violation in issues
+    )
 
 
 def test_reviewer_with_bash_allow_fails(tmp_path: Path):

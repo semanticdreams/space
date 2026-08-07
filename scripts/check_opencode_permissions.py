@@ -21,8 +21,18 @@ class PolicyViolation:
 REQUIRED_AGENT_KEYS = {"description", "mode", "model", "permission"}
 REQUIRED_SKILL_KEYS = {"name", "description"}
 CAPABILITY_AGENTS = {"git-integrator", "github-operator", "config-auditor"}
+REQUIRED_CAPABILITY_FILES = (
+    ".opencode/agents/git-integrator.md",
+    ".opencode/agents/github-operator.md",
+    ".opencode/agents/config-auditor.md",
+    "scripts/opencode_capabilities.py",
+    "scripts/opencode_git_integrate.py",
+    "scripts/opencode_pr_operator.py",
+    "scripts/verify_opencode_home_config.py",
+)
 SECRET_EXTERNAL_PATTERNS = ("auth.json", "auth.jsonc", "secret", "token")
 BLOCKED_ACTIONS = {"allow", "ask"}
+WRAPPER_REFERENCE_RE = re.compile(r"(?<![\w/.-])(scripts/[A-Za-z0-9_.-]+\.py)(?![\w/.-])")
 
 
 def _rel(repo_root: Path, path: Path) -> str:
@@ -159,6 +169,40 @@ def _check_opencode_json(repo_root: Path) -> list[PolicyViolation]:
     return violations
 
 
+def _check_required_capability_files(repo_root: Path) -> list[PolicyViolation]:
+    violations: list[PolicyViolation] = []
+    for relative_path in REQUIRED_CAPABILITY_FILES:
+        path = repo_root / relative_path
+        if not path.exists():
+            violations.append(_violation(path, repo_root, "capability-dependency", f"missing capability dependency: {relative_path}"))
+    return violations
+
+
+def _check_agent_wrapper_references(repo_root: Path) -> list[PolicyViolation]:
+    agents_dir = repo_root / ".opencode" / "agents"
+    violations: list[PolicyViolation] = []
+    for agent_path in sorted(agents_dir.glob("*.md")):
+        text = agent_path.read_text(encoding="utf-8")
+        _, raw = _frontmatter(text)
+        if raw is None:
+            continue
+        referenced_scripts = set()
+        for pattern, action in _mapping_entries(raw, "bash"):
+            if action == "allow":
+                referenced_scripts.update(WRAPPER_REFERENCE_RE.findall(pattern))
+        for script_path in sorted(referenced_scripts):
+            if not (repo_root / script_path).exists():
+                violations.append(
+                    _violation(
+                        agent_path,
+                        repo_root,
+                        "capability-dependency",
+                        f"missing wrapper script referenced by {_rel(repo_root, agent_path)}: {script_path}",
+                    )
+                )
+    return violations
+
+
 def _check_unsafe_text(path: Path, repo_root: Path, raw: str) -> list[PolicyViolation]:
     violations = []
     for pattern, action in _mapping_entries(raw, "bash"):
@@ -253,6 +297,8 @@ def check_repo(repo_root: Path) -> list[PolicyViolation]:
     repo_root = repo_root.resolve()
     violations: list[PolicyViolation] = []
     violations.extend(_check_opencode_json(repo_root))
+    violations.extend(_check_required_capability_files(repo_root))
+    violations.extend(_check_agent_wrapper_references(repo_root))
     violations.extend(_check_agents(repo_root))
     violations.extend(_check_skills(repo_root))
     return violations
