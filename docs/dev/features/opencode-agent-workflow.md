@@ -192,6 +192,24 @@ Space uses guarded capabilities to reduce routine OpenCode permission friction w
 - **Wrapper JSON evidence is the reviewable handoff.** Capability wrappers emit structured JSON with `status`, `action`, `message`, and `evidence` so supervisors, reviewers, and weekly automation can inspect what happened without granting a broad shell or GitHub capability.
 - **OpenCode must be restarted after `.opencode/**` changes.** Agent definitions, skill instructions, and permission rules are startup-loaded, so restart OpenCode before relying on changed capability agents or policy rules.
 
+### Capability preflight
+
+Privileged Git, GitHub, and OpenCode configuration operations route through
+capability agents and repo-local wrapper scripts, not through broad direct Git or
+GitHub commands. Run `make opencode-check` before finishing integration work and
+after merging or otherwise changing `.opencode/**` files so missing capability
+agents, missing wrappers, or stale wrapper references are caught locally before
+handoff.
+
+If OpenCode or an agent reports a missing wrapper such as
+`scripts/opencode_git_integrate.py`, the likely cause is branch/config skew: the
+active OpenCode configuration references a capability file that is absent from
+the checked-out branch. Update the branch from `origin/main` when permitted and
+rerun the preflight rather than bypassing the capability boundary with direct Git
+commands. After any `.opencode/**` change lands in the working tree, restart OpenCode
+so the startup-loaded agents, skills, and permission rules match the repository
+files.
+
 ## Validation continuation and current base
 
 Required validation failures are active debugging work, not a terminal workflow
