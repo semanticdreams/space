@@ -17,6 +17,7 @@ SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
 PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}
+FAILED_ROLLUP_CONCLUSIONS = {"failure", "failed", "cancelled", "timed-out", "action-required"}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
 DEFAULT_POLL_INTERVAL_SECONDS = 100
 MAX_RULESET_DETAIL_FETCHES = 5
@@ -330,7 +331,7 @@ def view_current_pr(repo_root: Path) -> dict[str, object]:
 def _failed_rollup(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
         conclusion = _normalized_rollup_value(check.get("conclusion")) if isinstance(check, dict) else None
-        if conclusion in {"failure", "failed", "cancelled", "timed_out", "action_required"}:
+        if conclusion in FAILED_ROLLUP_CONCLUSIONS:
             return True
     return False
 
@@ -345,18 +346,29 @@ def _rollup_check_is_completed(check: dict[str, Any]) -> bool:
     return _normalized_rollup_value(check.get("status")) == "completed"
 
 
+def _rollup_check_is_check_run(check: dict[str, Any]) -> bool:
+    return check.get("__typename") == "CheckRun"
+
+
 def _rollup_conclusion_is_blank_or_missing(check: dict[str, Any]) -> bool:
     conclusion = check.get("conclusion")
     return conclusion is None or (isinstance(conclusion, str) and conclusion.strip() == "")
+
+
+def _rollup_has_explicit_pending_state(check: dict[str, Any]) -> bool:
+    return (
+        _normalized_rollup_value(check.get("status")) in PENDING_ROLLUP_STATUSES
+        or _normalized_rollup_value(check.get("state")) in PENDING_ROLLUP_STATUSES
+    )
 
 
 def _has_pending_rollup_check(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
         if not isinstance(check, dict):
             continue
-        if _normalized_rollup_value(check.get("status")) in PENDING_ROLLUP_STATUSES:
+        if _rollup_has_explicit_pending_state(check):
             return True
-        if _rollup_conclusion_is_blank_or_missing(check) and not _rollup_check_is_completed(check):
+        if _rollup_check_is_check_run(check) and _rollup_conclusion_is_blank_or_missing(check) and not _rollup_check_is_completed(check):
             return True
     return False
 

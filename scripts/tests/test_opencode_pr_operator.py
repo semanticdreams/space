@@ -405,6 +405,78 @@ def test_poll_merge_queue_treats_blocked_in_progress_check_with_blank_conclusion
     assert len(calls) == 2
 
 
+def test_poll_merge_queue_rejects_blocked_state_with_non_pending_rollup_missing_conclusion(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "BLOCKED",
+                    "statusCheckRollup": [{"__typename": "StatusContext", "state": "SUCCESS"}],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Pull request merge queue state is ambiguous or unsupported"
+
+
+@pytest.mark.parametrize("conclusion", ["TIMED_OUT", "ACTION_REQUIRED"])
+def test_poll_merge_queue_rejects_completed_terminal_failed_check_conclusions(
+    monkeypatch,
+    trusted_repo: Path,
+    conclusion: str,
+) -> None:
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "pending",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "COMPLETED",
+                            "conclusion": conclusion,
+                        }
+                    ],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Required merge queue check failed"
+
+
 def test_poll_merge_queue_requires_merged_at_for_success(monkeypatch, trusted_repo: Path) -> None:
     runner = GhRunner(
         {
