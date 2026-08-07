@@ -254,6 +254,35 @@
     (manager:drop)
     (graph:drop))
 
+(fn manager-normalizes-integral-float-next-map-id []
+    (local graph (Graph {:with-start false}))
+    (local restored-state (json.loads "{\"active_map_id\":\"main\",\"next_map_id\":2.0,\"maps\":[{\"id\":\"main\",\"name\":\"Main\",\"nodes\":[],\"edges\":[]}]}"))
+    (local manager
+        (GraphMapManager.GraphMapManager
+            {:graph graph
+             :state restored-state}))
+    (assert (= manager.next-map-id 2)
+            "Restored integral float next_map_id should normalize to 2")
+    (assert (= (tostring manager.next-map-id) "2")
+            "Normalized next-map-id should stringify without .0")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-captures-normalized-next-map-id []
+    (local graph (Graph {:with-start false}))
+    (local restored-state (json.loads "{\"active_map_id\":\"main\",\"next_map_id\":2.0,\"maps\":[{\"id\":\"main\",\"name\":\"Main\",\"nodes\":[],\"edges\":[]}]}"))
+    (local manager
+        (GraphMapManager.GraphMapManager
+            {:graph graph
+             :state restored-state}))
+    (local captured (manager:capture-state))
+    (assert (= captured.next_map_id 2)
+            "Captured next_map_id should remain integer-like")
+    (assert (= (tostring captured.next_map_id) "2")
+            "Captured next_map_id should stringify without .0")
+    (manager:drop)
+    (graph:drop))
+
 (fn manager-creates-map []
     (local graph (Graph {:with-start false}))
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
@@ -1045,6 +1074,10 @@
 (table.insert tests {:name "GraphMapManager homeworld legacy carries additional maps" :fn manager-homeworld-legacy-carries-additional-maps})
 (table.insert tests {:name "GraphMapManager loads migrated state with default graph" :fn manager-loads-migrated-state-with-default-graph})
 (table.insert tests {:name "GraphMapManager captures state in target shape" :fn manager-captures-state-in-target-shape})
+(table.insert tests {:name "GraphMapManager normalizes integral float next-map-id"
+                     :fn manager-normalizes-integral-float-next-map-id})
+(table.insert tests {:name "GraphMapManager captures normalized next-map-id"
+                     :fn manager-captures-normalized-next-map-id})
 (table.insert tests {:name "GraphMapManager creates map" :fn manager-creates-map})
 (table.insert tests {:name "GraphMapManager renames map" :fn manager-renames-map})
 (table.insert tests {:name "GraphMapManager rename unknown map errors" :fn manager-rename-unknown-map-errors})

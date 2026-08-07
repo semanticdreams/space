@@ -54,7 +54,8 @@
 
 (fn test-theme []
   {:font (make-font-stub)
-   :graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
+   :graph {:background (glm.vec4 0.18 0.19 0.21 1)
+           :selection-border-color (glm.vec4 1 0.6 0.2 1)
            :label-color (glm.vec4 1 1 1 1)
            :label-target-pixels 13.0
            :label-min-scale 4.0
@@ -585,12 +586,12 @@
                 "Captured graph state should have disabled ambient light")
         (assert (not graph-captured.skybox.enabled?)
                 "Captured graph state should have disabled skybox")
-        ;; Background should be reset to default (neutral/black)
+        (local graph-background (. (test-theme) :graph :background))
         (assert (and app.background-state
-                     (= (. app.background-state.color 1) 0.0)
-                     (= (. app.background-state.color 2) 0.0)
-                     (= (. app.background-state.color 3) 0.0))
-                "Graph activation should reset background to default")
+                     (= (. app.background-state.color 1) graph-background.x)
+                     (= (. app.background-state.color 2) graph-background.y)
+                     (= (. app.background-state.color 3) graph-background.z))
+                "Graph activation should apply theme graph background")
         ;; Containment should be disabled
         (let [g-slot (scene:activity-slot "graph")
               g-manager (and g-slot g-slot.physics-containment-manager)]

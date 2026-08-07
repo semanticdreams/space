@@ -126,6 +126,55 @@
             (set found? true)))
     found?)
 
+(fn approx [a b]
+    (< (math.abs (- a b)) 0.001))
+
+(fn layout-sidebar! [entity width height]
+    (set entity.layout.size (glm.vec3 width height 0))
+    (entity.layout:measurer)
+    (entity.layout:layouter))
+
+(fn finder-layout [entity]
+    (local stack-layout (. entity.layout.children 1))
+    (local flex-layout (. stack-layout.children 2))
+    (. flex-layout.children (length flex-layout.children)))
+
+(local long-sidebar-node-label
+       "A graph node label that is deliberately long enough to exceed the sidebar width by many characters")
+
+(local long-finder-node-label
+       "A finder node label that remains searchable in full but displays with an ellipsis")
+
+(fn long-sidebar-node-loader [key]
+    (Graph.GraphNode {:key key :label long-sidebar-node-label}))
+
+(fn long-finder-node-loader [key]
+    (Graph.GraphNode {:key key :label long-finder-node-label}))
+
+(fn reveal-label-recorder [store]
+    (fn [clicked-node _event]
+        (set store.label clicked-node.label)))
+
+(fn reveal-key-recorder [store]
+    (fn [clicked-node _event]
+        (set store.key clicked-node.key)))
+
+(fn open-key-recorder [store]
+    (fn [clicked-node _event]
+        (set store.key clicked-node.key)))
+
+(fn selected-count-reader [store]
+    (fn [] store.count))
+
+(fn generic-graph-node-loader [key]
+    (Graph.GraphNode {:key key}))
+
+(fn node-label-loader [key]
+    (Graph.GraphNode {:key key :label (.. "Node " key)}))
+
+(fn clickable-node-loader [key]
+    (Graph.GraphNode {:key key :label "Clickable Node"}))
+
 (fn register-start-loader [graph]
     (when (not (graph:has-key-loader-for-key "start"))
         (graph:register-key-loader "start"
@@ -166,19 +215,19 @@
 (fn sidebar-exposes-map-labels-and-selected-count []
     (local graph (Graph {:with-start false}))
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
-    (var selected-count 2)
+    (local selected-count {:count 2})
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
                               :hoverables (make-hoverables-stub)}))
     (local builder (GraphMapSidebar.GraphMapSidebar
-                     {:manager manager
-                      :selected-count-provider (fn [] selected-count)}))
+                      {:manager manager
+                       :selected-count-provider (selected-count-reader selected-count)}))
     (local entity (builder ctx))
     (local labels (entity:visible-labels))
     (assert (contains-label? labels "Graph Maps") "Sidebar should label the graph maps dock")
     (assert (contains-label? labels "Switch Map") "Sidebar should include Switch Map label")
     (assert (contains-label? labels "Delete Map") "Sidebar should use Delete Map label")
     (assert (contains-label? labels "Selected: 2") "Sidebar should show selected count")
-    (set selected-count 5)
+    (set selected-count.count 5)
     (entity:update)
     (assert (contains-label? (entity:visible-labels) "Selected: 5")
             "Sidebar should refresh selected count on update")
@@ -188,9 +237,7 @@
 
 (fn sidebar-refreshes-active-map_counts_after_map_mutations []
     (local graph (Graph {:with-start false}))
-    (graph:register-key-loader "test"
-        (fn [key]
-            (Graph.GraphNode {:key key})))
+    (graph:register-key-loader "test" generic-graph-node-loader)
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
                                :hoverables (make-hoverables-stub)}))
@@ -310,9 +357,7 @@
 
 (fn sidebar-node-finder-lists-active-map-nodes []
     (local graph (Graph {:with-start false}))
-    (graph:register-key-loader "test"
-        (fn [key]
-            (Graph.GraphNode {:key key :label (.. "Node " key)})))
+    (graph:register-key-loader "test" node-label-loader)
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
     (local active (manager:get-active-map))
     (active:load-by-key "test:a")
@@ -338,31 +383,115 @@
 
 (fn sidebar-node-finder-clicks-route_callbacks []
     (local graph (Graph {:with-start false}))
-    (graph:register-key-loader "test"
-        (fn [key]
-            (Graph.GraphNode {:key key :label "Clickable Node"})))
+    (graph:register-key-loader "test" clickable-node-loader)
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
     (local active (manager:get-active-map))
     (local node (active:load-by-key "test:click"))
-    (var revealed-key nil)
-    (var opened-key nil)
+    (local revealed {:key nil})
+    (local opened {:key nil})
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
                               :hoverables (make-hoverables-stub)}))
     (local entity
         ((GraphMapSidebar.GraphMapSidebar
-           {:manager manager
-            :node-reveal-handler (fn [clicked-node _event]
-                                   (set revealed-key clicked-node.key))
-            :node-open-handler (fn [clicked-node _event]
-                                 (set opened-key clicked-node.key))})
+            {:manager manager
+             :node-reveal-handler (reveal-key-recorder revealed)
+             :node-open-handler (open-key-recorder opened)})
          ctx))
     (entity:update)
     (local button (find-clickable-by-label "Clickable Node"))
     (assert button "Finder row should render a clickable button")
     (button:on-click {:button 1})
-    (assert (= revealed-key node.key) "Single click should route reveal callback")
+    (assert (= revealed.key node.key) "Single click should route reveal callback")
     (button:on-double-click {:button 1})
-    (assert (= opened-key node.key) "Double click should route open callback")
+    (assert (= opened.key node.key) "Double click should route open callback")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-new-button-uses-integer-map-id-after-restored-float []
+    (local graph (Graph {:with-start false}))
+    (local manager
+        (GraphMapManager.GraphMapManager
+            {:graph graph
+             :state {:active_map_id "main"
+                     :next_map_id 2.0
+                     :maps [{:id "main" :name "Main" :nodes [] :edges []}]}}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (local new-button (find-clickable-by-label "New"))
+    (assert new-button "Sidebar should render a New button")
+    (local (ok err) (pcall (fn [] (new-button:on-click {}))))
+    (assert ok (.. "New button should not crash with restored next_map_id=2.0: " (tostring err)))
+    (assert (= manager.active-map-id "map-2")
+            "New button should switch to map-2, not map-2.0")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-width-stays-fixed-with-long-labels []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test" long-sidebar-node-loader)
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:rename-map! "main" "A graph map name that is deliberately long enough to exceed the sidebar width by many characters")
+    (local active (manager:get-active-map))
+    (active:load-by-key "test:long")
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (entity.layout:measurer)
+    (assert (approx entity.layout.measure.x 14.0)
+            (.. "Sidebar measure should be fixed at 14.0, got " (tostring entity.layout.measure.x)))
+    (layout-sidebar! entity 14.0 24.0)
+    (assert (approx entity.layout.size.x 14.0)
+            "Sidebar layout width should stay fixed at 14.0")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-truncates-display-labels-and-preserves-finder-data []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test" long-finder-node-loader)
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:rename-map! "main" "A graph map name that displays with an ellipsis in the sidebar row")
+    (local active (manager:get-active-map))
+    (local node (active:load-by-key "test:long"))
+    (local reveal-store {:label nil})
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity
+        ((GraphMapSidebar.GraphMapSidebar
+             {:manager manager
+              :node-reveal-handler (reveal-label-recorder reveal-store)})
+         ctx))
+    (entity:update)
+    (local labels (entity:visible-labels))
+    (assert (contains-label? labels "A graph map name that di...")
+            "Map row display label should be truncated with ellipsis")
+    (assert (contains-label? labels "A finder node label tha...")
+            "Finder row display label should be truncated with ellipsis")
+    (local button (find-clickable-by-label "A finder node label tha..."))
+    (assert button "Truncated finder row should be clickable")
+    (button:on-click {:button 1})
+    (assert (= reveal-store.label node.label)
+            "Finder callback should receive node with full label")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-empty-finder-fills-fixed-content-width []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (layout-sidebar! entity 14.0 24.0)
+    (local layout (finder-layout entity))
+    (assert (> layout.size.x 13.0)
+            (.. "Finder area should fill fixed sidebar content width, got " (tostring layout.size.x)))
     (entity:drop)
     (manager:drop)
     (graph:drop))
@@ -387,7 +516,15 @@
 (table.insert tests {:name "GraphMap sidebar node finder lists active map nodes"
                      :fn sidebar-node-finder-lists-active-map-nodes})
 (table.insert tests {:name "GraphMap sidebar node finder clicks route callbacks"
-                     :fn sidebar-node-finder-clicks-route_callbacks})
+                      :fn sidebar-node-finder-clicks-route_callbacks})
+(table.insert tests {:name "GraphMap sidebar New uses integer map id after restored float"
+                     :fn sidebar-new-button-uses-integer-map-id-after-restored-float})
+(table.insert tests {:name "GraphMap sidebar width stays fixed with long labels"
+                     :fn sidebar-width-stays-fixed-with-long-labels})
+(table.insert tests {:name "GraphMap sidebar truncates display labels and preserves finder data"
+                     :fn sidebar-truncates-display-labels-and-preserves-finder-data})
+(table.insert tests {:name "GraphMap sidebar empty finder fills fixed content width"
+                     :fn sidebar-empty-finder-fills-fixed-content-width})
 
 (local main
     (fn []

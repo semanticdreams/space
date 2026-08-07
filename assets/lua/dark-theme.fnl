@@ -43,12 +43,15 @@
                :item-selected-background (glm.vec4 0.18 0.22 0.34 1)
                :item-foreground text-color}
    :combo-box {:items-per-page 10}
-   :graph {:edge-color (glm.vec4 0.36 0.45 0.68 0.9)
+   :graph {:background (glm.vec4 0.095 0.105 0.13 1)
+           :edge-color (glm.vec4 0.36 0.45 0.68 0.9)
            :edge-thickness 4.0
            :label-color text-color
            :label-target-pixels 13.0
            :label-min-scale 4.0
            :selection-border-color (glm.vec4 0.2 0.55 0.95 0.95)}
+   :chrome {:rail-background (glm.vec4 0.075 0.09 0.12 0.98)
+            :panel-background (glm.vec4 0.12 0.13 0.18 0.98)}
    :terrain-selection {:fill (glm.vec4 0.24 0.58 0.98 0.22)
                        :border (glm.vec4 0.34 0.68 1.0 0.98)}
    :physics-containment {:visualization {:color (glm.vec4 0.45 0.72 0.95 0.28)}}
