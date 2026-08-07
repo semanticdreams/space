@@ -242,6 +242,94 @@ def test_check_main_protection_accepts_active_main_ruleset_with_required_test_an
     assert result["status"] == "pass"
 
 
+def test_check_main_protection_accepts_effective_main_rules_when_ruleset_list_is_summary_only(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+                [
+                    {
+                        "id": 20232493,
+                        "enforcement": "active",
+                        "conditions": None,
+                    }
+                ]
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): json.dumps(
+                [
+                    {"type": "pull_request"},
+                    {"type": "merge_queue"},
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {"required_status_checks": [{"context": "test"}]},
+                    },
+                ]
+            ),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["effective_branch_rules_available"] is True
+    assert result["evidence"]["effective_branch_rules_required_test_check_proven"] is True
+    assert result["evidence"]["effective_branch_rules_merge_queue_proven"] is True
+
+
+def test_check_main_protection_accepts_detailed_ruleset_when_effective_rules_are_unavailable(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            ("gh", "api", "repos/semanticdreams/space2/branches/main/protection"): json.dumps(
+                {"required_status_checks": {"contexts": ["lint"]}}
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets"): json.dumps(
+                [
+                    {
+                        "id": 20232493,
+                        "enforcement": "active",
+                        "conditions": None,
+                    }
+                ]
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rules/branches/main"): command_result(
+                ["gh", "api", "repos/semanticdreams/space2/rules/branches/main"],
+                returncode=404,
+            ),
+            ("gh", "api", "repos/semanticdreams/space2/rulesets/20232493"): json.dumps(
+                {
+                    "id": 20232493,
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                    "rules": [
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {"required_status_checks": [{"context": "test"}]},
+                        },
+                        {"type": "merge_queue"},
+                    ],
+                }
+            ),
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.check_main_protection(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["detailed_rulesets_available"] is True
+    assert result["evidence"]["detailed_rulesets_required_test_check_proven"] is True
+    assert result["evidence"]["detailed_rulesets_merge_queue_proven"] is True
+
+
 def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monkeypatch, trusted_repo: Path) -> None:
     states = iter(
         [
@@ -274,6 +362,119 @@ def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monk
 
     assert result["status"] == "pass"
     assert result["evidence"]["merged_at"] == "2026-08-06T00:00:00Z"
+
+
+def test_poll_merge_queue_treats_blocked_in_progress_check_with_blank_conclusion_as_nonterminal(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    states = iter(
+        [
+            {
+                "mergedAt": None,
+                "state": "OPEN",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "workflowName": "test",
+                        "status": "IN_PROGRESS",
+                        "conclusion": "",
+                        "completedAt": "0001-01-01T00:00:00Z",
+                    }
+                ],
+            },
+            {"mergedAt": "2026-08-07T00:00:00Z", "state": "MERGED", "mergeStateStatus": "clean", "statusCheckRollup": []},
+        ]
+    )
+    calls = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        calls.append(list(args))
+        return command_result(list(args), json.dumps(next(states)))
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+    monkeypatch.setattr(pr_operator.time, "sleep", lambda seconds: None)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 60, 1)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["merged_at"] == "2026-08-07T00:00:00Z"
+    assert len(calls) == 2
+
+
+def test_poll_merge_queue_rejects_blocked_state_with_non_pending_rollup_missing_conclusion(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "BLOCKED",
+                    "statusCheckRollup": [{"__typename": "StatusContext", "state": "SUCCESS"}],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Pull request merge queue state is ambiguous or unsupported"
+
+
+@pytest.mark.parametrize("conclusion", ["TIMED_OUT", "ACTION_REQUIRED"])
+def test_poll_merge_queue_rejects_completed_terminal_failed_check_conclusions(
+    monkeypatch,
+    trusted_repo: Path,
+    conclusion: str,
+) -> None:
+    runner = GhRunner(
+        {
+            (
+                "gh",
+                "pr",
+                "view",
+                "feature/opencode-capabilities",
+                "--json",
+                "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url",
+            ): json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "pending",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "COMPLETED",
+                            "conclusion": conclusion,
+                        }
+                    ],
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(pr_operator, "run_command", runner)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Required merge queue check failed"
 
 
 def test_poll_merge_queue_requires_merged_at_for_success(monkeypatch, trusted_repo: Path) -> None:

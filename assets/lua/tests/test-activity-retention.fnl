@@ -850,12 +850,18 @@
                   (.. "Captured " activity-id " state should have disabled ambient light"))
           (assert (not captured.skybox.enabled?)
                   (.. "Captured " activity-id " state should have disabled skybox"))
-          ;; Background should be reset to default
+          ;; Graph intentionally applies its graph-background fallback; other
+          ;; built-ins should reset the sandbox background to the neutral default.
+          (local expected-background (if (= activity-id "graph") [0.094999998807907 0.10499999672174 0.12999999523163] [0.0 0.0 0.0]))
+          (local actual-background (or (and app.background-state app.background-state.color) [999 999 999]))
+          (local background-delta-1 (_G.math.abs (- (. actual-background 1) (. expected-background 1))))
+          (local background-delta-2 (_G.math.abs (- (. actual-background 2) (. expected-background 2))))
+          (local background-delta-3 (_G.math.abs (- (. actual-background 3) (. expected-background 3))))
           (assert (and app.background-state
-                       (= (. app.background-state.color 1) 0.0)
-                       (= (. app.background-state.color 2) 0.0)
-                       (= (. app.background-state.color 3) 0.0))
-                  (.. activity-id " activation should reset background to default"))
+                       (< background-delta-1 0.00001)
+                       (< background-delta-2 0.00001)
+                       (< background-delta-3 0.00001))
+                  (.. activity-id " activation should apply isolated background"))
           ;; Containment should be disabled
           (let [act-slot (scene:activity-slot activity-id)
                 act-manager (and act-slot act-slot.physics-containment-manager)]

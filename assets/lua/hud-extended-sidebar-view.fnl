@@ -4,20 +4,20 @@
 (local Stack (require :stack))
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
-(local {: adjust} (require :widget-theme-utils))
+(local {: resolve-chrome-background} (require :widget-theme-utils))
 (local HudChromeMetrics (require :hud-chrome-metrics))
 
 (local panel-width 38)
 
 (fn panel-background [theme kind]
-  (local card-theme (and theme theme.card))
-  (local base (or (and card-theme card-theme.background)
-                  (if (= kind :rail)
-                      (glm.vec4 0.08 0.1 0.14 0.96)
-                      (glm.vec4 0.12 0.14 0.18 0.96))))
-  (if (= kind :rail)
-      (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
-      (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
+  (resolve-chrome-background theme kind))
+
+
+
+
+
+
+
 
 (fn HudExtendedSidebarView [sidebar opts]
   (assert sidebar "HudExtendedSidebarView requires sidebar")

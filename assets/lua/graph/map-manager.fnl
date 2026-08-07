@@ -7,8 +7,8 @@
 (fn ensure-int [v default]
     (if (and (= (type v) :number)
              (>= v 1)
-             (not (not (= v (math.floor v)))))
-        v
+             (= v (math.floor v)))
+        (math.floor v)
         default))
 
 (fn safe-map-id? [id]

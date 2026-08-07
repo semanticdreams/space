@@ -16,8 +16,11 @@ from opencode_capabilities import CapabilityError, ensure_space_repo, failure, h
 SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
+PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}
+FAILED_ROLLUP_CONCLUSIONS = {"failure", "failed", "cancelled", "timed-out", "action-required"}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
 DEFAULT_POLL_INTERVAL_SECONDS = 100
+MAX_RULESET_DETAIL_FETCHES = 5
 
 
 def _exit_code_for(result: dict[str, object]) -> int:
@@ -70,7 +73,10 @@ def _classic_protection_requires_test(protection: Any) -> bool:
 def _ruleset_applies_to_main(ruleset: dict[str, Any]) -> bool:
     if ruleset.get("enforcement") != "active":
         return False
-    ref_name = ruleset.get("conditions", {}).get("ref_name", {})
+    conditions = ruleset.get("conditions")
+    if not isinstance(conditions, dict):
+        return False
+    ref_name = conditions.get("ref_name", {})
     if not isinstance(ref_name, dict):
         return False
     include = ref_name.get("include")
@@ -101,6 +107,14 @@ def _ruleset_rule_requires_test(rule: Any) -> bool:
     return False
 
 
+def _rule_list_proofs(rules: Any) -> tuple[bool, bool]:
+    if not isinstance(rules, list):
+        return False, False
+    requires_test = any(_ruleset_rule_requires_test(rule) for rule in rules)
+    has_merge_queue = any(isinstance(rule, dict) and rule.get("type") == "merge_queue" for rule in rules)
+    return requires_test, has_merge_queue
+
+
 def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
     if not isinstance(rulesets, list):
         return False, False
@@ -109,12 +123,45 @@ def _active_main_ruleset_proofs(rulesets: Any) -> tuple[bool, bool]:
     for ruleset in rulesets:
         if not isinstance(ruleset, dict) or not _ruleset_applies_to_main(ruleset):
             continue
-        rules = ruleset.get("rules")
-        if not isinstance(rules, list):
-            continue
-        requires_test = requires_test or any(_ruleset_rule_requires_test(rule) for rule in rules)
-        has_merge_queue = has_merge_queue or any(isinstance(rule, dict) and rule.get("type") == "merge_queue" for rule in rules)
+        ruleset_requires_test, ruleset_has_merge_queue = _rule_list_proofs(ruleset.get("rules"))
+        requires_test = requires_test or ruleset_requires_test
+        has_merge_queue = has_merge_queue or ruleset_has_merge_queue
     return requires_test, has_merge_queue
+
+
+def _ruleset_detail_path(ruleset: dict[str, Any]) -> str | None:
+    ruleset_id = ruleset.get("id")
+    if isinstance(ruleset_id, int) or (isinstance(ruleset_id, str) and ruleset_id.isdigit()):
+        return f"repos/{SPACE_REPO}/rulesets/{ruleset_id}"
+    links = ruleset.get("_links")
+    self_link = links.get("self") if isinstance(links, dict) else None
+    href = self_link.get("href") if isinstance(self_link, dict) else self_link
+    if not isinstance(href, str):
+        return None
+    api_prefix = "https://api.github.com/"
+    path = href.removeprefix(api_prefix)
+    allowed_prefix = f"repos/{SPACE_REPO}/rulesets/"
+    if path.startswith(allowed_prefix):
+        return path
+    return None
+
+
+def _ruleset_detail_paths(rulesets: Any) -> list[str]:
+    if not isinstance(rulesets, list):
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for ruleset in rulesets:
+        if not isinstance(ruleset, dict):
+            continue
+        path = _ruleset_detail_path(ruleset)
+        if path is None or path in seen:
+            continue
+        paths.append(path)
+        seen.add(path)
+        if len(paths) >= MAX_RULESET_DETAIL_FETCHES:
+            break
+    return paths
 
 
 def pr_auth_status(repo_root: Path) -> dict[str, object]:
@@ -145,14 +192,40 @@ def check_main_protection(repo_root: Path) -> dict[str, object]:
 
     classic_has_test = _classic_protection_requires_test(protection)
     ruleset_has_test, ruleset_has_queue = _active_main_ruleset_proofs(rulesets)
-    has_test = classic_has_test or ruleset_has_test
-    has_queue = ruleset_has_queue
+    effective_rules = None
+    if not (classic_has_test or ruleset_has_test) or not ruleset_has_queue:
+        try:
+            effective_rules_result = run_command(["gh", "api", f"repos/{SPACE_REPO}/rules/branches/main"], repo, check=False)
+            effective_rules = _json_loads(effective_rules_result.stdout) if effective_rules_result.returncode == 0 else None
+        except (CapabilityError, json.JSONDecodeError):
+            effective_rules = None
+    effective_has_test, effective_has_queue = _rule_list_proofs(effective_rules)
+    detailed_rulesets: list[dict[str, Any]] = []
+    if not (classic_has_test or ruleset_has_test or effective_has_test) or not (ruleset_has_queue or effective_has_queue):
+        for path in _ruleset_detail_paths(rulesets):
+            try:
+                detail_result = run_command(["gh", "api", path], repo, check=False)
+                detail = _json_loads(detail_result.stdout) if detail_result.returncode == 0 else None
+            except (CapabilityError, json.JSONDecodeError):
+                detail = None
+            if isinstance(detail, dict):
+                detailed_rulesets.append(detail)
+    detailed_has_test, detailed_has_queue = _active_main_ruleset_proofs(detailed_rulesets)
+    has_test = classic_has_test or ruleset_has_test or effective_has_test or detailed_has_test
+    has_queue = ruleset_has_queue or effective_has_queue or detailed_has_queue
     evidence = {
         "classic_protection_available": protection is not None,
         "rulesets_available": rulesets is not None,
+        "effective_branch_rules_available": effective_rules is not None,
+        "detailed_rulesets_available": len(detailed_rulesets) > 0,
+        "detailed_rulesets_checked": len(detailed_rulesets),
         "classic_required_test_check_proven": classic_has_test,
         "active_main_ruleset_required_test_check_proven": ruleset_has_test,
         "active_main_ruleset_merge_queue_proven": ruleset_has_queue,
+        "effective_branch_rules_required_test_check_proven": effective_has_test,
+        "effective_branch_rules_merge_queue_proven": effective_has_queue,
+        "detailed_rulesets_required_test_check_proven": detailed_has_test,
+        "detailed_rulesets_merge_queue_proven": detailed_has_queue,
         "required_test_check_proven": has_test,
         "merge_queue_proven": has_queue,
     }
@@ -257,15 +330,45 @@ def view_current_pr(repo_root: Path) -> dict[str, object]:
 
 def _failed_rollup(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
-        conclusion = check.get("conclusion") if isinstance(check, dict) else None
-        if conclusion in {"failure", "failed", "cancelled", "timed_out", "action_required"}:
+        conclusion = _normalized_rollup_value(check.get("conclusion")) if isinstance(check, dict) else None
+        if conclusion in FAILED_ROLLUP_CONCLUSIONS:
             return True
     return False
 
 
-def _has_missing_rollup_conclusion(data: dict[str, Any]) -> bool:
+def _normalized_rollup_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.strip().lower().replace("_", "-")
+
+
+def _rollup_check_is_completed(check: dict[str, Any]) -> bool:
+    return _normalized_rollup_value(check.get("status")) == "completed"
+
+
+def _rollup_check_is_check_run(check: dict[str, Any]) -> bool:
+    return check.get("__typename") == "CheckRun"
+
+
+def _rollup_conclusion_is_blank_or_missing(check: dict[str, Any]) -> bool:
+    conclusion = check.get("conclusion")
+    return conclusion is None or (isinstance(conclusion, str) and conclusion.strip() == "")
+
+
+def _rollup_has_explicit_pending_state(check: dict[str, Any]) -> bool:
+    return (
+        _normalized_rollup_value(check.get("status")) in PENDING_ROLLUP_STATUSES
+        or _normalized_rollup_value(check.get("state")) in PENDING_ROLLUP_STATUSES
+    )
+
+
+def _has_pending_rollup_check(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
-        if isinstance(check, dict) and check.get("conclusion") is None:
+        if not isinstance(check, dict):
+            continue
+        if _rollup_has_explicit_pending_state(check):
+            return True
+        if _rollup_check_is_check_run(check) and _rollup_conclusion_is_blank_or_missing(check) and not _rollup_check_is_completed(check):
             return True
     return False
 
@@ -296,7 +399,7 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
-            if normalized_merge_state not in NONTERMINAL_STATES and not _has_missing_rollup_conclusion(data):
+            if normalized_merge_state not in NONTERMINAL_STATES and not _has_pending_rollup_check(data):
                 return human_decision(action, "Pull request merge queue state is ambiguous or unsupported", {"branch": safe, "merge_state": merge_state, "attempts": attempts})
             if time.monotonic() >= deadline:
                 return human_decision(action, "Timed out waiting for merge queue to merge pull request", {"branch": safe, "attempts": attempts})
