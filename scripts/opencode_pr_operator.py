@@ -16,6 +16,7 @@ from opencode_capabilities import CapabilityError, ensure_space_repo, failure, h
 SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
 NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
+PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
 DEFAULT_POLL_INTERVAL_SECONDS = 100
 MAX_RULESET_DETAIL_FETCHES = 5
@@ -328,15 +329,34 @@ def view_current_pr(repo_root: Path) -> dict[str, object]:
 
 def _failed_rollup(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
-        conclusion = check.get("conclusion") if isinstance(check, dict) else None
+        conclusion = _normalized_rollup_value(check.get("conclusion")) if isinstance(check, dict) else None
         if conclusion in {"failure", "failed", "cancelled", "timed_out", "action_required"}:
             return True
     return False
 
 
-def _has_missing_rollup_conclusion(data: dict[str, Any]) -> bool:
+def _normalized_rollup_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    return value.strip().lower().replace("_", "-")
+
+
+def _rollup_check_is_completed(check: dict[str, Any]) -> bool:
+    return _normalized_rollup_value(check.get("status")) == "completed"
+
+
+def _rollup_conclusion_is_blank_or_missing(check: dict[str, Any]) -> bool:
+    conclusion = check.get("conclusion")
+    return conclusion is None or (isinstance(conclusion, str) and conclusion.strip() == "")
+
+
+def _has_pending_rollup_check(data: dict[str, Any]) -> bool:
     for check in data.get("statusCheckRollup") or []:
-        if isinstance(check, dict) and check.get("conclusion") is None:
+        if not isinstance(check, dict):
+            continue
+        if _normalized_rollup_value(check.get("status")) in PENDING_ROLLUP_STATUSES:
+            return True
+        if _rollup_conclusion_is_blank_or_missing(check) and not _rollup_check_is_completed(check):
             return True
     return False
 
@@ -367,7 +387,7 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
-            if normalized_merge_state not in NONTERMINAL_STATES and not _has_missing_rollup_conclusion(data):
+            if normalized_merge_state not in NONTERMINAL_STATES and not _has_pending_rollup_check(data):
                 return human_decision(action, "Pull request merge queue state is ambiguous or unsupported", {"branch": safe, "merge_state": merge_state, "attempts": attempts})
             if time.monotonic() >= deadline:
                 return human_decision(action, "Timed out waiting for merge queue to merge pull request", {"branch": safe, "attempts": attempts})

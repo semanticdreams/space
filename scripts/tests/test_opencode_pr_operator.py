@@ -364,6 +364,47 @@ def test_poll_merge_queue_treats_pending_states_as_nonterminal_until_merged(monk
     assert result["evidence"]["merged_at"] == "2026-08-06T00:00:00Z"
 
 
+def test_poll_merge_queue_treats_blocked_in_progress_check_with_blank_conclusion_as_nonterminal(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    states = iter(
+        [
+            {
+                "mergedAt": None,
+                "state": "OPEN",
+                "mergeStateStatus": "BLOCKED",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "workflowName": "test",
+                        "status": "IN_PROGRESS",
+                        "conclusion": "",
+                        "completedAt": "0001-01-01T00:00:00Z",
+                    }
+                ],
+            },
+            {"mergedAt": "2026-08-07T00:00:00Z", "state": "MERGED", "mergeStateStatus": "clean", "statusCheckRollup": []},
+        ]
+    )
+    calls = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        calls.append(list(args))
+        return command_result(list(args), json.dumps(next(states)))
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+    monkeypatch.setattr(pr_operator.time, "sleep", lambda seconds: None)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 60, 1)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["merged_at"] == "2026-08-07T00:00:00Z"
+    assert len(calls) == 2
+
+
 def test_poll_merge_queue_requires_merged_at_for_success(monkeypatch, trusted_repo: Path) -> None:
     runner = GhRunner(
         {
