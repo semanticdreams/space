@@ -23,6 +23,16 @@
         out)
       value))
 
+(fn active-theme []
+  (and app app.themes app.themes.get-active-theme
+       (app.themes.get-active-theme)))
+
+(fn graph-background-state []
+  (local theme (active-theme))
+  (local background (or (and theme theme.graph theme.graph.background)
+                        (glm.vec4 0.095 0.105 0.13 1)))
+  {:color [background.x background.y background.z]})
+
 (fn graph-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
   (local graph-view-root (fs.join-path (fs.join-path lua-root "graph") "view"))
@@ -325,12 +335,15 @@
 (fn activate-activity! [ctx]
   ;; Ensure and activate empty Scene slot before Canvas hooks
   ;; so Graph does not inherit Sandbox content/environment/interaction.
-  (let [runtime (assert app.active-world-runtime
-                         "Graph activity activation requires app.active-world-runtime")
-        scene (assert runtime.scene
-                       "Graph activity activation requires runtime.scene")]
-    (scene:ensure-activity-slot "graph")
-    (scene:activate-activity-slot "graph"))
+  (local runtime (assert app.active-world-runtime
+                         "Graph activity activation requires app.active-world-runtime"))
+  (local scene (assert runtime.scene
+                       "Graph activity activation requires runtime.scene"))
+  (scene:ensure-activity-slot "graph")
+  (local scene-state (scene:capture-activity-slot-state "graph"))
+  (set scene-state.background (graph-background-state))
+  (scene:restore-activity-slot-state "graph" scene-state)
+  (scene:activate-activity-slot "graph")
   (ctx:defer-cleanup! drop-graph-view!)
   (local graph-view (activate-graph-view!))
   (disconnect-map-switch-handlers!)
