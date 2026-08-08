@@ -4262,6 +4262,10 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn make-capturing-line-factory [state] (fn [_ctx opts] (table.insert state.colors opts.color) {:update (fn [_self _start _end] true) :drop (fn [_self] true)}))
+(fn edge-color-approx [actual expected] (and actual expected (< (math.abs (- actual.x expected.x)) 1e-4) (< (math.abs (- actual.y expected.y)) 1e-4) (< (math.abs (- actual.z expected.z)) 1e-4) (< (math.abs (- actual.w expected.w)) 1e-4)))
+(fn graph-edge-default-color-uses-layout-theme-color [] (local theme-color (glm.vec4 0.12 0.34 0.56 1)) (local explicit-color (glm.vec4 0.9 0.8 0.7 1)) (local state {:colors []}) (local positions {}) (local layout (GraphViewLayout {:ctx (make-ctx) :edge-color theme-color :make-line (make-capturing-line-factory state) :get-position (fn [_self node] (. positions node))})) (local a (Graph.GraphNode {:key "edge-theme-a"})) (local b (Graph.GraphNode {:key "edge-theme-b"})) (set (. positions a) (glm.vec3 0 0 0)) (set (. positions b) (glm.vec3 10 0 0)) (layout:add-node a (glm.vec3 0 0 0)) (layout:add-node b (glm.vec3 10 0 0)) (layout:add-edge (Graph.GraphEdge {:source a :target b})) (assert (edge-color-approx (. state.colors 1) theme-color) "Default graph edge should use the layout/theme edge color") (layout:add-edge (Graph.GraphEdge {:source a :target b :color explicit-color})) (assert (edge-color-approx (. state.colors 2) explicit-color) "Explicit graph edge color should override the layout/theme edge color"))
+
 (table.insert tests {:name "GraphView capture-state emits selected_node_keys" :fn graph-view-capture-restore-selected-node-keys})
 (table.insert tests {:name "GraphView capture/restore preserves node selection" :fn graph-view-capture-restore-preserves-selection})
 (table.insert tests {:name "GraphView node-view panel capture includes graph-map-id" :fn graph-node-view-capture-includes-graph-map-id})
@@ -4280,13 +4284,9 @@
                      :fn graph-view-reveal-node-selects-focuses-and-centers})
 (table.insert tests {:name "GraphView open-node reveals and opens"
                      :fn graph-view-open-node-reveals-and-opens})
+(table.insert tests {:name "Graph edge default color uses layout theme color" :fn graph-edge-default-color-uses-layout-theme-color})
 
-(local main
-  (fn []
-    (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))})
-    (runner.run-tests {:name "graph-view"
-                       :tests tests})))
+(local main (fn [] (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))}) (runner.run-tests {:name "graph-view" :tests tests})))
 
-{:name "graph-view"
- :tests tests
- :main main}
+
+{:name "graph-view" :tests tests :main main}
