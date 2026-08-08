@@ -136,6 +136,24 @@ def test_audit_opencode_home_passes_for_expected_project_symlinks_and_allowed_su
     assert result["evidence"]["local_support_files"] == ["package-lock.json", "package.json", "plugins/rtk.ts"]
 
 
+def test_audit_opencode_home_accepts_home_symlinks_to_trusted_main_checkout_from_worktree_repo(tmp_path: Path) -> None:
+    active_repo = init_git_repo(tmp_path / "active-worktree")
+    main_checkout = init_git_repo(tmp_path / "main-checkout")
+    create_repo_opencode_tree(active_repo)
+    create_repo_opencode_tree(main_checkout)
+    home = make_opencode_home(tmp_path, main_checkout)
+
+    result = capabilities.audit_opencode_home(active_repo, home)
+
+    assert result["status"] == "pass"
+    assert result["action"] == "audit_opencode_home"
+    assert result["evidence"]["checked_symlinks"] == {
+        "opencode.json": str((main_checkout / ".opencode" / "opencode.json").resolve()),
+        "agents": str((main_checkout / ".opencode" / "agents").resolve()),
+        "skills": str((main_checkout / ".opencode" / "skills").resolve()),
+    }
+
+
 def test_audit_opencode_home_fails_closed_when_expected_symlink_resolves_outside_repo(tmp_path: Path) -> None:
     repo = init_git_repo(tmp_path / "space")
     create_repo_opencode_tree(repo)
@@ -150,6 +168,24 @@ def test_audit_opencode_home_fails_closed_when_expected_symlink_resolves_outside
     assert result["status"] == "human_decision_required"
     assert result["action"] == "audit_opencode_home"
     assert "agents" in json.dumps(result)
+
+
+def test_audit_opencode_home_fails_closed_when_trusted_checkout_symlink_points_to_wrong_opencode_entry(tmp_path: Path) -> None:
+    active_repo = init_git_repo(tmp_path / "active-worktree")
+    main_checkout = init_git_repo(tmp_path / "main-checkout")
+    create_repo_opencode_tree(active_repo)
+    create_repo_opencode_tree(main_checkout)
+    wrong_target = main_checkout / ".opencode" / "plugins"
+    home = make_opencode_home(tmp_path, main_checkout)
+    (home / "agents").unlink()
+    (home / "agents").symlink_to(wrong_target, target_is_directory=True)
+
+    result = capabilities.audit_opencode_home(active_repo, home)
+
+    serialized = json.dumps(result)
+    assert result["status"] == "human_decision_required"
+    assert "agents" in serialized
+    assert "symlink_target_not_project_opencode_entry" in serialized
 
 
 def test_audit_opencode_home_fails_closed_for_symlinked_package_support_file(tmp_path: Path) -> None:

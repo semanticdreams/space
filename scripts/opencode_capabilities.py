@@ -129,6 +129,30 @@ def _safe_relative(path: Path, root: Path) -> str:
         return "<outside-repo>"
 
 
+def _git_top_level_containing(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    cwd = path if path.is_dir() else path.parent
+    result = run_command(["git", "rev-parse", "--show-toplevel"], cwd, check=False)
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
+def _trusted_opencode_entry_target(resolved: Path, relative_name: str) -> Path | None:
+    top_level = _git_top_level_containing(resolved)
+    if top_level is None:
+        return None
+    try:
+        trusted_repo = ensure_space_repo(top_level)
+    except CapabilityError:
+        return None
+    expected_target = (trusted_repo / ".opencode" / relative_name).resolve()
+    if resolved != expected_target:
+        return None
+    return expected_target
+
+
 def _is_sensitive_entry(path: Path) -> bool:
     name = path.name.lower()
     lowered = str(path).lower()
@@ -149,37 +173,36 @@ def audit_opencode_home(repo_root: Path, opencode_home: Path) -> dict[str, objec
         return failure(action, error.message, {"code": error.code, "details": error.details})
 
     home = opencode_home.expanduser().resolve()
-    repo_opencode = repo / ".opencode"
-    expected = {
-        "opencode.json": repo_opencode / "opencode.json",
-        "agents": repo_opencode / "agents",
-        "skills": repo_opencode / "skills",
-    }
+    expected = ("opencode.json", "agents", "skills")
 
     if not home.exists() or not home.is_dir():
         return human_decision(action, "OpenCode home is missing or is not a directory", {"opencode_home": str(home)})
 
     checked: dict[str, str] = {}
     unsafe: list[dict[str, str]] = []
-    for relative_name, repo_target in expected.items():
+    for relative_name in expected:
         entry = home / relative_name
         if not entry.is_symlink():
             unsafe.append({"entry": relative_name, "reason": "expected_symlink_missing"})
             continue
         resolved = entry.resolve()
-        if not _is_inside(resolved, repo):
-            unsafe.append({"entry": relative_name, "reason": "symlink_target_outside_repo"})
-            continue
-        if resolved != repo_target.resolve():
+        trusted_target = _trusted_opencode_entry_target(resolved, relative_name)
+        if trusted_target is None:
+            top_level = _git_top_level_containing(resolved)
+            if top_level is None:
+                unsafe.append({"entry": relative_name, "reason": "symlink_target_outside_repo"})
+                continue
             unsafe.append(
                 {
                     "entry": relative_name,
                     "reason": "symlink_target_not_project_opencode_entry",
-                    "target": _safe_relative(resolved, repo),
+                    "target": _safe_relative(resolved, top_level),
                 }
             )
             continue
-        checked[relative_name] = _safe_relative(resolved, repo)
+        checked[relative_name] = (
+            _safe_relative(trusted_target, repo) if _is_inside(trusted_target, repo) else str(trusted_target)
+        )
 
     allowed_support = {"package.json", "package-lock.json", "plugins/rtk.ts"}
     local_support: list[str] = []
