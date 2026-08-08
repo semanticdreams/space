@@ -29,6 +29,10 @@
                   :pressure (and payload payload.pressure)}
                  "[pointer] dispatch"))
 
+(fn canvas-alt-movable-drag? [payload]
+  (and (= app.active-interaction-surface :canvas)
+       (Runtime.alt-held? payload)))
+
 (local InputMouseButtonDownDispatch
   {:mouse-button-down (fn [ctx payload]
                         (trace-pointer "mouse-button-down" payload)
@@ -60,11 +64,12 @@
    (fn [ctx payload]
      (local app ((. Common :app-from) ctx))
      (local mouse-down (and app.movables app.movables.on-mouse-button-down))
-     (when (and (not ((. ctx :event-consumed?)))
-                mouse-down
+      (when (and (not ((. ctx :event-consumed?)))
+                 mouse-down
                  (= payload.button SDL_BUTTON_LEFT)
-                 (Runtime.activity-object-drag-mode))
-       (mouse-down app.movables payload)))})
+                 (or (Runtime.activity-object-drag-mode)
+                     (canvas-alt-movable-drag? payload)))
+        (mouse-down app.movables payload)))})
 
 (local SelectionMouseButtonDown
   {:mouse-button-down
