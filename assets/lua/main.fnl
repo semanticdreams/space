@@ -799,7 +799,7 @@
 (set app.active-world-hud-contrib nil)
 (set app.active-world-hud-overlay nil)
 (set app.active-world-runtime nil)
-(set app.workspace-shell-changed (Signal))
+(do (set app.workspace-shell-changed (Signal)) (set app.activity-dock-changed (Signal)))
 
 (fn app.next-frame [cb]
   (assert cb "app.next-frame requires callback")
@@ -1358,7 +1358,7 @@
 (local installable-bind-active-world-runtime bind-active-world-runtime)
 
 (fn install-app-shell! []
-  (set app.workspace-shell-changed (or app.workspace-shell-changed (Signal)))
+  (do (set app.workspace-shell-changed (or app.workspace-shell-changed (Signal))) (set app.activity-dock-changed (or app.activity-dock-changed (Signal))))
   (set app.set-viewport installable-set-viewport)
   (set app.create-default-projection installable-create-default-projection)
   (set app.reset-projection installable-reset-projection)

@@ -3,7 +3,7 @@
 (local Main (require :main))
 (local Activities (require :activities))
 (local Graph (require :graph/init))
-(local GraphMap (require :graph/map))
+(local GraphMap (require :graph/map)) (local GraphMapManager (require :graph/map-manager))
 (local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
@@ -800,25 +800,25 @@
 
 (fn install-theme-switch-rail-check! []
   (local ActivityDockView (require :activity-dock-view))
-  (local state {:checked? false})
+  (local state {:checked? false :dock nil})
   (set app.apply-active-world-hud-contrib
        (fn []
          (local dock ((ActivityDockView {}) (make-theme-switch-hud-ctx)))
+         (set state.dock dock)
          (local graph-button (find-theme-switch-rail-button))
          (local expected-colors (app.themes:get-button-colors :secondary))
          (assert graph-button "graph theme switch HUD rebuild should recreate the graph rail button")
          (assert (theme-switch-color-approx graph-button.foreground-color expected-colors.foreground)
-                 "graph theme switch HUD rebuild should use the new theme rail button foreground")
+                  "graph theme switch HUD rebuild should use the new theme rail button foreground")
          (set state.checked? true)
-         (dock:drop)
          true))
   state)
 
 (fn with-graph-theme-switch-env [f]
   (local app-keys [:active-world-runtime :canvas :graph-map :graph-view :activity-registry
-                   :activities-changed :active-activity-id :active-interaction-surface
+                   :activities-changed :activity-dock-changed :active-activity-id :active-interaction-surface
                    :preferred-interaction-surface :active-pointer-controls :scene-interactive?
-                   :canvas-interactive? :canvas-surface-interactive? :canvas-visible?
+                   :canvas-interactive? :canvas-surface-interactive? :canvas-visible? :graph-map-manager
                    :canvas-controls :first-person-controls :viewport :themes :settings
                    :renderers :engine :apply-active-world-hud-contrib :mark-active-world-hud-dirty])
   (local app-snapshot (snapshot-app-fields app-keys))
@@ -830,6 +830,7 @@
   (set app.settings {:set-value (fn [_key _value _opts] true) :save (fn [] true)})
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.mark-active-world-hud-dirty (fn [] true))
+  (Main.install-app-shell!)
   (local rail-state (install-theme-switch-rail-check!))
   (local data-dir "/tmp/space/tests/graph-activity-theme-switch")
   (when (fs.exists data-dir) (fs.remove-all data-dir))
@@ -847,22 +848,26 @@
   (local graph (Graph {:with-start false}))
   (local node {:key "theme-node:one" :label "Theme Node"})
   (graph:register-key-loader "theme-node" (fn [key] (assert (= key node.key) "Unexpected theme test key") node))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
   (local loaded-node (graph-map:load-by-key node.key))
   (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context))
                                           :enabled? true}))
-  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map
+  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector :movables app.movables
                   :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph-map graph-map)
+  (set app.graph-map-manager graph-map-manager)
   (local (ok result) (pcall f loaded-node rail-state))
   (pcall GraphActivityUnit.unload-graph-activity!)
+  (when (and rail-state.dock rail-state.dock.drop)
+    (rail-state.dock:drop))
   (when runtime.graph-view (runtime.graph-view:drop) (set runtime.graph-view nil))
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -901,6 +906,13 @@
               "graph activity theme switch should rebuild the retained graph view so cached theme colors are refreshed")
       (assert rail-state.checked?
               "graph activity theme switch should cover real HUD rail foreground rebuild")
+      (assert app.activity-left-dock-builder
+              "graph activity theme switch should restore the graph sidebar dock builder")
+      (assert rail-state.dock
+              "graph activity theme switch test should keep the rebuilt activity dock")
+      (rail-state.dock:update)
+      (assert (rail-state.dock:active-dock-entity)
+              "activity dock should rebuild to include graph sidebar after graph theme switch")
       true)))
 
 (table.insert tests {:name "Graph activity theme switch rebuilds label colors"
