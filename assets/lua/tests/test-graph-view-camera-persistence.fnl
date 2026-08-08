@@ -48,10 +48,43 @@
   (assert (string.find (tostring err) "camera" 1 true)
           "camera error should name camera field"))
 
+(fn malformed-false-camera-state-fails-loudly []
+  (local dir (reset-dir))
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (fs.create-dirs (fs.join-path dir "graph" "maps" "main"))
+  (JsonUtils.write-json! persistence.metadata-path {:camera false})
+  (local (ok err) (pcall (fn [] (GraphViewPersistence {:data-dir dir :map-id "main"}))))
+  (assert (not ok) "false camera metadata should fail")
+  (assert (string.find (tostring err) "GraphViewPersistence" 1 true)
+          "false camera error should name GraphViewPersistence")
+  (assert (string.find (tostring err) "main" 1 true)
+          "false camera error should name map id")
+  (assert (string.find (tostring err) "camera" 1 true)
+          "false camera error should name camera field"))
+
+(fn malformed-false-camera-rotation-fails-loudly []
+  (local dir (reset-dir))
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (fs.create-dirs (fs.join-path dir "graph" "maps" "main"))
+  (JsonUtils.write-json! persistence.metadata-path {:camera {:position [1 2 3]
+                                                     :rotation false}})
+  (local (ok err) (pcall (fn [] (GraphViewPersistence {:data-dir dir :map-id "main"}))))
+  (assert (not ok) "false camera rotation metadata should fail")
+  (assert (string.find (tostring err) "GraphViewPersistence" 1 true)
+          "false rotation error should name GraphViewPersistence")
+  (assert (string.find (tostring err) "main" 1 true)
+          "false rotation error should name map id")
+  (assert (string.find (tostring err) "camera" 1 true)
+          "false rotation error should name camera field"))
+
 (table.insert tests {:name "camera state saves loads and preserves metadata"
                      :fn camera-state-saves-loads-and-preserves-metadata})
 (table.insert tests {:name "malformed camera state fails loudly"
                      :fn malformed-camera-state-fails-loudly})
+(table.insert tests {:name "malformed false camera state fails loudly"
+                     :fn malformed-false-camera-state-fails-loudly})
+(table.insert tests {:name "malformed false camera rotation fails loudly"
+                     :fn malformed-false-camera-rotation-fails-loudly})
 
 (local main
   (fn []

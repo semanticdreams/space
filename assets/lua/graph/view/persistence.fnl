@@ -41,16 +41,16 @@
             (assert (finite-number? (rawget value idx))
                     (string.format "GraphViewPersistence %s for %s camera has invalid value at %d" label map-id idx))))
     (fn assert-valid-camera-state [value context]
-        (when value
+        (when (not (= value nil))
             (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" context map-id))
             (assert-number-array value.position 3 (.. context " position"))
-            (when value.rotation
+            (when (not (= value.rotation nil))
                 (assert-number-array value.rotation 4 (.. context " rotation")))))
     (fn clone-camera-state [value]
-        (when value
+        (when (not (= value nil))
             (assert-valid-camera-state value "camera")
             (local cloned {:position [(rawget value.position 1) (rawget value.position 2) (rawget value.position 3)]})
-            (when value.rotation
+            (when (not (= value.rotation nil))
                 (set cloned.rotation [(rawget value.rotation 1) (rawget value.rotation 2) (rawget value.rotation 3) (rawget value.rotation 4)]))
             cloned))
 
@@ -90,7 +90,7 @@
              (local sizes (or decoded.sizes {}))
               (local panels (or decoded.panels []))
               (local extra-panels (or decoded.extra_panels []))
-              (local camera (and decoded decoded.camera))
+              (local camera (rawget decoded "camera"))
               (each [key value (pairs positions)]
                   (assert-valid-position key value "GraphViewPersistence load"))
              (each [key value (pairs presentations)]
