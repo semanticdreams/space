@@ -29,6 +29,7 @@
 (local PathUtils (require :tests.path-utils))
 (local TestSupport (require :tests/test-support))
 (local StateSystemBindings (require :state-system-bindings))
+(local PointerHandlers (require :state-handlers/pointer))
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
 
@@ -3197,6 +3198,67 @@
             (set app.scene-interactive? original-scene-interactive?)
             (set app.canvas-interactive? original-canvas-interactive?))))
 
+(fn graph-pointer-drag-test-ray [pointer]
+    (local x (if (and pointer pointer.x) pointer.x 0))
+    {:origin (glm.vec3 x 0 10)
+     :direction (glm.vec3 0 0 -1)})
+
+(fn graph-pointer-target-screen-pos-ray [_self pointer]
+    (graph-pointer-drag-test-ray pointer))
+
+(fn graph-nodes-start-alt-drag-through-pointer-handler-on-canvas-body [_root]
+    (local ctx (make-ctx))
+    (local intersector (Intersectables))
+    (local movables (Movables {:intersectables intersector}))
+    (local original-movables app.movables)
+    (local original-ray app.screen-pos-ray)
+    (local original-camera app.camera)
+    (local original-active-surface app.active-interaction-surface)
+    (local original-scene-interactive? app.scene-interactive?)
+    (local original-canvas-interactive? app.canvas-interactive?)
+    (local original-drag-mode-provider app.activity-object-drag-mode-provider)
+    (set app.movables movables)
+    (set app.screen-pos-ray graph-pointer-drag-test-ray)
+    (set app.camera nil)
+    (set app.active-interaction-surface :canvas)
+    (set app.scene-interactive? false)
+    (set app.canvas-interactive? true)
+    (set app.activity-object-drag-mode-provider nil)
+    (local graph (Graph {:with-start false}))
+    (local pointer-target {:interaction-surface :canvas
+                           :screen-pos-ray graph-pointer-target-screen-pos-ray})
+    (local view (GraphView {:graph-map graph
+                            :ctx ctx
+                            :movables movables
+                            :pointer-target pointer-target}))
+    (local node (Graph.GraphNode {:key "canvas-pointer-drag"}))
+    (graph:add-node node {:position (glm.vec3 0 0 0)})
+    (local handler-ctx {:app app
+                        :event-consumed? (fn [] false)})
+    ((. PointerHandlers.MovableMouseButtonDown :mouse-button-down)
+     handler-ctx
+     {:button 1 :x 0 :y 0 :mod 256})
+    (movables:on-mouse-motion {:x 20 :y 0 :mod 256})
+    (assert (movables:drag-active?)
+            "Canvas Alt-left down routed through pointer handler should start graph drag without provider")
+    (movables:on-mouse-button-up {:button 1 :x 20 :y 0 :mod 256})
+    (local position (view:get-position node))
+    (assert position "GraphView should expose node position after pointer-routed drag")
+    (assert (> position.x 1.5) "Pointer-routed Canvas Alt drag should move graph node")
+    (view:drop)
+    (graph:drop)
+    (movables:drop)
+    (set app.movables original-movables)
+    (set app.screen-pos-ray original-ray)
+    (set app.camera original-camera)
+    (set app.active-interaction-surface original-active-surface)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.activity-object-drag-mode-provider original-drag-mode-provider))
+
+(fn graph-nodes-start-alt-drag-through-pointer-handler-on-canvas []
+    (with-temp-data-dir graph-nodes-start-alt-drag-through-pointer-handler-on-canvas-body))
+
 (fn graph-drag-respects-force-layout-position []
     (with-temp-data-dir
         (fn [_root]
@@ -3676,6 +3738,8 @@
 (table.insert tests {:name "GraphView expanded card registers as resizable" :fn graph-expanded-card-registers-as-resizable})
 (table.insert tests {:name "Graph movables register and clean up drag targets" :fn graph-movables-module-registers-and-cleans-up})
 (table.insert tests {:name "Graph nodes register with movables for dragging" :fn graph-nodes-are-movable})
+(table.insert tests {:name "Graph nodes start Canvas Alt drag through pointer handler"
+                     :fn graph-nodes-start-alt-drag-through-pointer-handler-on-canvas})
 (table.insert tests {:name "Graph drag respects latest force layout position" :fn graph-drag-respects-force-layout-position})
 (table.insert tests {:name "GraphViewPersistence rejects unsafe map-id" :fn graph-persistence-rejects-unsafe-map-id})
 (table.insert tests {:name "GraphViewPersistence saves and restores positions" :fn graph-persistence-class-saves-and-restores})
