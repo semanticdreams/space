@@ -754,6 +754,159 @@
 (table.insert tests {:name "Graph and drawing do not share canvas camera"
                      :fn graph-and-drawing-do-not-share-canvas-camera})
 
+(fn theme-switch-color-approx [a b]
+  (local MathUtils (require :math-utils))
+  (and a b
+       (MathUtils.approx a.x b.x)
+       (MathUtils.approx a.y b.y)
+       (MathUtils.approx a.z b.z)
+       (MathUtils.approx a.w b.w)))
+
+(fn make-theme-switch-themes []
+  (local Themes (require :themes))
+  (local themes (Themes))
+  (themes.add-theme :dark (require :dark-theme))
+  (themes.add-theme :light (require :light-theme))
+  (themes.set-theme :dark)
+  themes)
+
+(fn make-theme-switch-icons-stub []
+  (local font (make-font-stub))
+  {:font font
+   :get (fn [_self name]
+          (assert (= name "account_tree") (.. "Missing icon " name))
+          4242)
+   :resolve (fn [self name]
+              {:type :font
+               :codepoint (self:get name)
+               :font self.font})})
+
+(fn find-theme-switch-rail-button []
+  (local clickables (assert app.clickables "graph activity theme switch test requires app.clickables"))
+  (var found nil)
+  (each [_ object (ipairs (or clickables.left-click-objects []))]
+    (when (and (not found) (= object.icon "account_tree"))
+      (set found object)))
+  found)
+
+(fn make-theme-switch-hud-ctx []
+  (local BuildContext (require :build-context))
+  (BuildContext {:theme (and app.themes app.themes.get-active-theme (app.themes:get-active-theme))
+                 :clickables (assert app.clickables "test requires app.clickables")
+                 :hoverables (assert app.hoverables "test requires app.hoverables")
+                 :system-cursors app.system-cursors
+                 :icons (make-theme-switch-icons-stub)
+                 :states app.states}))
+
+(fn install-theme-switch-rail-check! []
+  (local ActivityDockView (require :activity-dock-view))
+  (local state {:checked? false})
+  (set app.apply-active-world-hud-contrib
+       (fn []
+         (local dock ((ActivityDockView {}) (make-theme-switch-hud-ctx)))
+         (local graph-button (find-theme-switch-rail-button))
+         (local expected-colors (app.themes:get-button-colors :secondary))
+         (assert graph-button "graph theme switch HUD rebuild should recreate the graph rail button")
+         (assert (theme-switch-color-approx graph-button.foreground-color expected-colors.foreground)
+                 "graph theme switch HUD rebuild should use the new theme rail button foreground")
+         (set state.checked? true)
+         (dock:drop)
+         true))
+  state)
+
+(fn with-graph-theme-switch-env [f]
+  (local app-keys [:active-world-runtime :canvas :graph-map :graph-view :activity-registry
+                   :activities-changed :active-activity-id :active-interaction-surface
+                   :preferred-interaction-surface :active-pointer-controls :scene-interactive?
+                   :canvas-interactive? :canvas-surface-interactive? :canvas-visible?
+                   :canvas-controls :first-person-controls :viewport :themes :settings
+                   :renderers :engine :apply-active-world-hud-contrib :mark-active-world-hud-dirty])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.engine (or app.engine {}))
+  (set app.themes (make-theme-switch-themes))
+  (set app.settings {:set-value (fn [_key _value _opts] true) :save (fn [] true)})
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.mark-active-world-hud-dirty (fn [] true))
+  (local rail-state (install-theme-switch-rail-check!))
+  (local data-dir "/tmp/space/tests/graph-activity-theme-switch")
+  (when (fs.exists data-dir) (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "graph-activity-theme-switch-test"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local node {:key "theme-node:one" :label "Theme Node"})
+  (graph:register-key-loader "theme-node" (fn [key] (assert (= key node.key) "Unexpected theme test key") node))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local loaded-node (graph-map:load-by-key node.key))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context))
+                                          :enabled? true}))
+  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map
+                  :object-selector object-selector :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph-map graph-map)
+  (local (ok result) (pcall f loaded-node rail-state))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (when runtime.graph-view (runtime.graph-view:drop) (set runtime.graph-view nil))
+  (object-selector:drop)
+  (graph-map:drop)
+  (graph:drop)
+  (scene:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (when (fs.exists data-dir) (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(fn graph-activity-theme-switch-rebuilds-label-colors []
+  (with-graph-theme-switch-env
+    (fn [loaded-node rail-state]
+      (local ThemeActions (require :theme-actions))
+      (GraphActivityUnit.load-graph-activity!)
+      (Activities.activate-activity "graph")
+      (local dark-theme (app.themes:get-active-theme))
+      (local dark-color dark-theme.graph.label-color)
+      (app.graph-view.labels:update app.graph-view.points [loaded-node] {:force? true})
+      (local dark-span (. app.graph-view.labels.labels loaded-node))
+      (assert dark-span "graph activity should create a visible graph label before theme switch")
+      (assert (theme-switch-color-approx dark-span.style.color dark-color)
+              "graph label should start with the active dark theme color")
+      (local old-view app.graph-view)
+      (ThemeActions.apply-theme :light)
+      (assert app.graph-view "theme switch should leave graph mode active with a graph view")
+      (local light-theme (app.themes:get-active-theme))
+      (local light-color light-theme.graph.label-color)
+      (app.graph-view.labels:update app.graph-view.points [loaded-node] {:force? true})
+      (local light-span (. app.graph-view.labels.labels loaded-node))
+      (assert light-span "graph activity should recreate a visible graph label after theme switch")
+      (assert (theme-switch-color-approx light-span.style.color light-color)
+              "graph label should use the new light theme color after ThemeActions.apply-theme")
+      (assert (not (theme-switch-color-approx light-span.style.color dark-color))
+              "graph label must not retain the stale dark theme color after ThemeActions.apply-theme")
+      (assert (not (= app.graph-view old-view))
+              "graph activity theme switch should rebuild the retained graph view so cached theme colors are refreshed")
+      (assert rail-state.checked?
+              "graph activity theme switch should cover real HUD rail foreground rebuild")
+      true)))
+
+(table.insert tests {:name "Graph activity theme switch rebuilds label colors"
+                      :fn graph-activity-theme-switch-rebuilds-label-colors})
+
+
 (local main
   (fn []
     (local runner (require :tests/runner))

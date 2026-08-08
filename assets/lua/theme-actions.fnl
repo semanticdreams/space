@@ -64,7 +64,8 @@
         (canvas-ctx:set-theme active-theme)))
   (if (and app.scene app.scene.apply-active-theme-to-contexts)
       (app.scene:apply-active-theme-to-contexts)
-      (let [scene-ctx (and app.scene app.scene.build-context)]
+      (do
+        (local scene-ctx (and app.scene app.scene.build-context))
         (when (and scene-ctx scene-ctx.set-theme)
           (scene-ctx:set-theme active-theme))))
   (local hud-ctx (and app.hud app.hud.build-context))
@@ -81,6 +82,9 @@
     (Activities.with-workspace-shell-change-suppressed
       (fn []
         (Activities.deactivate-active-activity))))
+  (when graph-active?
+    (local GraphActivityUnit (require :graph-activity-unit))
+    (GraphActivityUnit.drop-graph-view!))
   (local (ok err)
     (pcall
       (fn []
@@ -94,8 +98,9 @@
               (app.hud:build-default)))
         (when (and app.renderers app.renderers.apply-theme)
           (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
-        (let [manager (and app.scene app.scene.active-containment-manager
-                           (app.scene:active-containment-manager))]
+        (do
+          (local manager (and app.scene app.scene.active-containment-manager
+                              (app.scene:active-containment-manager)))
           (when manager
             (manager:refresh-visualization {})))
         (reapply-active-world-skybox theme-name)
