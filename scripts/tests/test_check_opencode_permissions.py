@@ -96,9 +96,91 @@ def violation_codes(repo: Path) -> set[str]:
     return {violation.code for violation in checker.check_repo(repo)}
 
 
+def permission_entries(repo: Path, agent_name: str, parent: str) -> dict[str, str]:
+    checker = load_checker()
+    path = repo / ".opencode" / "agents" / f"{agent_name}.md"
+    _, raw = checker._frontmatter(path.read_text(encoding="utf-8"))
+    assert raw is not None
+    return dict(checker._mapping_entries(raw, parent))
+
+
 def test_current_repo_policy_passes_after_task_3_changes():
     checker = load_checker()
     assert checker.check_repo(REPO_ROOT) == []
+
+
+def test_check_repo_fails_when_permission_frontmatter_contains_ask(tmp_path: Path):
+    repo = make_repo(tmp_path, permission_text='  bash:\n    "*": ask\n')
+
+    checker = load_checker()
+    issues = checker.check_repo(repo)
+
+    assert any(
+        violation.code == "no-ask-permission"
+        and '.opencode/agents/example-agent.md' in violation.message
+        and 'bash "*": ask' in violation.message
+        for violation in issues
+    )
+
+
+def test_supervisor_allows_routine_bash_by_default_and_denies_capability_commands():
+    bash_entries = permission_entries(REPO_ROOT, "supervisor", "bash")
+
+    assert bash_entries["*"] == "allow"
+    assert bash_entries["git push*"] == "deny"
+    assert bash_entries["git fetch*"] == "deny"
+    assert bash_entries["git pull*"] == "deny"
+    assert bash_entries["git merge*"] == "deny"
+    assert bash_entries["git -C * fetch*"] == "deny"
+    assert bash_entries["git -C * pull*"] == "deny"
+    assert bash_entries["git -C * merge*"] == "deny"
+    assert bash_entries["git -C * push*"] == "deny"
+    assert bash_entries["gh *"] == "deny"
+
+
+def test_supervisor_denies_destructive_branch_bash_operations():
+    bash_entries = permission_entries(REPO_ROOT, "supervisor", "bash")
+
+    for pattern in [
+        "git branch -d*",
+        "git branch -D*",
+        "git branch --delete*",
+        "git switch -C*",
+        "git checkout -B*",
+        "git -C * branch -d*",
+        "git -C * branch -D*",
+        "git -C * branch --delete*",
+        "git -C * switch -C*",
+        "git -C * checkout -B*",
+    ]:
+        assert bash_entries[pattern] == "deny"
+
+
+def test_supervisor_denies_secret_env_reads_and_broad_external_directories():
+    read_entries = permission_entries(REPO_ROOT, "supervisor", "read")
+    external_entries = permission_entries(REPO_ROOT, "supervisor", "external_directory")
+
+    assert read_entries["*.env"] == "deny"
+    assert read_entries["*.env.*"] == "deny"
+    assert read_entries["*.env.example"] == "allow"
+    assert external_entries["*"] == "deny"
+
+
+@pytest.mark.parametrize(
+    "permission_text",
+    [
+        "  bash: ask # trailing comment\n",
+        "  bash: 'ask'\n",
+        "  bash: \"ask\" # trailing comment\n",
+        "  bash:\n    \"*\": ask # trailing comment\n",
+        "  bash:\n    \"*\": 'ask'\n",
+        "  bash:\n    \"*\": \"ask\" # trailing comment\n",
+    ],
+)
+def test_check_repo_fails_when_permission_frontmatter_contains_ask_variants(tmp_path: Path, permission_text: str):
+    repo = make_repo(tmp_path, permission_text=permission_text)
+
+    assert "no-ask-permission" in violation_codes(repo)
 
 
 def test_cli_emits_pass_or_fail_json(tmp_path: Path):

@@ -8,8 +8,8 @@ steps: 30
 permission:
   read:
     "*": allow
-    "*.env": ask
-    "*.env.*": ask
+    "*.env": deny
+    "*.env.*": deny
     "*.env.example": allow
   glob: allow
   grep: allow

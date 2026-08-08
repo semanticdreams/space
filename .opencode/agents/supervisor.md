@@ -8,8 +8,8 @@ steps: 500
 permission:
   read:
     "*": allow
-    "*.env": ask
-    "*.env.*": ask
+    "*.env": deny
+    "*.env.*": deny
     "*.env.example": allow
   glob: allow
   grep: allow
@@ -21,49 +21,64 @@ permission:
     ".superpowers/sdd/**": allow
   task: allow
   external_directory:
-    "*": ask
+    "*": deny
     "~/space/**": allow
   webfetch: deny
   websearch: deny
   question: deny
   bash:
-    "*": ask
-    "git push*": ask
-    "git push origin opencode/workflow-debug/*": allow
+    "*": allow
+    "git push*": deny
+    "git push origin opencode/workflow-debug/*": deny
     "git push origin main": deny
-    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
-    "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": allow
-    "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow
+    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": deny
+    "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": deny
+    "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": deny
     "gh *": deny
-    "gh auth status*": allow
-    "gh repo view --json owner,name --jq *": allow
-    "gh api repos/*/*/branches/main/protection*": allow
-    "gh api repos/*/*/rules/branches/main*": allow
-    "gh pr view automation/daily-devlog/????-??-??": allow
-    "gh pr view automation/weekly-agent-workflow/????-W??*": allow
-    "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": allow
-    "gh pr checks * --watch": allow
+    "gh auth status*": deny
+    "gh repo view --json owner,name --jq *": deny
+    "gh api repos/*/*/branches/main/protection*": deny
+    "gh api repos/*/*/rules/branches/main*": deny
+    "gh pr view automation/daily-devlog/????-??-??": deny
+    "gh pr view automation/weekly-agent-workflow/????-W??*": deny
+    "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": deny
+    "gh pr checks * --watch": deny
     "git push origin --delete *": deny
     "git push *--force*": deny
     "git push * -f*": deny
     "git push -f *": deny
-    "git pull*": ask
-    "git pull --ff-only origin main": allow
-    "git merge*": ask
-    "git merge --squash opencode/workflow-debug/*": allow
+    "git fetch*": deny
+    "git pull*": deny
+    "git pull --ff-only origin main": deny
+    "git merge*": deny
+    "git merge --squash opencode/workflow-debug/*": deny
+    "git fetch origin main*": deny
+    "git branch -d*": deny
+    "git branch -D*": deny
+    "git branch --delete*": deny
+    "git switch -C*": deny
+    "git checkout -B*": deny
     "git reset*": deny
     "git clean*": deny
     "git restore*": deny
     "git checkout --*": deny
     "git commit --amend*": deny
     "git rebase*": deny
-    "git -C * push*": ask
+    "git -C * push*": deny
     "git -C * reset*": deny
     "git -C * clean*": deny
     "git -C * restore*": deny
     "git -C * checkout --*": deny
     "git -C * commit --amend*": deny
     "git -C * rebase*": deny
+    "git -C * fetch*": deny
+    "git -C * pull*": deny
+    "git -C * merge*": deny
+    "git -C * branch -d*": deny
+    "git -C * branch -D*": deny
+    "git -C * branch --delete*": deny
+    "git -C * switch -C*": deny
+    "git -C * checkout -B*": deny
     "rm -rf*": deny
     "rm -fr*": deny
     "rm -r*": deny
@@ -273,25 +288,27 @@ unchanged.
 ## External Directory Access
 
 When a task requires reading, globbing, or grepping files outside the
-project workspace (anything under the `external_directory` permission),
-you must request access from the human partner before proceeding. Follow
-these rules:
+project workspace (anything under the `external_directory` permission), use
+only configured allowed scopes. Do not ask for one-off permission prompts.
+Follow these rules:
 
-- **Narrowest useful scope.** Request the smallest directory subtree that
-  covers what the task genuinely needs (e.g., `/etc/nginx/` not `/etc`;
-  `~/.config/app/` not `~/.config`).
+- **Stay within configured scopes.** Use the smallest already-allowed directory
+  subtree that covers what the task genuinely needs. If the needed scope is not
+  configured, stop and report `HUMAN_DECISION_REQUIRED` with the exact missing
+  scope and task rationale instead of prompting.
 
-- **No generic roots.** Never request `/`, the entire home directory
-  (`~` or `$HOME`), or other broad system prefixes whose contents are
+- **No generic roots.** Never browse `/`, the entire home directory (`~` or
+  `$HOME`), or other broad system prefixes whose contents are
   irrelevant to the task.
 
-- **Batch by task scope, not by file.** When a task clearly needs to
-  inspect multiple files under a known directory or subtree, request
-  the subtree once rather than asking permission per-file.
+- **Route capability boundaries.** Dispatch `config-auditor` for OpenCode home
+  config verification, and dispatch another suitable capability subagent when
+  one exists for the requested action. If no capability path exists, report a
+  non-prompt blocker rather than trying to widen access.
 
-- **Explain the scope.** In your ask prompt, state what directory subtree
-  you need and why — link it to the active task or plan step so the
-  human partner can make an informed decision.
+- **Protect sensitive data.** Do not browse raw credentials, auth files, tokens,
+  secrets, private logs, or databases unless an explicit configured capability
+  wrapper requires and bounds that access.
 
 ## Core Workflow
 
