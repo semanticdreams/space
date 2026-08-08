@@ -411,6 +411,53 @@ def test_poll_merge_queue_waits_for_open_clean_mergeable_pr_with_successful_chec
     assert len(calls) == 2
 
 
+def test_poll_merge_queue_waits_for_open_unknown_mergeability_with_successful_checks(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    states = iter(
+        [
+            {
+                "mergedAt": None,
+                "state": "OPEN",
+                "mergeStateStatus": "UNKNOWN",
+                "mergeable": "UNKNOWN",
+                "statusCheckRollup": [
+                    {
+                        "__typename": "CheckRun",
+                        "name": "test",
+                        "workflowName": "test",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                    }
+                ],
+            },
+            {
+                "mergedAt": "2026-08-08T01:00:00Z",
+                "state": "MERGED",
+                "mergeStateStatus": "CLEAN",
+                "mergeable": "MERGEABLE",
+                "statusCheckRollup": [],
+            },
+        ]
+    )
+    calls = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        calls.append(list(args))
+        return command_result(list(args), json.dumps(next(states)))
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+    monkeypatch.setattr(pr_operator.time, "sleep", lambda seconds: None)
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 60, 1)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["merged_at"] == "2026-08-08T01:00:00Z"
+    assert len(calls) == 2
+
+
 def test_poll_merge_queue_rejects_conflict_even_with_pending_rollup(
     monkeypatch,
     trusted_repo: Path,
