@@ -219,12 +219,14 @@ def _check_unsafe_text(path: Path, repo_root: Path, raw: str) -> list[PolicyViol
 def _check_no_ask_actions(path: Path, repo_root: Path, raw: str) -> list[PolicyViolation]:
     violations: list[PolicyViolation] = []
     parent = None
+    ask_value = r"(?:ask|[\"']ask[\"'])"
+    suffix = r"(?:\s*(?:#.*)?)$"
     for line in raw.splitlines():
         parent_match = re.match(r"^\s{2}([A-Za-z0-9_-]+):\s*$", line)
         if parent_match:
             parent = parent_match.group(1)
             continue
-        scalar_match = re.match(r"^\s{2}([A-Za-z0-9_-]+):\s*ask\s*$", line)
+        scalar_match = re.match(rf"^\s{{2}}([A-Za-z0-9_-]+):\s*{ask_value}{suffix}", line)
         if scalar_match:
             key = scalar_match.group(1)
             violations.append(
@@ -232,7 +234,7 @@ def _check_no_ask_actions(path: Path, repo_root: Path, raw: str) -> list[PolicyV
             )
             parent = None
             continue
-        mapping_match = re.match(r"^\s{4}([\"']?)(.*?)\1:\s*ask\s*$", line)
+        mapping_match = re.match(rf"^\s{{4}}([\"']?)(.*?)\1:\s*{ask_value}{suffix}", line)
         if mapping_match:
             key = mapping_match.group(2)
             prefix = f"{parent} " if parent else ""

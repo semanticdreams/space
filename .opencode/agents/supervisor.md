@@ -47,11 +47,17 @@ permission:
     "git push *--force*": deny
     "git push * -f*": deny
     "git push -f *": deny
+    "git fetch*": deny
     "git pull*": deny
     "git pull --ff-only origin main": deny
     "git merge*": deny
     "git merge --squash opencode/workflow-debug/*": deny
     "git fetch origin main*": deny
+    "git branch -d*": deny
+    "git branch -D*": deny
+    "git branch --delete*": deny
+    "git switch -C*": deny
+    "git checkout -B*": deny
     "git reset*": deny
     "git clean*": deny
     "git restore*": deny
@@ -65,6 +71,14 @@ permission:
     "git -C * checkout --*": deny
     "git -C * commit --amend*": deny
     "git -C * rebase*": deny
+    "git -C * fetch*": deny
+    "git -C * pull*": deny
+    "git -C * merge*": deny
+    "git -C * branch -d*": deny
+    "git -C * branch -D*": deny
+    "git -C * branch --delete*": deny
+    "git -C * switch -C*": deny
+    "git -C * checkout -B*": deny
     "rm -rf*": deny
     "rm -fr*": deny
     "rm -r*": deny
@@ -274,25 +288,27 @@ unchanged.
 ## External Directory Access
 
 When a task requires reading, globbing, or grepping files outside the
-project workspace (anything under the `external_directory` permission),
-you must request access from the human partner before proceeding. Follow
-these rules:
+project workspace (anything under the `external_directory` permission), use
+only configured allowed scopes. Do not ask for one-off permission prompts.
+Follow these rules:
 
-- **Narrowest useful scope.** Request the smallest directory subtree that
-  covers what the task genuinely needs (e.g., `/etc/nginx/` not `/etc`;
-  `~/.config/app/` not `~/.config`).
+- **Stay within configured scopes.** Use the smallest already-allowed directory
+  subtree that covers what the task genuinely needs. If the needed scope is not
+  configured, stop and report `HUMAN_DECISION_REQUIRED` with the exact missing
+  scope and task rationale instead of prompting.
 
-- **No generic roots.** Never request `/`, the entire home directory
-  (`~` or `$HOME`), or other broad system prefixes whose contents are
+- **No generic roots.** Never browse `/`, the entire home directory (`~` or
+  `$HOME`), or other broad system prefixes whose contents are
   irrelevant to the task.
 
-- **Batch by task scope, not by file.** When a task clearly needs to
-  inspect multiple files under a known directory or subtree, request
-  the subtree once rather than asking permission per-file.
+- **Route capability boundaries.** Dispatch `config-auditor` for OpenCode home
+  config verification, and dispatch another suitable capability subagent when
+  one exists for the requested action. If no capability path exists, report a
+  non-prompt blocker rather than trying to widen access.
 
-- **Explain the scope.** In your ask prompt, state what directory subtree
-  you need and why — link it to the active task or plan step so the
-  human partner can make an informed decision.
+- **Protect sensitive data.** Do not browse raw credentials, auth files, tokens,
+  secrets, private logs, or databases unless an explicit configured capability
+  wrapper requires and bounds that access.
 
 ## Core Workflow
 
