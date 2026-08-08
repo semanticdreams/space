@@ -15,7 +15,7 @@ from opencode_capabilities import CapabilityError, ensure_space_repo, failure, h
 
 SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
-NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
+NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", "clean", "unknown", None}
 PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}
 FAILED_ROLLUP_CONCLUSIONS = {"failure", "failed", "cancelled", "timed-out", "action-required"}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
@@ -399,6 +399,14 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
+            mergeable = data.get("mergeable")
+            normalized_mergeable = mergeable.lower() if isinstance(mergeable, str) else mergeable
+            if normalized_merge_state == "dirty" or normalized_mergeable == "conflicting":
+                return human_decision(
+                    action,
+                    "Pull request has merge conflicts or is not mergeable",
+                    {"branch": safe, "merge_state": merge_state, "mergeable": mergeable, "attempts": attempts},
+                )
             if normalized_merge_state not in NONTERMINAL_STATES and not _has_pending_rollup_check(data):
                 return human_decision(action, "Pull request merge queue state is ambiguous or unsupported", {"branch": safe, "merge_state": merge_state, "attempts": attempts})
             if time.monotonic() >= deadline:
