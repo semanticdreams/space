@@ -216,6 +216,32 @@ def _check_unsafe_text(path: Path, repo_root: Path, raw: str) -> list[PolicyViol
     return violations
 
 
+def _check_no_ask_actions(path: Path, repo_root: Path, raw: str) -> list[PolicyViolation]:
+    violations: list[PolicyViolation] = []
+    parent = None
+    for line in raw.splitlines():
+        parent_match = re.match(r"^\s{2}([A-Za-z0-9_-]+):\s*$", line)
+        if parent_match:
+            parent = parent_match.group(1)
+            continue
+        scalar_match = re.match(r"^\s{2}([A-Za-z0-9_-]+):\s*ask\s*$", line)
+        if scalar_match:
+            key = scalar_match.group(1)
+            violations.append(
+                _violation(path, repo_root, "no-ask-permission", f"{_rel(repo_root, path)} permission must not use ask actions: {key}: ask")
+            )
+            parent = None
+            continue
+        mapping_match = re.match(r"^\s{4}([\"']?)(.*?)\1:\s*ask\s*$", line)
+        if mapping_match:
+            key = mapping_match.group(2)
+            prefix = f"{parent} " if parent else ""
+            violations.append(
+                _violation(path, repo_root, "no-ask-permission", f'{_rel(repo_root, path)} permission must not use ask actions: {prefix}"{key}": ask')
+            )
+    return violations
+
+
 def _check_role_boundaries(path: Path, repo_root: Path, name: str, raw: str) -> list[PolicyViolation]:
     violations: list[PolicyViolation] = []
     if name == "reviewer":
@@ -272,6 +298,7 @@ def _check_agents(repo_root: Path) -> list[PolicyViolation]:
         missing = REQUIRED_AGENT_KEYS - set(keys)
         if missing:
             violations.append(_violation(path, repo_root, "agent-frontmatter", f"agent frontmatter missing: {', '.join(sorted(missing))}"))
+        violations.extend(_check_no_ask_actions(path, repo_root, raw))
         violations.extend(_check_unsafe_text(path, repo_root, raw))
         violations.extend(_check_role_boundaries(path, repo_root, name, raw))
         violations.extend(_check_capability_boundary(path, repo_root, name, raw))

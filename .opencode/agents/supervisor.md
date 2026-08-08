@@ -8,8 +8,8 @@ steps: 500
 permission:
   read:
     "*": allow
-    "*.env": ask
-    "*.env.*": ask
+    "*.env": deny
+    "*.env.*": deny
     "*.env.example": allow
   glob: allow
   grep: allow
@@ -21,43 +21,44 @@ permission:
     ".superpowers/sdd/**": allow
   task: allow
   external_directory:
-    "*": ask
+    "*": deny
     "~/space/**": allow
   webfetch: deny
   websearch: deny
   question: deny
   bash:
-    "*": ask
-    "git push*": ask
-    "git push origin opencode/workflow-debug/*": allow
+    "*": allow
+    "git push*": deny
+    "git push origin opencode/workflow-debug/*": deny
     "git push origin main": deny
-    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
-    "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": allow
-    "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": allow
+    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": deny
+    "git push origin HEAD:refs/heads/automation/weekly-agent-workflow/????-W??": deny
+    "git push origin HEAD:refs/heads/opencode/workflow-debug-pr/*": deny
     "gh *": deny
-    "gh auth status*": allow
-    "gh repo view --json owner,name --jq *": allow
-    "gh api repos/*/*/branches/main/protection*": allow
-    "gh api repos/*/*/rules/branches/main*": allow
-    "gh pr view automation/daily-devlog/????-??-??": allow
-    "gh pr view automation/weekly-agent-workflow/????-W??*": allow
-    "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": allow
-    "gh pr checks * --watch": allow
+    "gh auth status*": deny
+    "gh repo view --json owner,name --jq *": deny
+    "gh api repos/*/*/branches/main/protection*": deny
+    "gh api repos/*/*/rules/branches/main*": deny
+    "gh pr view automation/daily-devlog/????-??-??": deny
+    "gh pr view automation/weekly-agent-workflow/????-W??*": deny
+    "gh pr checks automation/weekly-agent-workflow/????-W?? --watch": deny
+    "gh pr checks * --watch": deny
     "git push origin --delete *": deny
     "git push *--force*": deny
     "git push * -f*": deny
     "git push -f *": deny
-    "git pull*": ask
-    "git pull --ff-only origin main": allow
-    "git merge*": ask
-    "git merge --squash opencode/workflow-debug/*": allow
+    "git pull*": deny
+    "git pull --ff-only origin main": deny
+    "git merge*": deny
+    "git merge --squash opencode/workflow-debug/*": deny
+    "git fetch origin main*": deny
     "git reset*": deny
     "git clean*": deny
     "git restore*": deny
     "git checkout --*": deny
     "git commit --amend*": deny
     "git rebase*": deny
-    "git -C * push*": ask
+    "git -C * push*": deny
     "git -C * reset*": deny
     "git -C * clean*": deny
     "git -C * restore*": deny
