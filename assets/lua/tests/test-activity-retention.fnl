@@ -3,7 +3,7 @@
 (local Main (require :main))
 (local Activities (require :activities))
 (local Graph (require :graph/init))
-(local GraphMap (require :graph/map))
+(local GraphMapManager (require :graph/map-manager))
 (local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
@@ -115,7 +115,7 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -126,7 +126,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
@@ -136,7 +136,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -214,7 +214,7 @@
   (pcall GraphActivityUnit.unload-graph-activity!)
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (pcall BoardActivityUnit.unload-board-activity!)
-  (object-selector:drop)
+  (object-selector:drop) (graph-map-manager:drop)
   (graph-map:drop)
   (graph:drop)
   (scene:drop)
@@ -770,14 +770,14 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context)) :enabled? true}))
   (local controller (DrawingController {:data_dir data-dir}))
   (controller:add-layer "vector")
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
@@ -788,7 +788,7 @@
   (set app.canvas canvas)
   (set app.scene scene)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -893,7 +893,7 @@
   (pcall GraphActivityUnit.unload-graph-activity!)
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (pcall BoardActivityUnit.unload-board-activity!)
-  (object-selector:drop)
+  (object-selector:drop) (graph-map-manager:drop)
   (graph-map:drop)
   (graph:drop)
   (scene:drop)
