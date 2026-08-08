@@ -411,6 +411,46 @@ def test_poll_merge_queue_waits_for_open_clean_mergeable_pr_with_successful_chec
     assert len(calls) == 2
 
 
+def test_poll_merge_queue_rejects_conflict_even_with_pending_rollup(
+    monkeypatch,
+    trusted_repo: Path,
+) -> None:
+    calls = []
+
+    def fake_run(args, cwd: Path, check: bool = True):
+        del cwd, check
+        calls.append(list(args))
+        return command_result(
+            list(args),
+            json.dumps(
+                {
+                    "mergedAt": None,
+                    "state": "OPEN",
+                    "mergeStateStatus": "DIRTY",
+                    "mergeable": "CONFLICTING",
+                    "statusCheckRollup": [
+                        {
+                            "__typename": "CheckRun",
+                            "name": "test",
+                            "workflowName": "test",
+                            "status": "IN_PROGRESS",
+                            "conclusion": None,
+                        }
+                    ],
+                }
+            ),
+        )
+
+    monkeypatch.setattr(pr_operator, "run_command", fake_run)
+    monkeypatch.setattr(pr_operator.time, "sleep", lambda seconds: pytest.fail("conflict should not wait"))
+
+    result = pr_operator.poll_merge_queue(trusted_repo, "feature/opencode-capabilities", 0, 1)
+
+    assert result["status"] == "human_decision_required"
+    assert result["message"] == "Pull request has merge conflicts or is not mergeable"
+    assert len(calls) == 1
+
+
 def test_poll_merge_queue_treats_blocked_in_progress_check_with_blank_conclusion_as_nonterminal(
     monkeypatch,
     trusted_repo: Path,

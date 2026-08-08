@@ -399,6 +399,14 @@ def poll_merge_queue(repo_root: Path, branch: str, timeout_seconds: int, interva
                 return human_decision(action, "Required merge queue check failed", {"branch": safe, "attempts": attempts})
             merge_state = data.get("mergeStateStatus")
             normalized_merge_state = merge_state.lower() if isinstance(merge_state, str) else merge_state
+            mergeable = data.get("mergeable")
+            normalized_mergeable = mergeable.lower() if isinstance(mergeable, str) else mergeable
+            if normalized_merge_state == "dirty" or normalized_mergeable == "conflicting":
+                return human_decision(
+                    action,
+                    "Pull request has merge conflicts or is not mergeable",
+                    {"branch": safe, "merge_state": merge_state, "mergeable": mergeable, "attempts": attempts},
+                )
             if normalized_merge_state not in NONTERMINAL_STATES and not _has_pending_rollup_check(data):
                 return human_decision(action, "Pull request merge queue state is ambiguous or unsupported", {"branch": safe, "merge_state": merge_state, "attempts": attempts})
             if time.monotonic() >= deadline:
