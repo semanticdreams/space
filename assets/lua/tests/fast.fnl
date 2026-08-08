@@ -64,6 +64,7 @@
     :tests.test-aligned
     :tests.test-cuboid
     :tests.test-main-events
+    :tests.test-pointer-routing
     :tests.test-states
       :tests.test-activity-presentation
       :tests.test-activity-camera-state
