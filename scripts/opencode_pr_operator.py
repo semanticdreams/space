@@ -15,7 +15,7 @@ from opencode_capabilities import CapabilityError, ensure_space_repo, failure, h
 
 SPACE_REPO = "semanticdreams/space2"
 PR_VIEW_FIELDS = "state,mergedAt,mergeStateStatus,mergeable,autoMergeRequest,statusCheckRollup,headRefName,headRefOid,url"
-NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", None}
+NONTERMINAL_STATES = {"queued", "waiting", "pending", "in_progress", "in-progress", "expected", "clean", None}
 PENDING_ROLLUP_STATUSES = {"queued", "pending", "in-progress", "expected"}
 FAILED_ROLLUP_CONCLUSIONS = {"failure", "failed", "cancelled", "timed-out", "action-required"}
 DEFAULT_POLL_TIMEOUT_SECONDS = 7200
