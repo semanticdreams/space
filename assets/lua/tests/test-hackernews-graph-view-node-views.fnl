@@ -264,10 +264,10 @@
           (assert (= (and (. state.open-views 1) (. (. state.open-views 1) :node-key))
                      "terrain:world-1:node-a"))
           (views:drop-all))}
- {:name "graph view node-views default canvas placement uses camera center"
-  :fn (fn []
-          (local ctx (make-ctx))
-          (local target (make-view-target ctx))
+  {:name "graph view node-views default canvas placement uses camera center"
+   :fn (fn []
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
           (set target.interaction-surface :canvas)
           (set target.default-panel-location "float")
           (set target.camera {:position (glm.vec3 12 34 99)})
@@ -282,12 +282,12 @@
           (local position (and target.last-add-panel-opts target.last-add-panel-opts.position))
           (assert position "expected canvas node view placement position")
           (assert (= position.x 12) "canvas placement should use camera x")
-          (assert (= position.y 34) "canvas placement should use camera y")
-          (assert (= position.z 0) "canvas placement should use graph plane z")
-          (views:drop-all))}
-  {:name "graph-node-view panel restorer module compiles and exports restore"
-   :fn (fn []
-           (local restorer (require :graph/view/node-view-panel-restorer))
+           (assert (= position.y 34) "canvas placement should use camera y")
+           (assert (= position.z 0) "canvas placement should use graph plane z")
+           (views:drop-all))}
+   {:name "graph-node-view panel restorer module compiles and exports restore"
+    :fn (fn []
+            (local restorer (require :graph/view/node-view-panel-restorer))
            (assert (= (type restorer) :table)
                    "node-view-panel-restorer should export a table")
            (assert (= (type restorer.restore) :function)
@@ -590,6 +590,50 @@
             (set app.panel-transfer saved-pt)
              (assert capture-ok
                      "capture-state should error when target is not a registered receiver"))}
+  {:name "graph view node-views default canvas placement uses bounded size"
+   :fn (fn []
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (set target.interaction-surface :canvas)
+           (set target.default-panel-location "float")
+           (set target.camera {:position (glm.vec3 12 34 99)})
+           (local node {:key "canvas-size-node"
+                        :label "Canvas Size Node"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _opts]
+                                      (make-simple-view)))})
+           (local views (GraphViewNodeViews {:ctx ctx :view-target target}))
+           (views:open node)
+           (local size (and target.last-add-panel-opts target.last-add-panel-opts.size))
+           (assert size "new canvas node view should pass bounded default size")
+           (assert (= size.x 32.0) "default canvas panel width should match inline card default")
+           (assert (= size.y 18.0) "default canvas panel height should match inline card default")
+           (assert (= size.z 0) "default canvas panel z size should be zero")
+           (views:drop-all))}
+  {:name "graph view node-views restored canvas placement preserves persisted size"
+   :fn (fn []
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (set target.interaction-surface :canvas)
+           (set target.default-panel-location "float")
+           (local node {:key "canvas-restored-size-node"
+                        :label "Canvas Restored Size Node"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _opts]
+                                      (make-simple-view)))})
+           (local graph {:id "main" :nodes {}})
+           (set (. graph.nodes node.key) node)
+           (set graph.lookup (fn [_self key] (. graph.nodes key)))
+           (local views (GraphViewNodeViews {:ctx ctx :graph-map graph :view-target target}))
+           (views:restore-state {:open-views [{:node-key node.key
+                                               :graph-map-id "main"
+                                               :panel {:layer "float"
+                                                       :size [44 22 0]}}]})
+           (local size (and target.last-add-panel-opts target.last-add-panel-opts.size))
+           (assert size "restored canvas node view should pass restored size")
+           (assert (= size.x 44) "restored canvas panel width should come from persisted size")
+           (assert (= size.y 22) "restored canvas panel height should come from persisted size")
+           (views:drop-all))}
   {:name "graph view node-views restore does not auto-load nodes into map"
    :fn (fn []
            (local ctx (make-ctx))

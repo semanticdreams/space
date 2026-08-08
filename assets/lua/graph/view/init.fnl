@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local appdirs (require :appdirs))
 (local Signal (require :signal))
-
+(local PanelBounds (require :graph/view/panel-bounds))
 (local Utils (require :graph/view/utils))
 (local MathUtils (require :math-utils))
 (local GraphViewEdge (require :graph/view/edge))
@@ -537,14 +537,15 @@
 
     (fn build-expanded-presentation [node position]
         (local saved-size (persistence:saved-size node))
+        (local bounds (PanelBounds.inline-card-bounds))
         (local card-builder (GraphNodePresentation.card-builder
-                             {:node node
-                              :position position
-                              :default-size (glm.vec3 32.0 18.0 0)
-                              :min-size (glm.vec3 24.0 12.0 0)
-                              :max-size (glm.vec3 52.0 34.0 0)
-                              :resize-max-size (glm.vec3 90.0 60.0 0)
-                              :requested-size saved-size
+                              {:node node
+                               :position position
+                               :default-size bounds.default-size
+                               :min-size bounds.min-size
+                               :max-size bounds.max-size
+                               :resize-max-size bounds.resize-max-size
+                               :requested-size saved-size
                               :depth-offset-index point-base-depth-offset
                               :selection-color resolved-selection-border-color
                               :focus-color resolved-focus-outline-color
@@ -562,16 +563,15 @@
                                              (focus-manager:clear-auto-focus))
                                          (when (not ok)
                                              (error err)))
-                              :on-menu (fn [event]
-                                         (local focus-node (. focus-nodes node))
-                                         (when focus-node
+                               :on-menu (fn [event]
+                                          (local focus-node (. focus-nodes node))
+                                          (when focus-node
                                              (focus-node:request-focus))
                                          (local manager (get-menu-manager))
-                                         (when manager
-                                             (manager:open {:actions (node-menu-actions node)
-                                                            :position (resolve-menu-position event)})))}))
+                                          (when manager
+                                              (manager:open {:actions (node-menu-actions node)
+                                                             :position (resolve-menu-position event)})))}))
         (card-builder ctx))
-
     (fn attach-presentation-events [node presentation]
         (set presentation.on-click
              (fn [_self _event]
