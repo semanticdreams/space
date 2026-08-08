@@ -6,7 +6,7 @@
 
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
 (local position-magnitude-threshold 1e6)
-
+(var finite-number? nil) (var assert-valid-position nil) (var assert-valid-size nil)
 (fn GraphViewPersistence [opts]
     (local options (or opts {}))
     (local data-dir options.data-dir)
@@ -22,55 +22,39 @@
     (local graph-data-dir (fs.join-path (fs.join-path data-dir "graph" "maps") map-id))
     (local metadata-path (fs.join-path graph-data-dir "metadata.json"))
     (var pending-save? false)
-    (var persisted {:positions {}
-                    :presentations {}
-                    :sizes {}
-                    :panels []
-                    :extra_panels []})
+     (var persisted {:positions {}
+                     :presentations {}
+                     :sizes {}
+                     :panels []
+                     :extra_panels []
+                     :camera nil})
     (var persisted-positions persisted.positions)
     (var persisted-presentations persisted.presentations)
     (var persisted-sizes persisted.sizes)
-    (var persisted-panels persisted.panels)
-    (var persisted-extra-panels [])
+     (var persisted-panels persisted.panels)
+     (var persisted-extra-panels [])
+     (var persisted-camera nil)
 
-    (fn finite-number? [value]
-        (and (= (type value) :number)
-             (= value value)
-             (not (= value math.huge))
-             (not (= value (- math.huge)))))
+    (fn assert-number-array [value count label]
+        (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" label map-id))
+        (for [idx 1 count]
+            (assert (finite-number? (rawget value idx))
+                    (string.format "GraphViewPersistence %s for %s camera has invalid value at %d" label map-id idx))))
+    (fn assert-valid-camera-state [value context]
+        (when value
+            (assert (= (type value) :table) (string.format "GraphViewPersistence %s for %s camera must be a table" context map-id))
+            (assert-number-array value.position 3 (.. context " position"))
+            (when value.rotation
+                (assert-number-array value.rotation 4 (.. context " rotation")))))
+    (fn clone-camera-state [value]
+        (when value
+            (assert-valid-camera-state value "camera")
+            (local cloned {:position [(rawget value.position 1) (rawget value.position 2) (rawget value.position 3)]})
+            (when value.rotation
+                (set cloned.rotation [(rawget value.rotation 1) (rawget value.rotation 2) (rawget value.rotation 3) (rawget value.rotation 4)]))
+            cloned))
 
-    (fn assert-valid-position [key value context]
-        (local prefix (or context "GraphViewPersistence position"))
-        (assert (= (type value) :table)
-                (string.format "%s for %s must be a table" prefix key))
-        (assert (finite-number? (rawget value 1))
-                (string.format "%s for %s has invalid x value" prefix key))
-        (assert (finite-number? (rawget value 2))
-                (string.format "%s for %s has invalid y value" prefix key))
-        (assert (finite-number? (rawget value 3))
-                (string.format "%s for %s has invalid z value" prefix key))
-        (local magnitude (glm.length (ensure-glm-vec3 value)))
-        (assert (<= magnitude position-magnitude-threshold)
-                (string.format "%s for %s magnitude %.3f exceeds threshold %.0f"
-                               prefix
-                               key
-                               magnitude
-                               position-magnitude-threshold)))
-
-    (fn assert-valid-size [key value context]
-        (local prefix (or context "GraphViewPersistence size"))
-        (assert (= (type value) :table)
-                (string.format "%s for %s must be a table" prefix key))
-        (assert (finite-number? (rawget value 1))
-                (string.format "%s for %s has invalid x value" prefix key))
-        (assert (finite-number? (rawget value 2))
-                (string.format "%s for %s has invalid y value" prefix key))
-        (assert (>= (rawget value 1) 0)
-                (string.format "%s for %s has negative x value" prefix key))
-        (assert (>= (rawget value 2) 0)
-                (string.format "%s for %s has negative y value" prefix key)))
-
-    (fn ensure-graph-data-dir []
+     (fn ensure-graph-data-dir []
         (local (ok result) (pcall fs.create-dirs graph-data-dir))
         (when (not ok)
             (error (string.format "GraphView failed to create %s: %s"
@@ -102,12 +86,13 @@
                                       source-path
                                       decoded)))
             (local positions (or decoded.positions {}))
-            (local presentations (or decoded.presentations {}))
-            (local sizes (or decoded.sizes {}))
-             (local panels (or decoded.panels []))
-             (local extra-panels (or decoded.extra_panels []))
-             (each [key value (pairs positions)]
-                 (assert-valid-position key value "GraphViewPersistence load"))
+             (local presentations (or decoded.presentations {}))
+             (local sizes (or decoded.sizes {}))
+              (local panels (or decoded.panels []))
+              (local extra-panels (or decoded.extra_panels []))
+              (local camera (and decoded decoded.camera))
+              (each [key value (pairs positions)]
+                  (assert-valid-position key value "GraphViewPersistence load"))
              (each [key value (pairs presentations)]
                  (assert (= value :expanded)
                          (string.format "GraphViewPersistence load presentation for %s must be :expanded" key)))
@@ -115,9 +100,10 @@
                  (assert-valid-size key value "GraphViewPersistence load"))
             (assert (= (type panels) :table)
                     "GraphViewPersistence load panels must be a table")
-            (assert (= (type extra-panels) :table)
-                    "GraphViewPersistence load extra_panels must be a table")
-              (local kept-panels [])
+             (assert (= (type extra-panels) :table)
+                     "GraphViewPersistence load extra_panels must be a table")
+             (assert-valid-camera-state camera "load")
+               (local kept-panels [])
               (local kept-extra-panels [])
               (var compacted? false)
               (each [_ panel (ipairs panels)]
@@ -138,18 +124,20 @@
                           (= panel.graph-map-id map-id))
                       (table.insert kept-extra-panels panel)
                       (set compacted? true)))
-              (set persisted {:positions positions
-                              :presentations presentations
-                              :sizes sizes
-                              :panels kept-panels
-                              :extra_panels kept-extra-panels})
+               (set persisted {:positions positions
+                               :presentations presentations
+                               :sizes sizes
+                               :panels kept-panels
+                               :extra_panels kept-extra-panels
+                               :camera (clone-camera-state camera)})
              (set persisted-positions positions)
              (set persisted-presentations presentations)
              (set persisted-sizes sizes)
-              (set persisted-panels kept-panels)
-              (set persisted-extra-panels kept-extra-panels)
-              (when compacted?
-                  (ensure-graph-data-dir)
+               (set persisted-panels kept-panels)
+               (set persisted-extra-panels kept-extra-panels)
+               (set persisted-camera persisted.camera)
+               (when compacted?
+                   (ensure-graph-data-dir)
                   (JsonUtils.write-json! metadata-path persisted))))
 
     (fn saved-position [_self node]
@@ -173,6 +161,9 @@
             (when stored
                 (assert-valid-size node.key stored "GraphViewPersistence saved-size")
                 (glm.vec3 (rawget stored 1) (rawget stored 2) 0))))
+
+    (fn saved-camera-state [_self]
+        (clone-camera-state persisted-camera))
 
     (fn capture-positions [_self points]
         (local positions {})
@@ -205,11 +196,12 @@
             (each [k v (pairs positions)]
                 (tset merged k v))
              (set persisted.positions merged)
-             (set persisted.presentations persisted-presentations)
-             (set persisted.sizes persisted-sizes)
-             (set persisted.panels persisted-panels)
-             (set persisted.extra_panels persisted-extra-panels)
-            (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
+              (set persisted.presentations persisted-presentations)
+              (set persisted.sizes persisted-sizes)
+              (set persisted.panels persisted-panels)
+              (set persisted.extra_panels persisted-extra-panels)
+             (set persisted.camera persisted-camera)
+             (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
             (when (not write-ok)
                 (error (string.format "GraphView failed to write %s: %s"
                                       metadata-path
@@ -243,6 +235,12 @@
             (tset persisted-sizes node.key nil))
         (set persisted.sizes persisted-sizes)
         (set pending-save? true))
+
+    (fn set-camera-state [_self camera-state]
+        (set persisted-camera (clone-camera-state camera-state))
+        (set persisted.camera persisted-camera)
+        (set pending-save? true)
+        true)
 
     (fn prune-node-key [_self key]
         (assert (= (type key) :string) "GraphViewPersistence prune-node-key requires a string key")
@@ -290,11 +288,13 @@
                  :schedule-save schedule-save
                  :saved-position saved-position
                  :saved-presentation saved-presentation
-                 :saved-size saved-size
-                 :saved-panels saved-panels
+                  :saved-size saved-size
+                  :saved-camera-state saved-camera-state
+                  :saved-panels saved-panels
                  :saved-extra-panels saved-extra-panels
-                  :set-size set-size
-                  :set-presentation set-presentation
+                   :set-size set-size
+                   :set-camera-state set-camera-state
+                   :set-presentation set-presentation
                   :prune-node-key prune-node-key
                   :set-panels set-panels
                  :set-extra-panels set-extra-panels
@@ -303,5 +303,45 @@
 
     (self:load)
     self)
+
+(set finite-number?
+     (fn [value]
+         (and (= (type value) :number)
+              (= value value)
+              (not (= value math.huge))
+              (not (= value (- math.huge))))))
+
+(set assert-valid-position
+     (fn [key value context]
+         (local prefix (or context "GraphViewPersistence position"))
+         (assert (= (type value) :table)
+                 (string.format "%s for %s must be a table" prefix key))
+         (assert (finite-number? (rawget value 1))
+                 (string.format "%s for %s has invalid x value" prefix key))
+         (assert (finite-number? (rawget value 2))
+                 (string.format "%s for %s has invalid y value" prefix key))
+         (assert (finite-number? (rawget value 3))
+                 (string.format "%s for %s has invalid z value" prefix key))
+         (local magnitude (glm.length (ensure-glm-vec3 value)))
+         (assert (<= magnitude position-magnitude-threshold)
+                 (string.format "%s for %s magnitude %.3f exceeds threshold %.0f"
+                                prefix
+                                key
+                                magnitude
+                                position-magnitude-threshold))))
+
+(set assert-valid-size
+     (fn [key value context]
+         (local prefix (or context "GraphViewPersistence size"))
+         (assert (= (type value) :table)
+                 (string.format "%s for %s must be a table" prefix key))
+         (assert (finite-number? (rawget value 1))
+                 (string.format "%s for %s has invalid x value" prefix key))
+         (assert (finite-number? (rawget value 2))
+                 (string.format "%s for %s has invalid y value" prefix key))
+         (assert (>= (rawget value 1) 0)
+                 (string.format "%s for %s has negative x value" prefix key))
+         (assert (>= (rawget value 2) 0)
+                 (string.format "%s for %s has negative y value" prefix key))))
 
 GraphViewPersistence
