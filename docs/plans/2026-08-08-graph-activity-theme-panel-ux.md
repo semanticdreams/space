@@ -370,7 +370,7 @@ In `assets/lua/tests/test-graph-view.fnl`, add this test near other expanded-car
   (assert card.header-title-text "Expanded card should expose the display title string")
   (assert (string.find card.header-title-text (string.char 46 46 46) 1 true)
           "Expanded card display title should truncate long labels with an ellipsis")
-  (assert (string.find long-label card.header-title-text 1 true)
+  (assert (= node.label long-label)
           "Truncation should not mutate the source node label")
   (assert (= (length card.header-bar.children) 5)
           "Expanded card header should have title, spacer, and three buttons")
