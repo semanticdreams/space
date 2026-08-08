@@ -754,6 +754,170 @@
 (table.insert tests {:name "Graph and drawing do not share canvas camera"
                      :fn graph-and-drawing-do-not-share-canvas-camera})
 
+(local board-graph-camera-app-keys
+  [:active-world-runtime
+   :canvas
+   :graph
+   :graph-map
+   :graph-map-manager
+   :graph-view
+   :board
+   :board-view
+   :activity-registry
+   :activities-changed
+   :active-activity-id
+   :active-interaction-surface
+   :preferred-interaction-surface
+   :active-pointer-controls
+   :scene-interactive?
+   :canvas-interactive?
+   :canvas-surface-interactive?
+   :canvas-visible?
+   :canvas-controls
+   :first-person-controls
+   :viewport
+   :themes
+   :renderers
+   :background-state
+   :lights
+   :engine])
+
+(fn make-board-graph-camera-renderers []
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  {:skybox {:get-state (fn [_] skybox-state)
+            :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+   :get-background-state (fn [_]
+                           (if app.background-state
+                               app.background-state
+                               BackgroundState.default-state))
+   :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+
+(fn make-board-graph-camera-lights []
+  (var mock-lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0}
+                          :directional []
+                          :point []
+                          :spot []})
+  {:get-state (fn [_] mock-lights-state)
+   :set-state (fn [_ state] (set mock-lights-state state))})
+
+(fn board-and-graph-activity-cameras-stay-isolated []
+  (local app-snapshot (snapshot-app-fields board-graph-camera-app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas-visible? false)
+  (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (Main.install-app-shell!)
+  (set app.themes {:get-active-theme test-theme})
+  (set app.renderers (make-board-graph-camera-renderers))
+  (set app.lights (make-board-graph-camera-lights))
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                             :removeRigidBody (fn [_phys _body])}})
+  (local data-dir "/tmp/space/tests/board-graph-camera-isolation")
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "board-graph-camera-isolation"}))
+  (local canvas (Canvas {:camera camera
+                         :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
+  (local object-selector (ObjectSelector {:ctx-provider (fn []
+                                                         (or (and canvas.active-activity-slot
+                                                                  canvas.active-activity-slot.ctx)
+                                                             canvas.build-context))
+                                           :enabled? true}))
+  (local runtime {:canvas canvas
+                  :scene scene
+                  :graph graph
+                  :graph-map graph-map
+                  :graph-map-manager graph-map-manager
+                  :object-selector object-selector
+                  :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir
+                  :board-state {:items [] :connectors []}})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph graph)
+  (set app.graph-map graph-map)
+  (set app.graph-map-manager graph-map-manager)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (BoardActivityUnit.load-board-activity!)
+
+        (Activities.activate-activity "graph")
+        (local graph-slot (canvas:activity-slot "graph"))
+        (local graph-camera (. runtime.activity-cameras.canvas "graph"))
+        (assert graph-camera "Graph activity should create a graph camera")
+        (assert (= graph-slot.camera graph-camera)
+                "Graph slot must use the graph activity camera")
+        (graph-camera:set-position (glm.vec3 10 20 100))
+
+        (Activities.activate-activity "board")
+        (local board-slot (canvas:activity-slot "board"))
+        (local board-camera (. runtime.activity-cameras.canvas "board"))
+        (assert board-camera "Board activity should create a board camera")
+        (assert (= board-slot.camera board-camera)
+                "Board slot must use the board activity camera")
+        (assert (not (= graph-camera board-camera))
+                "Graph and Board must not share the same activity camera object")
+        (board-camera:set-position (glm.vec3 -30 -40 100))
+        (assert (= graph-camera.position.x 10)
+                "Moving Board must not change Graph camera x")
+        (assert (= graph-camera.position.y 20)
+                "Moving Board must not change Graph camera y")
+
+        (Activities.activate-activity "graph")
+        (assert (= graph-camera.position.x 10)
+                "Graph camera x should restore after Board activity movement")
+        (assert (= graph-camera.position.y 20)
+                "Graph camera y should restore after Board activity movement")
+        (assert (= board-camera.position.x -30)
+                "Graph reactivation must not change Board camera x")
+        (assert (= board-camera.position.y -40)
+                "Graph reactivation must not change Board camera y")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (when runtime.graph-view
+    (runtime.graph-view:drop)
+    (set runtime.graph-view nil))
+  (when runtime.board-view
+    (runtime.board-view:drop)
+    (set runtime.board-view nil))
+  (object-selector:drop)
+  (graph-map-manager:drop)
+  (graph:drop)
+  (scene:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Board and Graph activity cameras stay isolated"
+                     :fn board-and-graph-activity-cameras-stay-isolated})
+
 (fn theme-switch-color-approx [a b]
   (local MathUtils (require :math-utils))
   (and a b
