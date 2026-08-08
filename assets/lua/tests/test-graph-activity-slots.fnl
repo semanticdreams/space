@@ -115,8 +115,8 @@
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
-  (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph (Graph {:with-start false})) (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -125,7 +125,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -134,7 +134,7 @@
 
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   ;; Pre-create canvas slots with activity-owned cameras so
   ;; active-slot camera resolution does not fall back to the
   ;; canvas constructor camera.
@@ -181,7 +181,7 @@
     (runtime.graph-view:drop)
     (set runtime.graph-view nil))
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -281,7 +281,7 @@
                                (assert (= key panel-node.key)
                                        "Unexpected test graph key")
                                panel-node))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (graph-map:load-by-key panel-node.key)
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
@@ -293,7 +293,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -304,7 +304,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   ;; Pre-create canvas slots with activity-owned cameras.
   (canvas:ensure-activity-slot "graph" {:camera camera})
@@ -375,7 +375,7 @@
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (pcall BoardActivityUnit.unload-board-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -490,7 +490,7 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -499,7 +499,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -509,7 +509,7 @@
   (set app.canvas canvas)
   (set app.scene scene)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (local (ok result)
     (pcall
       (fn []
@@ -615,7 +615,7 @@
   (pcall SandboxActivityUnit.unload-sandbox-activity!)
   (pcall GraphActivityUnit.unload-graph-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -694,7 +694,7 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -705,7 +705,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -716,7 +716,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -742,7 +742,7 @@
   (pcall GraphActivityUnit.unload-graph-activity!)
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -917,6 +917,26 @@
 
 (table.insert tests {:name "Graph activity theme switch rebuilds label colors"
                       :fn graph-activity-theme-switch-rebuilds-label-colors})
+
+(fn graph-activity-requires-map-manager-for-sidebar []
+  (local app-keys [:active-world-runtime :canvas :graph-map :graph-map-manager :graph-view :activity-registry :activities-changed :active-activity-id :active-interaction-surface :preferred-interaction-surface :canvas-visible? :viewport :themes])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil) (set app.activities-changed nil) (set app.active-activity-id nil) (set app.themes {:get-active-theme test-theme})
+  (local data-dir "/tmp/space/tests/graph-activity-missing-manager") (when (fs.exists data-dir) (fs.remove-all data-dir)) (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)})) (local focus-manager (FocusManager {:root-name "graph-activity-missing-manager"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager})) (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600}) (canvas:on-viewport-changed app.viewport) (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false})) (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context)) :enabled? true}))
+  (set app.active-world-runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :object-selector object-selector :movables app.movables :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :world-dir data-dir})
+  (set app.canvas canvas) (set app.graph-map graph-map) (set app.graph-map-manager nil)
+  (local (ok result) (pcall (fn [] (GraphActivityUnit.load-graph-activity!) (Activities.activate-activity "graph"))))
+  (pcall GraphActivityUnit.unload-graph-activity!) (object-selector:drop) (graph-map:drop) (graph:drop) (scene:drop) (canvas:drop) (focus-manager:drop) (camera:drop) (when (fs.exists data-dir) (fs.remove-all data-dir)) (restore-app-fields! app-snapshot)
+  (assert (not ok) "Graph activity should fail loudly when runtime.graph-map-manager is missing")
+  (assert (string.find (tostring result) "runtime.graph-map-manager" 1 true) "Missing graph-map-manager failure should name the required manager") true)
+
+(table.insert tests {:name "Graph activity requires graph map manager for sidebar"
+                      :fn graph-activity-requires-map-manager-for-sidebar})
 
 
 (local main

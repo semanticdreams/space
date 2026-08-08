@@ -70,11 +70,11 @@
    :node-reveal-handler reveal-sidebar-node
    :node-open-handler open-sidebar-node})
 
-(fn graph-left-dock-builder [ctx]
-  (local world-runtime app.active-world-runtime)
-  (local manager (and world-runtime world-runtime.graph-map-manager))
-  (when manager
-    ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx)))
+(fn graph-left-dock-builder [ctx] (local world-runtime (assert app.active-world-runtime "Graph sidebar requires app.active-world-runtime"))
+  (local manager (assert world-runtime.graph-map-manager "Graph sidebar requires runtime.graph-map-manager"))
+  ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx))
+
+
 
 (fn active-graph-map []
   (local world-runtime app.active-world-runtime)
@@ -164,10 +164,9 @@
   (local world-runtime (assert app.active-world-runtime
                                   "Graph activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                           "Graph activity requires runtime.canvas"))
-  (local graph-map (active-graph-map))
-  (assert graph-map
-          "Graph activity requires runtime.graph-map or graph-map-manager")
+                            "Graph activity requires runtime.canvas"))
+  (local manager (assert world-runtime.graph-map-manager "Graph activity requires runtime.graph-map-manager"))
+  (local graph-map (assert (manager:get-active-map) "Graph activity requires runtime.graph-map-manager active graph map"))
   (local object-selector (assert world-runtime.object-selector
                                      "Graph activity requires runtime.object-selector"))
 
@@ -227,6 +226,7 @@
           (when (and saved-extra-panels (> (length saved-extra-panels) 0))
             (graph-view:restore-state {:extra_panels saved-extra-panels})))))
   graph-view)
+
 
 (fn capture-graph-view-state! []
   (local world-runtime app.active-world-runtime)
