@@ -470,5 +470,6 @@
 {:graph-activity-owned-paths graph-activity-owned-paths
  :load-graph-activity! load-graph-activity!
  :unload-graph-activity! unload-graph-activity!
+ :drop-graph-view! drop-graph-view!
  :snapshot-graph-activity! snapshot-graph-activity!
  :restore-graph-activity! restore-graph-activity!}
