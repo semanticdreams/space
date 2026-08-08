@@ -13,7 +13,7 @@ import opencode_capabilities as capabilities
 import verify_opencode_home_config as verify_config
 
 
-def init_git_repo(path: Path, *, origin: str = "git@example.com:semanticdreams/space2.git") -> Path:
+def init_git_repo(path: Path, *, origin: str = "git@github.com:semanticdreams/space2.git") -> Path:
     path.mkdir(parents=True)
     subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["git", "remote", "add", "origin", origin], cwd=path, check=True)
@@ -185,6 +185,24 @@ def test_audit_opencode_home_fails_closed_when_trusted_checkout_symlink_points_t
     serialized = json.dumps(result)
     assert result["status"] == "human_decision_required"
     assert "agents" in serialized
+    assert "symlink_target_not_project_opencode_entry" in serialized
+
+
+def test_audit_opencode_home_fails_closed_for_spoofed_outside_checkout_origin(tmp_path: Path) -> None:
+    active_repo = init_git_repo(tmp_path / "active-worktree")
+    spoofed_checkout = init_git_repo(
+        tmp_path / "spoofed-checkout",
+        origin="git@example.com:attacker/semanticdreams/space2-fake.git",
+    )
+    create_repo_opencode_tree(active_repo)
+    create_repo_opencode_tree(spoofed_checkout)
+    home = make_opencode_home(tmp_path, spoofed_checkout)
+
+    result = capabilities.audit_opencode_home(active_repo, home)
+
+    serialized = json.dumps(result)
+    assert result["status"] == "human_decision_required"
+    assert "opencode.json" in serialized
     assert "symlink_target_not_project_opencode_entry" in serialized
 
 

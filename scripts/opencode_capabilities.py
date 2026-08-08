@@ -20,6 +20,13 @@ class CapabilityError(Exception):
         self.details = details or {}
 
 
+_TRUSTED_SPACE_REMOTES = (
+    re.compile(r"^git@github\.com:semanticdreams/space2(?:\.git)?$"),
+    re.compile(r"^ssh://git@github\.com/semanticdreams/space2(?:\.git)?$"),
+    re.compile(r"^https://github\.com/semanticdreams/space2(?:\.git)?$"),
+)
+
+
 @dataclass(frozen=True)
 class CommandResult:
     args: list[str]
@@ -63,6 +70,10 @@ def run_command(args: Sequence[str], cwd: Path, check: bool = True) -> CommandRe
     return result
 
 
+def _is_trusted_space_origin(origin: str) -> bool:
+    return any(pattern.fullmatch(origin) for pattern in _TRUSTED_SPACE_REMOTES)
+
+
 def ensure_space_repo(repo_root: Path) -> Path:
     resolved = repo_root.expanduser().resolve()
     if not resolved.exists():
@@ -81,8 +92,8 @@ def ensure_space_repo(repo_root: Path) -> Path:
         raise CapabilityError("invalid_repo", "Repository is missing Space markers", {"missing": missing})
 
     origin = run_command(["git", "remote", "get-url", "origin"], resolved).stdout.strip()
-    if "semanticdreams/space2" not in origin:
-        raise CapabilityError("invalid_repo", "Repository origin is not semanticdreams/space2", {"origin": origin})
+    if not _is_trusted_space_origin(origin):
+        raise CapabilityError("invalid_repo", "Repository origin is not trusted Space remote", {"origin": origin})
 
     return resolved
 
