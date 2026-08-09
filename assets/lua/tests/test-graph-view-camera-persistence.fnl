@@ -164,6 +164,31 @@
           "second added node should not recenter y")
   (drop-view-fixture! fixture))
 
+(fn unconsumed-initial-center-survives-empty-map-capture-and-reload []
+  (local dir (reset-dir))
+  (local fixture (make-view-fixture dir))
+  (fixture.view:apply-initial-camera-policy!)
+  (fixture.view:capture-state)
+  (drop-view-fixture! fixture)
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (assert (= (persistence:saved-camera-state) nil)
+          "capturing an empty map before first center should not create saved camera state")
+  (local reloaded (make-view-fixture dir))
+  (reloaded.view:apply-initial-camera-policy!)
+  (local first (Graph.GraphNode {:key "reloaded-first"}))
+  (reloaded.graph-map:add-node first {:position (glm.vec3 70 80 0)})
+  (assert (= reloaded.camera.position.x 70)
+          "reloaded empty map should center first added node x")
+  (assert (= reloaded.camera.position.y 80)
+          "reloaded empty map should center first added node y")
+  (local second (Graph.GraphNode {:key "reloaded-second"}))
+  (reloaded.graph-map:add-node second {:position (glm.vec3 900 1000 0)})
+  (assert (= reloaded.camera.position.x 70)
+          "reloaded empty map should not recenter second node x")
+  (assert (= reloaded.camera.position.y 80)
+          "reloaded empty map should not recenter second node y")
+  (drop-view-fixture! reloaded))
+
 (table.insert tests {:name "camera state saves loads and preserves metadata"
                      :fn camera-state-saves-loads-and-preserves-metadata})
 (table.insert tests {:name "malformed camera state fails loudly"
@@ -177,7 +202,9 @@
 (table.insert tests {:name "no saved camera prefers mounted start node"
                      :fn no-saved-camera-prefers-mounted-start-node})
 (table.insert tests {:name "no saved camera empty map centers first added node once"
-                     :fn no-saved-camera-empty-map-centers-first-added-node-once})
+                      :fn no-saved-camera-empty-map-centers-first-added-node-once})
+(table.insert tests {:name "unconsumed initial center survives empty map capture and reload"
+                     :fn unconsumed-initial-center-survives-empty-map-capture-and-reload})
 
 (local main
   (fn []

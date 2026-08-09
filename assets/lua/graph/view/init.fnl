@@ -1358,7 +1358,7 @@
                    (fn []
                        (graph-map:restore-state state))))
              true))
-    (set view.capture-camera-state! (fn [_self] (when (and options.camera persistence persistence.set-camera-state) (local state (ActivityCameraState.capture-camera options.camera)) (persistence:set-camera-state state) state)))
+    (set view.capture-camera-state! (fn [_self] (when (and options.camera persistence persistence.set-camera-state (or (not pending-initial-center?) initial-center-consumed? (not (and options.camera.position (= options.camera.position.x 0) (= options.camera.position.y 0) (= options.camera.position.z 100))))) (local state (ActivityCameraState.capture-camera options.camera)) (persistence:set-camera-state state) state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")
