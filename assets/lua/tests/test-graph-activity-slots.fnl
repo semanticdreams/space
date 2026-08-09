@@ -918,6 +918,70 @@
 (table.insert tests {:name "Board and Graph activity cameras stay isolated"
                      :fn board-and-graph-activity-cameras-stay-isolated})
 
+(fn graph-map-cameras-save-and-restore-on-switch []
+  (local app-snapshot (snapshot-app-fields board-graph-camera-app-keys))
+  (set app.activity-registry nil) (set app.activities-changed nil) (set app.active-activity-id nil)
+  (set app.canvas-visible? false) (set app.canvas-interactive? false) (set app.canvas-surface-interactive? true)
+  (set app.active-interaction-surface :scene) (set app.preferred-interaction-surface :scene) (Main.install-app-shell!)
+  (set app.themes {:get-active-theme test-theme}) (set app.renderers (make-board-graph-camera-renderers)) (set app.lights (make-board-graph-camera-lights))
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body]) :removeRigidBody (fn [_phys _body])}})
+  (local data-dir "/tmp/space/tests/graph-map-camera-switch")
+  (when (fs.exists data-dir) (fs.remove-all data-dir)) (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "graph-map-camera-switch"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection) (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600}) (canvas:on-viewport-changed app.viewport) (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph :data-dir data-dir}))
+  (graph-map-manager:create-map! "beta" "beta")
+  (local graph-map (graph-map-manager:get-active-map))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context))
+                                           :enabled? true}))
+  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :graph-map-manager graph-map-manager
+                  :object-selector object-selector
+                  :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir})
+  (set app.active-world-runtime runtime) (set app.canvas canvas) (set app.graph graph) (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (Activities.activate-activity "graph")
+        (local graph-camera (. runtime.activity-cameras.canvas "graph"))
+        (assert graph-camera "Graph activity should create a graph camera")
+        (graph-camera:set-position (glm.vec3 10 20 100))
+
+        (graph-map-manager:switch-map! "beta")
+        (local GraphViewPersistence (require :graph/view/persistence))
+        (local main-persistence (GraphViewPersistence {:data-dir data-dir :map-id "main"}))
+        (local main-camera (main-persistence:saved-camera-state))
+        (assert (= (. main-camera.position 1) 10) "Switching away should persist main camera x")
+        (assert (= (. main-camera.position 2) 20) "Switching away should persist main camera y")
+
+        (graph-camera:set-position (glm.vec3 -30 -40 150))
+        (graph-map-manager:switch-map! "main")
+        (assert (= graph-camera.position.x 10) "Switching back to main should restore main camera x")
+        (assert (= graph-camera.position.y 20) "Switching back to main should restore main camera y")
+
+        (graph-map-manager:switch-map! "beta")
+        (assert (= graph-camera.position.x -30) "Switching back to beta should restore beta camera x")
+        (assert (= graph-camera.position.y -40) "Switching back to beta should restore beta camera y")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (when runtime.graph-view (runtime.graph-view:drop) (set runtime.graph-view nil))
+  (object-selector:drop) (graph-map-manager:drop) (graph:drop) (scene:drop) (canvas:drop) (focus-manager:drop) (camera:drop)
+  (when (fs.exists data-dir) (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Graph map cameras save and restore on switch"
+                     :fn graph-map-cameras-save-and-restore-on-switch})
+
 (fn theme-switch-color-approx [a b]
   (local MathUtils (require :math-utils))
   (and a b

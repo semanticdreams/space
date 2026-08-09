@@ -115,7 +115,7 @@
   (when (and world-runtime graph-view graph-view.capture-state)
     (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or map-id "main"))
-         (graph-view:capture-state)))
+         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {}) (or map-id "main"))))
 
@@ -208,7 +208,7 @@
   (set world-runtime.graph-view graph-view)
   (set world-runtime.graph-view-map-id map-id)
   (set app.graph-view graph-view)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (local saved-camera-state (and graph-view.persistence graph-view.persistence.saved-camera-state (graph-view.persistence:saved-camera-state))) (when saved-camera-state (ActivityCameraState.restore-camera! slot-camera saved-camera-state))
   (local stored-state (. world-runtime.graph-view-states map-id))
   (if stored-state
       (restore-graph-view-state! graph-view stored-state map-id)
@@ -235,7 +235,7 @@
     (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or world-runtime.graph-view-map-id
                                                 (view-state-key)))
-         (graph-view:capture-state)))
+         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {})
           (or world-runtime.graph-view-map-id (view-state-key)))))

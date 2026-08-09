@@ -11,7 +11,7 @@
 (local GraphViewLabels (require :graph/view/labels))
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
-(local GraphViewPersistence (require :graph/view/persistence))
+(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
 
@@ -1303,9 +1303,9 @@
               (when (and view-state view-state.open-views persistence.set-panels)
                   (persistence:set-panels view-state.open-views))
               (when persistence.set-extra-panels
-                  (persistence:set-extra-panels (or view.extra-panels [])))
-              (persistence:persist registry.points true)
-              {:views view-state
+                  (persistence:set-extra-panels (or view.extra-panels []))) (view:capture-camera-state!)
+               (persistence:persist registry.points true)
+               {:views view-state
                :selected_node_keys keys
                :extra_panels view.extra-panels}))
     (set view.restore-graph-state
@@ -1316,6 +1316,7 @@
                    (fn []
                        (graph-map:restore-state state))))
              true))
+    (set view.capture-camera-state! (fn [_self] (when (and options.camera persistence persistence.set-camera-state) (local state (ActivityCameraState.capture-camera options.camera)) (persistence:set-camera-state state) state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")
@@ -1458,8 +1459,8 @@
                             (persistence:set-panels view-state.open-views)))
                     (when (and persistence.set-extra-panels)
                         (sync-extra-panel-runtime-states!)
-                        (persistence:set-extra-panels (or view.extra-panels [])))
-                    (persistence:persist registry.points true))))
+                        (persistence:set-extra-panels (or view.extra-panels []))) (view:capture-camera-state!)
+                     (persistence:persist registry.points true))))
              (drop-extra-panel-runtimes!)
              (when (and layout.stabilized stabilized-handler)
                  (layout.stabilized:disconnect stabilized-handler true)
@@ -1498,8 +1499,7 @@
              (each [node _ (pairs selected-set)]
                  (set (. selected-set node) nil))
              (set focused-node nil)
-             (set drag-active? false)
-             (set drag-node nil)
+              (set drag-active? false) (set drag-node nil)
               (clear-batched-graph-updates!)
               (unregister-extra-panel-transfer-handler)
               (each [node _ (pairs expanded-nodes)]
