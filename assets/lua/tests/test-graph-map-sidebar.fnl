@@ -536,6 +536,64 @@
     (manager:drop)
     (graph:drop))
 
+(fn sidebar-node-finder-scrolls-within-allocated-height []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test" node-label-loader)
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local active (manager:get-active-map))
+    (for [idx 1 30]
+        (active:load-by-key (.. "test:" idx)))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (local allocated-height 9.0)
+    (layout-sidebar! entity 14.0 allocated-height)
+    (local content-layout (content-flex-layout entity))
+    (local finder (finder-layout entity))
+    (local fixed-height (- content-layout.size.y finder.size.y))
+    (local search-layout (. (. finder.children 1) :children 1))
+    (local scroll-view-layout (. search-layout.children 2))
+    (local scroll-area-layout (. scroll-view-layout.children 1))
+    (local scroll-controller scroll-area-layout.scroll-controller)
+    (assert (approx entity.layout.size.y allocated-height)
+            (.. "GraphMapSidebar root should keep allocated height " allocated-height
+                ", got " entity.layout.size.y))
+    (assert (<= (+ finder.position.y finder.size.y) (+ entity.layout.position.y entity.layout.size.y 0.001))
+            "Finder should remain inside the allocated sidebar height")
+    (assert (> fixed-height 0)
+            "Fixed graph-map management rows should keep positive height above the finder")
+    (assert (<= scroll-view-layout.size.y (+ finder.size.y 0.001))
+            "Finder scroll view should receive a bounded viewport height")
+    (assert (and scroll-controller scroll-controller.state scroll-controller.state.scroll-enabled?)
+            "Many finder rows should overflow the bounded viewport and enable scrolling")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-node-finder-measures-within-finite-height-constraint []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test" node-label-loader)
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local active (manager:get-active-map))
+    (for [idx 1 30]
+        (active:load-by-key (.. "test:" idx)))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local entity ((GraphMapSidebar.GraphMapSidebar {:manager manager}) ctx))
+    (entity:update)
+    (local constrained-height 9.0)
+    (entity.layout:measure-constrained {:max (glm.vec3 14.0 constrained-height 0)})
+    (local finder (finder-layout entity))
+    (assert (<= entity.layout.measure.y (+ constrained-height 0.001))
+            (.. "GraphMapSidebar constrained measure should stay within height "
+                constrained-height ", got " entity.layout.measure.y))
+    (assert (<= finder.measure.y (+ constrained-height 0.001))
+            (.. "Finder constrained measure should stay bounded, got " finder.measure.y))
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
 (table.insert tests {:name "GraphMapManager active-map-id updates after switch" :fn manager-active-map-id-updates-after-switch})
 (table.insert tests {:name "GraphMapManager rename updates active-map-name" :fn manager-rename-updates-active-map-name})
 (table.insert tests {:name "GraphMapManager active-map-status returns correct values" :fn manager-active-map-status-returns-correct-values})
@@ -566,7 +624,11 @@
 (table.insert tests {:name "GraphMap sidebar truncates display labels and preserves finder data"
                      :fn sidebar-truncates-display-labels-and-preserves-finder-data})
 (table.insert tests {:name "GraphMap sidebar empty finder fills resolved content width"
-                     :fn sidebar-empty-finder-fills-resolved-content-width})
+                      :fn sidebar-empty-finder-fills-resolved-content-width})
+(table.insert tests {:name "GraphMap sidebar node finder scrolls within allocated height"
+                      :fn sidebar-node-finder-scrolls-within-allocated-height})
+(table.insert tests {:name "GraphMap sidebar node finder measures within finite height constraint"
+                     :fn sidebar-node-finder-measures-within-finite-height-constraint})
 
 (local main
     (fn []

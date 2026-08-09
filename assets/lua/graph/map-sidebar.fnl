@@ -344,6 +344,13 @@
             (local width (width-provider))
             (child.layout:measurer)
             (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
+        (fn constrained-measurer [self constraints]
+            (local width (width-provider))
+            (if (and constraints constraints.max)
+                (child.layout:measure-constrained
+                    {:max (glm.vec3 width constraints.max.y constraints.max.z)})
+                (child.layout:measurer))
+            (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
         (fn layouter [self]
             (local width (width-provider))
             (set child.layout.position self.position)
@@ -354,6 +361,7 @@
             (child.layout:layouter))
         (local layout (Layout {:name name
                                :measurer measurer
+                               :constrained-measurer constrained-measurer
                                :layouter layouter
                                :children [child.layout]}))
         {:layout layout
@@ -435,27 +443,45 @@
           state.ctx))
     (state.root-layout:add-child state.content-entity.layout))
 
-(fn sidebar-measurer [state self]
-    (if state.content-entity
-        (do
-            (set state.resolved-sidebar-width sidebar-width)
-            (state.content-entity.layout:measurer)
-            (set state.resolved-sidebar-width
-                 (math.max sidebar-width state.content-entity.layout.measure.x))
-            (state.content-entity.layout:measurer)
-            (set self.measure (glm.vec3 (current-sidebar-width state)
-                                        state.content-entity.layout.measure.y
-                                        state.content-entity.layout.measure.z)))
+(fn sidebar-height-constraint [self constraints]
+    (if (and constraints constraints.max constraints.max.y (> constraints.max.y 0))
+        constraints.max.y
+        (if (and self.size self.size.y (> self.size.y 0))
+            self.size.y
+            nil)))
+
+(fn measure-content [state max-height]
+    (if max-height
+        (state.content-entity.layout:measure-constrained
+            {:max (glm.vec3 100000.0 max-height 0)})
+        (state.content-entity.layout:measurer)))
+
+(fn sidebar-measurer [state self constraints]
+     (if state.content-entity
+         (do
+             (local max-height (sidebar-height-constraint self constraints))
+             (set state.resolved-sidebar-width sidebar-width)
+             (measure-content state max-height)
+             (set state.resolved-sidebar-width
+                  (math.max sidebar-width state.content-entity.layout.measure.x))
+             (measure-content state max-height)
+             (local measured-height
+                    (if max-height
+                        (math.min max-height state.content-entity.layout.measure.y)
+                        state.content-entity.layout.measure.y))
+             (set self.measure (glm.vec3 (current-sidebar-width state)
+                                         measured-height
+                                         state.content-entity.layout.measure.z)))
         (do
             (set state.resolved-sidebar-width sidebar-width)
             (set self.measure (glm.vec3 sidebar-width 0 0)))))
 
 (fn sidebar-layouter [state self]
-    (local self-size (if self.size self.size (glm.vec3 0 0 0)))
-    (local resolved-width (current-sidebar-width state))
+     (local self-size (if self.size self.size (glm.vec3 0 0 0)))
+     (local resolved-width (current-sidebar-width state))
     (local allocated-size
         (glm.vec3 resolved-width
-                  (math.max self.measure.y self-size.y)
+                  (if (> self-size.y 0) self-size.y self.measure.y)
                   (math.max self.measure.z self-size.z)))
     (set self.size allocated-size)
     (when state.content-entity
@@ -487,8 +513,12 @@
     (state.root-layout:drop))
 
 (fn layout-measurer [state]
-    (fn [self]
-        (sidebar-measurer state self)))
+     (fn [self]
+         (sidebar-measurer state self nil)))
+
+(fn layout-constrained-measurer [state]
+     (fn [self constraints]
+         (sidebar-measurer state self constraints)))
 
 (fn layout-layouter [state]
     (fn [self]
@@ -537,10 +567,11 @@
                   :visible-labels []
                   :last-selected-count nil})
     (set state.root-layout
-         (Layout {:name "graph-map-sidebar"
-                  :measurer (layout-measurer state)
-                  :layouter (layout-layouter state)
-                  :children []}))
+          (Layout {:name "graph-map-sidebar"
+                   :measurer (layout-measurer state)
+                   :constrained-measurer (layout-constrained-measurer state)
+                   :layouter (layout-layouter state)
+                   :children []}))
     (set state.maps-changed-handler
          (manager.maps-changed:connect (maps-changed-listener state)))
     (rebuild-children state)

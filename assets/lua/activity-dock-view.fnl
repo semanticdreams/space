@@ -151,9 +151,9 @@
 
     (fn layouter [self]
       (local allocated-size
-        (glm.vec3 (math.max self.measure.x (or self.size.x 0))
-                  (math.max self.measure.y (or self.size.y 0))
-                  (math.max self.measure.z (or self.size.z 0))))
+        (glm.vec3 (math.max self.measure.x (if self.size self.size.x 0))
+                  (if (and self.size (> self.size.y 0)) self.size.y self.measure.y)
+                  (math.max self.measure.z (if self.size self.size.z 0))))
       (set self.size allocated-size)
       (when content-entity
         (set content-entity.layout.position self.position)
