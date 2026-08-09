@@ -86,7 +86,7 @@
     (var extra-panel-transfer-handler nil)
     (var dropped? false)
     (var pending-initial-center? false)
-    (var initial-center-consumed? false)
+    (var initial-center-consumed? false) (var armed-initial-camera-state nil)
     (var consume-initial-center! nil)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
@@ -1265,6 +1265,51 @@
                         (set target-node node)))
                 target-node)))
 
+    (fn camera-state-values=? [left right count]
+        (var matches? true)
+        (for [idx 1 count]
+            (when (not (= (rawget left idx) (rawget right idx)))
+                (set matches? false)))
+        matches?)
+
+    (fn camera-states=? [left right]
+        (if (not left)
+            false
+            (not right)
+            false
+            (not left.position)
+            false
+            (not right.position)
+            false
+            (not (camera-state-values=? left.position right.position 3))
+            false
+            left.rotation
+            (and right.rotation
+                 (camera-state-values=? left.rotation right.rotation 4))
+            right.rotation
+            false
+            true))
+
+    (fn should-capture-initial-camera-state? [current-state armed-state]
+        (if (not pending-initial-center?)
+            true
+            initial-center-consumed?
+            true
+            (camera-states=? current-state armed-state)
+            false
+            true))
+
+    (fn capture-current-camera-state []
+        (ActivityCameraState.capture-camera options.camera))
+
+    (fn arm-pending-initial-center! []
+        (set pending-initial-center? true)
+        (set armed-initial-camera-state (capture-current-camera-state)))
+
+    (fn should-capture-camera-state? []
+        (should-capture-initial-camera-state? (capture-current-camera-state)
+                                              armed-initial-camera-state))
+
     (set consume-initial-center!
          (fn [node]
              (when (and pending-initial-center?
@@ -1274,6 +1319,7 @@
                  (center-camera-on-node! node)
                  (set pending-initial-center? false)
                  (set initial-center-consumed? true)
+                 (set armed-initial-camera-state nil)
                  true)))
 
     (set view.apply-initial-camera-policy!
@@ -1285,11 +1331,12 @@
                      (local target-node (find-initial-center-target))
                      (if target-node
                          (do
-                             (center-camera-on-node! target-node)
-                             (set initial-center-consumed? true)
-                             (set pending-initial-center? false))
-                         (set pending-initial-center? true))
-                     true))))
+                              (center-camera-on-node! target-node)
+                              (set initial-center-consumed? true)
+                              (set pending-initial-center? false)
+                              (set armed-initial-camera-state nil))
+                          (arm-pending-initial-center!))
+                      true))))
 
     (set view.remove-nodes (fn [_self nodes-to-remove]
                                 (assert-not-dropped "remove-nodes")
@@ -1358,7 +1405,15 @@
                    (fn []
                        (graph-map:restore-state state))))
              true))
-    (set view.capture-camera-state! (fn [_self] (when (and options.camera persistence persistence.set-camera-state (or (not pending-initial-center?) initial-center-consumed? (not (and options.camera.position (= options.camera.position.x 0) (= options.camera.position.y 0) (= options.camera.position.z 100))))) (local state (ActivityCameraState.capture-camera options.camera)) (persistence:set-camera-state state) state)))
+    (set view.capture-camera-state!
+         (fn [_self]
+             (when (and options.camera
+                        persistence
+                        persistence.set-camera-state
+                        (should-capture-camera-state?))
+                 (local state (capture-current-camera-state))
+                 (persistence:set-camera-state state)
+                 state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")

@@ -27,14 +27,14 @@
            :edge-color (glm.vec4 0.6 0.6 0.6 1)}
    :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
 
-(fn make-view-fixture [dir]
+(fn make-view-fixture-with-camera-position [dir camera-position]
   (local focus-manager (FocusManager {:root-name "graph-camera-persistence"}))
   (local focus-scope (focus-manager:create-scope {:name "graph-camera-persistence-scope"}))
   (local ctx (BuildContext {:clickables (Clickables)
                             :theme (test-theme)
                             :focus-manager focus-manager
                             :focus-scope focus-scope}))
-  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local camera (Camera {:position camera-position}))
   (local graph (Graph {:with-start false}))
   (local view (GraphView {:graph-map graph
                           :ctx ctx
@@ -44,6 +44,9 @@
    :focus-manager focus-manager
    :graph-map graph
    :view view})
+
+(fn make-view-fixture [dir]
+  (make-view-fixture-with-camera-position dir (glm.vec3 0 0 100)))
 
 (fn drop-view-fixture! [fixture]
   (when fixture.view (fixture.view:drop))
@@ -189,6 +192,25 @@
           "reloaded empty map should not recenter second node y")
   (drop-view-fixture! reloaded))
 
+(fn unconsumed-initial-center-uses-armed-camera-as-default []
+  (local dir (reset-dir))
+  (local fixture (make-view-fixture-with-camera-position dir (glm.vec3 5 6 120)))
+  (fixture.view:apply-initial-camera-policy!)
+  (fixture.view:capture-state)
+  (drop-view-fixture! fixture)
+  (local persistence (GraphViewPersistence {:data-dir dir :map-id "main"}))
+  (assert (= (persistence:saved-camera-state) nil)
+          "capturing an empty map should compare against the armed camera state, not a hard-coded default")
+  (local reloaded (make-view-fixture-with-camera-position dir (glm.vec3 5 6 120)))
+  (reloaded.view:apply-initial-camera-policy!)
+  (local first (Graph.GraphNode {:key "custom-default-first"}))
+  (reloaded.graph-map:add-node first {:position (glm.vec3 12 13 0)})
+  (assert (= reloaded.camera.position.x 12)
+          "custom default reload should center first node x")
+  (assert (= reloaded.camera.position.y 13)
+          "custom default reload should center first node y")
+  (drop-view-fixture! reloaded))
+
 (table.insert tests {:name "camera state saves loads and preserves metadata"
                      :fn camera-state-saves-loads-and-preserves-metadata})
 (table.insert tests {:name "malformed camera state fails loudly"
@@ -205,6 +227,8 @@
                       :fn no-saved-camera-empty-map-centers-first-added-node-once})
 (table.insert tests {:name "unconsumed initial center survives empty map capture and reload"
                      :fn unconsumed-initial-center-survives-empty-map-capture-and-reload})
+(table.insert tests {:name "unconsumed initial center uses armed camera as default"
+                     :fn unconsumed-initial-center-uses-armed-camera-as-default})
 
 (local main
   (fn []
