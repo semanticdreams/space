@@ -32,7 +32,7 @@
   (local background (or (and theme theme.graph theme.graph.background)
                         (glm.vec4 0.095 0.105 0.13 1)))
   {:color [background.x background.y background.z]})
-
+(fn default-graph-camera-state [] {:position [0 0 100] :rotation [1 0 0 0]})
 (fn graph-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
   (local graph-view-root (fs.join-path (fs.join-path lua-root "graph") "view"))
@@ -208,7 +208,7 @@
   (set world-runtime.graph-view graph-view)
   (set world-runtime.graph-view-map-id map-id)
   (set app.graph-view graph-view)
-  (set app.graph-map graph-map) (local saved-camera-state (and graph-view.persistence graph-view.persistence.saved-camera-state (graph-view.persistence:saved-camera-state))) (when saved-camera-state (ActivityCameraState.restore-camera! slot-camera saved-camera-state))
+  (set app.graph-map graph-map) (local saved-camera-state (and graph-view.persistence graph-view.persistence.saved-camera-state (graph-view.persistence:saved-camera-state))) (ActivityCameraState.restore-camera! slot-camera (or saved-camera-state (default-graph-camera-state)))
   (local stored-state (. world-runtime.graph-view-states map-id))
   (if stored-state
       (restore-graph-view-state! graph-view stored-state map-id)
@@ -470,6 +470,7 @@
 {:graph-activity-owned-paths graph-activity-owned-paths
  :load-graph-activity! load-graph-activity!
  :unload-graph-activity! unload-graph-activity!
- :drop-graph-view! drop-graph-view!
- :snapshot-graph-activity! snapshot-graph-activity!
- :restore-graph-activity! restore-graph-activity!}
+  :drop-graph-view! drop-graph-view!
+  :snapshot-graph-activity! snapshot-graph-activity!
+  :restore-graph-activity! restore-graph-activity!
+  :default-graph-camera-state default-graph-camera-state}

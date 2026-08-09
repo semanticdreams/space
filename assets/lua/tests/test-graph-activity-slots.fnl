@@ -962,6 +962,22 @@
         (local main-camera (main-persistence:saved-camera-state))
         (assert (= (. main-camera.position 1) 10) "Switching away should persist main camera x")
         (assert (= (. main-camera.position 2) 20) "Switching away should persist main camera y")
+        (assert (= graph-camera.position.x 0) "Map with no saved camera should reset camera x")
+        (assert (= graph-camera.position.y 0) "Map with no saved camera should reset camera y")
+        (assert (= graph-camera.position.z 100) "Map with no saved camera should reset camera z")
+
+        (graph-map-manager:switch-map! "main")
+        (local beta-persistence (GraphViewPersistence {:data-dir data-dir :map-id "beta"}))
+        (local beta-camera (beta-persistence:saved-camera-state))
+        (assert (= (. beta-camera.position 1) 0) "Switching away from untouched beta should persist default camera x")
+        (assert (= (. beta-camera.position 2) 0) "Switching away from untouched beta should persist default camera y")
+        (assert (= (. beta-camera.position 3) 100) "Switching away from untouched beta should persist default camera z")
+        (assert (= graph-camera.position.x 10) "Switching back to main after untouched beta should restore main camera x")
+        (assert (= graph-camera.position.y 20) "Switching back to main after untouched beta should restore main camera y")
+
+        (graph-map-manager:switch-map! "beta")
+        (assert (= graph-camera.position.x 0) "Switching back to untouched beta should restore default camera x")
+        (assert (= graph-camera.position.y 0) "Switching back to untouched beta should restore default camera y")
 
         (graph-camera:set-position (glm.vec3 -30 -40 150))
         (graph-map-manager:switch-map! "main")
