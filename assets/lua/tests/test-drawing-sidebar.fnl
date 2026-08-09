@@ -858,6 +858,58 @@
           (dock:drop)
           (set app.drawing-controller original-controller))))))
 
+(fn build-over-tall-panel [_ctx]
+  (local layout
+    (Layout {:name "over-tall-activity-panel"
+             :measurer (fn [self]
+                         (set self.measure (glm.vec3 20 80 0)))
+             :layouter (fn [_self] nil)}))
+  {:layout layout
+   :update (fn [])
+   :drop (fn [_self]
+           (layout:drop))})
+
+(fn layout-activity-dock-at-small-height []
+  (local dock ((ActivityDockView {}) (make-ctx)))
+  (dock:update)
+  (dock.layout:measurer)
+  (set dock.layout.position (glm.vec3 0 0 0))
+  (set dock.layout.size (glm.vec3 30 12 0))
+  (set dock.layout.rotation (glm.quat 1 0 0 0))
+  (set dock.layout.clip-region nil)
+  (set dock.layout.depth-offset-index 0)
+  (dock.layout:layouter)
+  dock)
+
+(fn assert-over-tall-dock-is-contained [dock]
+  (local content-layout (. dock.layout.children 1))
+  (local rail-layout (and content-layout (. content-layout.children 1)))
+  (local panel-layout (and content-layout (. content-layout.children 2)))
+  (assert (MathUtils.approx dock.layout.size.y 12)
+          (.. "activity dock root height should remain allocated at 12, got "
+              dock.layout.size.y))
+  (assert rail-layout "feature rail should be present with an over-tall panel")
+  (assert (MathUtils.approx rail-layout.size.y 12)
+          (.. "feature rail should remain within allocated height 12, got "
+              rail-layout.size.y))
+  (assert panel-layout "active activity panel should be present")
+  (assert (<= panel-layout.size.y (+ 12 0.001))
+          (.. "active panel should be clamped to allocation, got "
+              panel-layout.size.y)))
+
+(fn activity-dock-view-clamps-over-tall-active-panel-to-allocation []
+  (with-sidebar-env
+    (fn []
+      (local original-builder app.activity-left-dock-builder)
+      (set app.activity-left-dock-builder build-over-tall-panel)
+      (set app.active-activity-id "graph")
+      (set-interaction-surface :canvas)
+      (emit-workspace-shell-changed "activity")
+      (local dock (layout-activity-dock-at-small-height))
+      (assert-over-tall-dock-is-contained dock)
+      (dock:drop)
+      (set app.activity-left-dock-builder original-builder))))
+
 (table.insert tests {:name "Activity dock always shows feature rail in scene mode"
                      :fn activity-dock-always-shows-feature-rail-in-scene-mode})
 (table.insert tests {:name "Drawing sidebar expands in drawing activity"
@@ -897,7 +949,9 @@
 (table.insert tests {:name "Activity dock view reserves toolbar height for activity content"
                       :fn activity-dock-view-reserves-toolbar-height-for-activity-content})
 (table.insert tests {:name "Activity dock view rebuilds when activities register at runtime"
-                      :fn activity-dock-view-rebuilds-when-activities-register-at-runtime})
+                       :fn activity-dock-view-rebuilds-when-activities-register-at-runtime})
+(table.insert tests {:name "Activity dock view clamps over-tall active panel to allocation"
+                     :fn activity-dock-view-clamps-over-tall-active-panel-to-allocation})
 
 (local main
   (fn []
