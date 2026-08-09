@@ -1,7 +1,7 @@
 (global app (or app {}))
 
 (local Signal (require :signal))
-
+(fn emit-activity-dock-changed! [reason previous current] (when (and app.activity-dock-changed (not (= previous current))) (app.activity-dock-changed:emit {:reason reason :previous-left-dock-builder previous :current-left-dock-builder current})) current)
 (local persisted-activity-migrations {})
 
 (fn clone-list [items]
@@ -66,7 +66,7 @@
        (not (= activity-id ""))
        (. registry.activities activity-id)))
 
-(fn clear-activity-runtime-hooks! []
+(fn clear-activity-runtime-hooks! [] (local previous-left-dock-builder app.activity-left-dock-builder)
   (set app.activity-root-actions nil)
   (set app.activity-selection-actions nil)
   (set app.activity-left-dock-builder nil)
@@ -83,7 +83,7 @@
   (set app.activity-top-toolbar-builder nil)
   (set app.activity-object-drag-mode-provider nil)
   (set app.canvas-surface-interactive? true)
-  true)
+  (emit-activity-dock-changed! "activity-hooks" previous-left-dock-builder nil) true)
 
 (fn empty-activity-hooks []
   {:root-actions nil
@@ -126,7 +126,7 @@
   true)
 
 (fn apply-activity-hooks! [hook-state]
-  (local hooks (or hook-state (empty-activity-hooks)))
+  (local hooks (or hook-state (empty-activity-hooks))) (local previous-left-dock-builder app.activity-left-dock-builder)
   (set app.activity-root-actions hooks.root-actions)
   (set app.activity-selection-actions hooks.selection-actions)
   (set app.activity-left-dock-builder hooks.left-dock-builder)
@@ -148,7 +148,7 @@
         (set app.canvas-surface-interactive? true)
         (when app.sync-interaction-surface-state
           (app.sync-interaction-surface-state "activity-policy-cleared" nil))))
-  true)
+  (emit-activity-dock-changed! "activity-hooks" previous-left-dock-builder app.activity-left-dock-builder) true)
 
 (fn workspace-shell-state []
   {:interaction-surface app.active-interaction-surface

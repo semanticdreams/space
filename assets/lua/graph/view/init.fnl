@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local appdirs (require :appdirs))
 (local Signal (require :signal))
-
+(local PanelBounds (require :graph/view/panel-bounds))
 (local Utils (require :graph/view/utils))
 (local MathUtils (require :math-utils))
 (local GraphViewEdge (require :graph/view/edge))
@@ -11,7 +11,7 @@
 (local GraphViewLabels (require :graph/view/labels))
 (local GraphViewSelection (require :graph/view/selection))
 (local GraphViewNodeViews (require :graph/view/node-views))
-(local GraphViewPersistence (require :graph/view/persistence))
+(local GraphViewPersistence (require :graph/view/persistence)) (local ActivityCameraState (require :activity-camera-state))
 (local NodeBase (require :graph/node-base))
 (local GraphNodePresentation (require :graph/view/presentation))
 
@@ -85,6 +85,9 @@
     (var extra-panel-transfer-source nil)
     (var extra-panel-transfer-handler nil)
     (var dropped? false)
+    (var pending-initial-center? false)
+    (var initial-center-consumed? false) (var armed-initial-camera-state nil)
+    (var consume-initial-center! nil)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
     (assert focus "GraphView requires ctx.focus")
@@ -537,14 +540,15 @@
 
     (fn build-expanded-presentation [node position]
         (local saved-size (persistence:saved-size node))
+        (local bounds (PanelBounds.inline-card-bounds))
         (local card-builder (GraphNodePresentation.card-builder
-                             {:node node
-                              :position position
-                              :default-size (glm.vec3 32.0 18.0 0)
-                              :min-size (glm.vec3 24.0 12.0 0)
-                              :max-size (glm.vec3 52.0 34.0 0)
-                              :resize-max-size (glm.vec3 90.0 60.0 0)
-                              :requested-size saved-size
+                              {:node node
+                               :position position
+                               :default-size bounds.default-size
+                               :min-size bounds.min-size
+                               :max-size bounds.max-size
+                               :resize-max-size bounds.resize-max-size
+                               :requested-size saved-size
                               :depth-offset-index point-base-depth-offset
                               :selection-color resolved-selection-border-color
                               :focus-color resolved-focus-outline-color
@@ -562,16 +566,15 @@
                                              (focus-manager:clear-auto-focus))
                                          (when (not ok)
                                              (error err)))
-                              :on-menu (fn [event]
-                                         (local focus-node (. focus-nodes node))
-                                         (when focus-node
+                               :on-menu (fn [event]
+                                          (local focus-node (. focus-nodes node))
+                                          (when focus-node
                                              (focus-node:request-focus))
                                          (local manager (get-menu-manager))
-                                         (when manager
-                                             (manager:open {:actions (node-menu-actions node)
-                                                            :position (resolve-menu-position event)})))}))
+                                          (when manager
+                                              (manager:open {:actions (node-menu-actions node)
+                                                             :position (resolve-menu-position event)})))}))
         (card-builder ctx))
-
     (fn attach-presentation-events [node presentation]
         (set presentation.on-click
              (fn [_self _event]
@@ -804,6 +807,8 @@
                     (clickables:register-right-click point))
                 (clickables:register-double-click point)
                 (registry:add-node node point idx (and node-opts node-opts.pinned))
+                (when consume-initial-center!
+                    (consume-initial-center! node))
                 (attach-focus-bounds node)
                 (register-movable node point)
                 (when selector
@@ -1249,6 +1254,90 @@
         (local center (presentation-center (. registry.points node)))
         (camera:set-position (glm.vec3 center.x center.y camera.position.z)))
 
+    (fn find-initial-center-target []
+        (local start-node (and graph-map.lookup (graph-map:lookup "start")))
+        (if (and start-node (. registry.points start-node))
+            start-node
+            (do
+                (var target-node nil)
+                (each [_ node (ipairs nodes-by-index) &until target-node]
+                    (when (. registry.points node)
+                        (set target-node node)))
+                target-node)))
+
+    (fn camera-state-values=? [left right count]
+        (var matches? true)
+        (for [idx 1 count]
+            (when (not (= (rawget left idx) (rawget right idx)))
+                (set matches? false)))
+        matches?)
+
+    (fn camera-states=? [left right]
+        (if (not left)
+            false
+            (not right)
+            false
+            (not left.position)
+            false
+            (not right.position)
+            false
+            (not (camera-state-values=? left.position right.position 3))
+            false
+            left.rotation
+            (and right.rotation
+                 (camera-state-values=? left.rotation right.rotation 4))
+            right.rotation
+            false
+            true))
+
+    (fn should-capture-initial-camera-state? [current-state armed-state]
+        (if (not pending-initial-center?)
+            true
+            initial-center-consumed?
+            true
+            (camera-states=? current-state armed-state)
+            false
+            true))
+
+    (fn capture-current-camera-state []
+        (ActivityCameraState.capture-camera options.camera))
+
+    (fn arm-pending-initial-center! []
+        (set pending-initial-center? true)
+        (set armed-initial-camera-state (capture-current-camera-state)))
+
+    (fn should-capture-camera-state? []
+        (should-capture-initial-camera-state? (capture-current-camera-state)
+                                              armed-initial-camera-state))
+
+    (set consume-initial-center!
+         (fn [node]
+             (when (and pending-initial-center?
+                        (not initial-center-consumed?)
+                        node
+                        (. registry.points node))
+                 (center-camera-on-node! node)
+                 (set pending-initial-center? false)
+                 (set initial-center-consumed? true)
+                 (set armed-initial-camera-state nil)
+                 true)))
+
+    (set view.apply-initial-camera-policy!
+         (fn [_self]
+             (assert-not-dropped "apply-initial-camera-policy!")
+             (if initial-center-consumed?
+                 true
+                 (do
+                     (local target-node (find-initial-center-target))
+                     (if target-node
+                         (do
+                              (center-camera-on-node! target-node)
+                              (set initial-center-consumed? true)
+                              (set pending-initial-center? false)
+                              (set armed-initial-camera-state nil))
+                          (arm-pending-initial-center!))
+                      true))))
+
     (set view.remove-nodes (fn [_self nodes-to-remove]
                                 (assert-not-dropped "remove-nodes")
                                 (graph-map:remove-nodes nodes-to-remove)))
@@ -1303,9 +1392,9 @@
               (when (and view-state view-state.open-views persistence.set-panels)
                   (persistence:set-panels view-state.open-views))
               (when persistence.set-extra-panels
-                  (persistence:set-extra-panels (or view.extra-panels [])))
-              (persistence:persist registry.points true)
-              {:views view-state
+                  (persistence:set-extra-panels (or view.extra-panels []))) (view:capture-camera-state!)
+               (persistence:persist registry.points true)
+               {:views view-state
                :selected_node_keys keys
                :extra_panels view.extra-panels}))
     (set view.restore-graph-state
@@ -1316,6 +1405,15 @@
                    (fn []
                        (graph-map:restore-state state))))
              true))
+    (set view.capture-camera-state!
+         (fn [_self]
+             (when (and options.camera
+                        persistence
+                        persistence.set-camera-state
+                        (should-capture-camera-state?))
+                 (local state (capture-current-camera-state))
+                 (persistence:set-camera-state state)
+                 state)))
     (set view.restore-views-state
          (fn [_self state]
              (assert-not-dropped "restore-views-state")
@@ -1458,8 +1556,8 @@
                             (persistence:set-panels view-state.open-views)))
                     (when (and persistence.set-extra-panels)
                         (sync-extra-panel-runtime-states!)
-                        (persistence:set-extra-panels (or view.extra-panels [])))
-                    (persistence:persist registry.points true))))
+                        (persistence:set-extra-panels (or view.extra-panels []))) (view:capture-camera-state!)
+                     (persistence:persist registry.points true))))
              (drop-extra-panel-runtimes!)
              (when (and layout.stabilized stabilized-handler)
                  (layout.stabilized:disconnect stabilized-handler true)
@@ -1498,8 +1596,7 @@
              (each [node _ (pairs selected-set)]
                  (set (. selected-set node) nil))
              (set focused-node nil)
-             (set drag-active? false)
-             (set drag-node nil)
+              (set drag-active? false) (set drag-node nil)
               (clear-batched-graph-updates!)
               (unregister-extra-panel-transfer-handler)
               (each [node _ (pairs expanded-nodes)]

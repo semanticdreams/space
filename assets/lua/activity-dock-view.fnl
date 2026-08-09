@@ -58,7 +58,7 @@
     (var active-dock-entity nil)
     (var pending-rebuild? true)
     (var workspace-shell-changed-handler nil)
-    (var activities-changed-handler nil)
+    (var activities-changed-handler nil) (var activity-dock-changed-handler nil)
     (local theme (and ctx ctx.theme))
 
     (fn drop-content! []
@@ -187,7 +187,7 @@
       (set activities-changed-handler
            (app.activities-changed:connect
              (fn [_payload]
-               (request-rebuild!)))))
+               (request-rebuild!))))) (when app.activity-dock-changed (set activity-dock-changed-handler (app.activity-dock-changed:connect (fn [_payload] (request-rebuild!)))))
 
     (rebuild-children!)
     (set pending-rebuild? false)
@@ -198,18 +198,18 @@
                  (set pending-rebuild? false)
                  (rebuild-children!)
                  (when root-layout
-                   (root-layout:mark-measure-dirty)))
-               (when (and active-dock-entity active-dock-entity.update)
-                 (active-dock-entity:update)))
-     :drop (fn [_self]
-             (when workspace-shell-changed-handler
-               (app.workspace-shell-changed:disconnect workspace-shell-changed-handler true)
-               (set workspace-shell-changed-handler nil))
-             (when activities-changed-handler
-               (app.activities-changed:disconnect activities-changed-handler true)
-               (set activities-changed-handler nil))
-             (drop-content!)
-             (root-layout:drop))}))
+                  (root-layout:mark-measure-dirty)))
+                (when (and active-dock-entity active-dock-entity.update)
+                  (active-dock-entity:update)))
+      :active-dock-entity (fn [_self] active-dock-entity) :drop (fn [_self]
+              (when workspace-shell-changed-handler
+                (app.workspace-shell-changed:disconnect workspace-shell-changed-handler true)
+                (set workspace-shell-changed-handler nil))
+              (when activities-changed-handler
+                (app.activities-changed:disconnect activities-changed-handler true)
+                (set activities-changed-handler nil)) (when activity-dock-changed-handler (app.activity-dock-changed:disconnect activity-dock-changed-handler true) (set activity-dock-changed-handler nil))
+              (drop-content!)
+              (root-layout:drop))}))
 
   build)
 

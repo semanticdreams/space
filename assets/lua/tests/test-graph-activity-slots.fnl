@@ -3,7 +3,7 @@
 (local Main (require :main))
 (local Activities (require :activities))
 (local Graph (require :graph/init))
-(local GraphMap (require :graph/map))
+(local GraphMap (require :graph/map)) (local GraphMapManager (require :graph/map-manager))
 (local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
@@ -115,8 +115,8 @@
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
-  (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph (Graph {:with-start false})) (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -125,7 +125,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -134,7 +134,7 @@
 
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   ;; Pre-create canvas slots with activity-owned cameras so
   ;; active-slot camera resolution does not fall back to the
   ;; canvas constructor camera.
@@ -181,7 +181,7 @@
     (runtime.graph-view:drop)
     (set runtime.graph-view nil))
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -281,7 +281,7 @@
                                (assert (= key panel-node.key)
                                        "Unexpected test graph key")
                                panel-node))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (graph-map:load-by-key panel-node.key)
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
@@ -293,7 +293,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -304,7 +304,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   ;; Pre-create canvas slots with activity-owned cameras.
   (canvas:ensure-activity-slot "graph" {:camera camera})
@@ -375,7 +375,7 @@
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (pcall BoardActivityUnit.unload-board-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -490,7 +490,7 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -499,7 +499,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -509,7 +509,7 @@
   (set app.canvas canvas)
   (set app.scene scene)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (local (ok result)
     (pcall
       (fn []
@@ -615,7 +615,7 @@
   (pcall SandboxActivityUnit.unload-sandbox-activity!)
   (pcall GraphActivityUnit.unload-graph-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -694,7 +694,7 @@
   (canvas:on-viewport-changed app.viewport)
   (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph})) (local graph-map (graph-map-manager:get-active-map))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                          (or (and canvas.active-activity-slot
                                                                   canvas.active-activity-slot.ctx)
@@ -705,7 +705,7 @@
   (local runtime {:canvas canvas
                   :scene scene
                   :graph graph
-                  :graph-map graph-map
+                  :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector
                   :movables app.movables
                   :activity-cameras {:canvas {} :scene {}}
@@ -716,7 +716,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
-  (set app.graph-map graph-map)
+  (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -742,7 +742,7 @@
   (pcall GraphActivityUnit.unload-graph-activity!)
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -753,6 +753,254 @@
 
 (table.insert tests {:name "Graph and drawing do not share canvas camera"
                      :fn graph-and-drawing-do-not-share-canvas-camera})
+
+(local board-graph-camera-app-keys
+  [:active-world-runtime
+   :canvas
+   :graph
+   :graph-map
+   :graph-map-manager
+   :graph-view
+   :board
+   :board-view
+   :activity-registry
+   :activities-changed
+   :active-activity-id
+   :active-interaction-surface
+   :preferred-interaction-surface
+   :active-pointer-controls
+   :scene-interactive?
+   :canvas-interactive?
+   :canvas-surface-interactive?
+   :canvas-visible?
+   :canvas-controls
+   :first-person-controls
+   :viewport
+   :themes
+   :renderers
+   :background-state
+   :lights
+   :engine])
+
+(fn make-board-graph-camera-renderers []
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  {:skybox {:get-state (fn [_] skybox-state)
+            :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+   :get-background-state (fn [_]
+                           (if app.background-state
+                               app.background-state
+                               BackgroundState.default-state))
+   :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+
+(fn make-board-graph-camera-lights []
+  (var mock-lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0}
+                          :directional []
+                          :point []
+                          :spot []})
+  {:get-state (fn [_] mock-lights-state)
+   :set-state (fn [_ state] (set mock-lights-state state))})
+
+(fn board-and-graph-activity-cameras-stay-isolated []
+  (local app-snapshot (snapshot-app-fields board-graph-camera-app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas-visible? false)
+  (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (Main.install-app-shell!)
+  (set app.themes {:get-active-theme test-theme})
+  (set app.renderers (make-board-graph-camera-renderers))
+  (set app.lights (make-board-graph-camera-lights))
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                             :removeRigidBody (fn [_phys _body])}})
+  (local data-dir "/tmp/space/tests/board-graph-camera-isolation")
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "board-graph-camera-isolation"}))
+  (local canvas (Canvas {:camera camera
+                         :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
+  (local object-selector (ObjectSelector {:ctx-provider (fn []
+                                                         (or (and canvas.active-activity-slot
+                                                                  canvas.active-activity-slot.ctx)
+                                                             canvas.build-context))
+                                           :enabled? true}))
+  (local runtime {:canvas canvas
+                  :scene scene
+                  :graph graph
+                  :graph-map graph-map
+                  :graph-map-manager graph-map-manager
+                  :object-selector object-selector
+                  :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir
+                  :board-state {:items [] :connectors []}})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph graph)
+  (set app.graph-map graph-map)
+  (set app.graph-map-manager graph-map-manager)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (BoardActivityUnit.load-board-activity!)
+
+        (Activities.activate-activity "graph")
+        (local graph-slot (canvas:activity-slot "graph"))
+        (local graph-camera (. runtime.activity-cameras.canvas "graph"))
+        (assert graph-camera "Graph activity should create a graph camera")
+        (assert (= graph-slot.camera graph-camera)
+                "Graph slot must use the graph activity camera")
+        (graph-camera:set-position (glm.vec3 10 20 100))
+
+        (Activities.activate-activity "board")
+        (local board-slot (canvas:activity-slot "board"))
+        (local board-camera (. runtime.activity-cameras.canvas "board"))
+        (assert board-camera "Board activity should create a board camera")
+        (assert (= board-slot.camera board-camera)
+                "Board slot must use the board activity camera")
+        (assert (not (= graph-camera board-camera))
+                "Graph and Board must not share the same activity camera object")
+        (board-camera:set-position (glm.vec3 -30 -40 100))
+        (assert (= graph-camera.position.x 10)
+                "Moving Board must not change Graph camera x")
+        (assert (= graph-camera.position.y 20)
+                "Moving Board must not change Graph camera y")
+
+        (Activities.activate-activity "graph")
+        (assert (= graph-camera.position.x 10)
+                "Graph camera x should restore after Board activity movement")
+        (assert (= graph-camera.position.y 20)
+                "Graph camera y should restore after Board activity movement")
+        (assert (= board-camera.position.x -30)
+                "Graph reactivation must not change Board camera x")
+        (assert (= board-camera.position.y -40)
+                "Graph reactivation must not change Board camera y")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (when runtime.graph-view
+    (runtime.graph-view:drop)
+    (set runtime.graph-view nil))
+  (when runtime.board-view
+    (runtime.board-view:drop)
+    (set runtime.board-view nil))
+  (object-selector:drop)
+  (graph-map-manager:drop)
+  (graph:drop)
+  (scene:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Board and Graph activity cameras stay isolated"
+                     :fn board-and-graph-activity-cameras-stay-isolated})
+
+(fn graph-map-cameras-save-and-restore-on-switch []
+  (local app-snapshot (snapshot-app-fields board-graph-camera-app-keys))
+  (set app.activity-registry nil) (set app.activities-changed nil) (set app.active-activity-id nil)
+  (set app.canvas-visible? false) (set app.canvas-interactive? false) (set app.canvas-surface-interactive? true)
+  (set app.active-interaction-surface :scene) (set app.preferred-interaction-surface :scene) (Main.install-app-shell!)
+  (set app.themes {:get-active-theme test-theme}) (set app.renderers (make-board-graph-camera-renderers)) (set app.lights (make-board-graph-camera-lights))
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body]) :removeRigidBody (fn [_phys _body])}})
+  (local data-dir "/tmp/space/tests/graph-map-camera-switch")
+  (when (fs.exists data-dir) (fs.remove-all data-dir)) (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "graph-map-camera-switch"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection) (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600}) (canvas:on-viewport-changed app.viewport) (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph :data-dir data-dir}))
+  (graph:register-key-loader "beta-node" (fn [key] (Graph.GraphNode {:key key})))
+  (graph-map-manager:create-map! "beta" "beta")
+  (local graph-map (graph-map-manager:get-active-map))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context))
+                                           :enabled? true}))
+  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :graph-map-manager graph-map-manager
+                  :object-selector object-selector
+                  :movables app.movables
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
+                  :world-dir data-dir})
+  (set app.active-world-runtime runtime) (set app.canvas canvas) (set app.graph graph) (set app.graph-map graph-map) (set app.graph-map-manager graph-map-manager)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (Activities.activate-activity "graph")
+        (local graph-camera (. runtime.activity-cameras.canvas "graph"))
+        (assert graph-camera "Graph activity should create a graph camera")
+        (graph-camera:set-position (glm.vec3 10 20 100))
+
+        (graph-map-manager:switch-map! "beta")
+        (local GraphViewPersistence (require :graph/view/persistence))
+        (local main-persistence (GraphViewPersistence {:data-dir data-dir :map-id "main"}))
+        (local main-camera (main-persistence:saved-camera-state))
+        (assert (= (. main-camera.position 1) 10) "Switching away should persist main camera x")
+        (assert (= (. main-camera.position 2) 20) "Switching away should persist main camera y")
+        (assert (= graph-camera.position.x 0) "Map with no saved camera should reset camera x before first node")
+        (assert (= graph-camera.position.y 0) "Map with no saved camera should reset camera y before first node")
+        (assert (= graph-camera.position.z 100) "Map with no saved camera should reset camera z")
+        (app.graph-map:add-node (Graph.GraphNode {:key "beta-node"}) {:position (glm.vec3 111 222 0)})
+        (assert (= graph-camera.position.x 111) "Map with no saved camera should center first added node x")
+        (assert (= graph-camera.position.y 222) "Map with no saved camera should center first added node y")
+
+        (graph-map-manager:switch-map! "main")
+        (local beta-persistence (GraphViewPersistence {:data-dir data-dir :map-id "beta"}))
+        (local beta-camera (beta-persistence:saved-camera-state))
+        (assert (= (. beta-camera.position 1) 111) "Switching away from untouched beta should persist centered camera x")
+        (assert (= (. beta-camera.position 2) 222) "Switching away from untouched beta should persist centered camera y")
+        (assert (= (. beta-camera.position 3) 100) "Switching away from untouched beta should persist default camera z")
+        (assert (= graph-camera.position.x 10) "Switching back to main after untouched beta should restore main camera x")
+        (assert (= graph-camera.position.y 20) "Switching back to main after untouched beta should restore main camera y")
+
+        (graph-map-manager:switch-map! "beta")
+        (assert (= graph-camera.position.x 111) "Switching back to untouched beta should restore centered camera x")
+        (assert (= graph-camera.position.y 222) "Switching back to untouched beta should restore centered camera y")
+
+        (graph-camera:set-position (glm.vec3 -30 -40 150))
+        (graph-map-manager:switch-map! "main")
+        (assert (= graph-camera.position.x 10) "Switching back to main should restore main camera x")
+        (assert (= graph-camera.position.y 20) "Switching back to main should restore main camera y")
+
+        (graph-map-manager:switch-map! "beta")
+        (assert (= graph-camera.position.x -30) "Switching back to beta should restore beta camera x")
+        (assert (= graph-camera.position.y -40) "Switching back to beta should restore beta camera y")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (when runtime.graph-view (runtime.graph-view:drop) (set runtime.graph-view nil))
+  (object-selector:drop) (graph-map-manager:drop) (graph:drop) (scene:drop) (canvas:drop) (focus-manager:drop) (camera:drop)
+  (when (fs.exists data-dir) (fs.remove-all data-dir))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Graph map cameras save and restore on switch"
+                     :fn graph-map-cameras-save-and-restore-on-switch})
 
 (fn theme-switch-color-approx [a b]
   (local MathUtils (require :math-utils))
@@ -800,25 +1048,25 @@
 
 (fn install-theme-switch-rail-check! []
   (local ActivityDockView (require :activity-dock-view))
-  (local state {:checked? false})
+  (local state {:checked? false :dock nil})
   (set app.apply-active-world-hud-contrib
        (fn []
          (local dock ((ActivityDockView {}) (make-theme-switch-hud-ctx)))
+         (set state.dock dock)
          (local graph-button (find-theme-switch-rail-button))
          (local expected-colors (app.themes:get-button-colors :secondary))
          (assert graph-button "graph theme switch HUD rebuild should recreate the graph rail button")
          (assert (theme-switch-color-approx graph-button.foreground-color expected-colors.foreground)
-                 "graph theme switch HUD rebuild should use the new theme rail button foreground")
+                  "graph theme switch HUD rebuild should use the new theme rail button foreground")
          (set state.checked? true)
-         (dock:drop)
          true))
   state)
 
 (fn with-graph-theme-switch-env [f]
   (local app-keys [:active-world-runtime :canvas :graph-map :graph-view :activity-registry
-                   :activities-changed :active-activity-id :active-interaction-surface
+                   :activities-changed :activity-dock-changed :active-activity-id :active-interaction-surface
                    :preferred-interaction-surface :active-pointer-controls :scene-interactive?
-                   :canvas-interactive? :canvas-surface-interactive? :canvas-visible?
+                   :canvas-interactive? :canvas-surface-interactive? :canvas-visible? :graph-map-manager
                    :canvas-controls :first-person-controls :viewport :themes :settings
                    :renderers :engine :apply-active-world-hud-contrib :mark-active-world-hud-dirty])
   (local app-snapshot (snapshot-app-fields app-keys))
@@ -830,6 +1078,7 @@
   (set app.settings {:set-value (fn [_key _value _opts] true) :save (fn [] true)})
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.mark-active-world-hud-dirty (fn [] true))
+  (Main.install-app-shell!)
   (local rail-state (install-theme-switch-rail-check!))
   (local data-dir "/tmp/space/tests/graph-activity-theme-switch")
   (when (fs.exists data-dir) (fs.remove-all data-dir))
@@ -847,22 +1096,26 @@
   (local graph (Graph {:with-start false}))
   (local node {:key "theme-node:one" :label "Theme Node"})
   (graph:register-key-loader "theme-node" (fn [key] (assert (= key node.key) "Unexpected theme test key") node))
-  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local graph-map-manager (GraphMapManager.GraphMapManager {:graph graph}))
+  (local graph-map (graph-map-manager:get-active-map))
   (local loaded-node (graph-map:load-by-key node.key))
   (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context))
                                           :enabled? true}))
-  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map
+  (local runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :graph-map-manager graph-map-manager
                   :object-selector object-selector :movables app.movables
                   :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph-map graph-map)
+  (set app.graph-map-manager graph-map-manager)
   (local (ok result) (pcall f loaded-node rail-state))
   (pcall GraphActivityUnit.unload-graph-activity!)
+  (when (and rail-state.dock rail-state.dock.drop)
+    (rail-state.dock:drop))
   (when runtime.graph-view (runtime.graph-view:drop) (set runtime.graph-view nil))
   (object-selector:drop)
-  (graph-map:drop)
+  (graph-map-manager:drop)
   (graph:drop)
   (scene:drop)
   (canvas:drop)
@@ -901,10 +1154,37 @@
               "graph activity theme switch should rebuild the retained graph view so cached theme colors are refreshed")
       (assert rail-state.checked?
               "graph activity theme switch should cover real HUD rail foreground rebuild")
+      (assert app.activity-left-dock-builder
+              "graph activity theme switch should restore the graph sidebar dock builder")
+      (assert rail-state.dock
+              "graph activity theme switch test should keep the rebuilt activity dock")
+      (rail-state.dock:update)
+      (assert (rail-state.dock:active-dock-entity)
+              "activity dock should rebuild to include graph sidebar after graph theme switch")
       true)))
 
 (table.insert tests {:name "Graph activity theme switch rebuilds label colors"
                       :fn graph-activity-theme-switch-rebuilds-label-colors})
+
+(fn graph-activity-requires-map-manager-for-sidebar []
+  (local app-keys [:active-world-runtime :canvas :graph-map :graph-map-manager :graph-view :activity-registry :activities-changed :active-activity-id :active-interaction-surface :preferred-interaction-surface :canvas-visible? :viewport :themes])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil) (set app.activities-changed nil) (set app.active-activity-id nil) (set app.themes {:get-active-theme test-theme})
+  (local data-dir "/tmp/space/tests/graph-activity-missing-manager") (when (fs.exists data-dir) (fs.remove-all data-dir)) (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)})) (local focus-manager (FocusManager {:root-name "graph-activity-missing-manager"}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager})) (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600}) (canvas:on-viewport-changed app.viewport) (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false})) (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context)) :enabled? true}))
+  (set app.active-world-runtime {:canvas canvas :scene scene :graph graph :graph-map graph-map :object-selector object-selector :movables app.movables :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}} :world-dir data-dir})
+  (set app.canvas canvas) (set app.graph-map graph-map) (set app.graph-map-manager nil)
+  (local (ok result) (pcall (fn [] (GraphActivityUnit.load-graph-activity!) (Activities.activate-activity "graph"))))
+  (pcall GraphActivityUnit.unload-graph-activity!) (object-selector:drop) (graph-map:drop) (graph:drop) (scene:drop) (canvas:drop) (focus-manager:drop) (camera:drop) (when (fs.exists data-dir) (fs.remove-all data-dir)) (restore-app-fields! app-snapshot)
+  (assert (not ok) "Graph activity should fail loudly when runtime.graph-map-manager is missing")
+  (assert (string.find (tostring result) "runtime.graph-map-manager" 1 true) "Missing graph-map-manager failure should name the required manager") true)
+
+(table.insert tests {:name "Graph activity requires graph map manager for sidebar"
+                      :fn graph-activity-requires-map-manager-for-sidebar})
 
 
 (local main

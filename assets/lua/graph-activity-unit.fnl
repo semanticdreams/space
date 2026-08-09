@@ -32,7 +32,7 @@
   (local background (or (and theme theme.graph theme.graph.background)
                         (glm.vec4 0.095 0.105 0.13 1)))
   {:color [background.x background.y background.z]})
-
+(fn default-graph-camera-state [] {:position [0 0 100] :rotation [1 0 0 0]})
 (fn graph-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
   (local graph-view-root (fs.join-path (fs.join-path lua-root "graph") "view"))
@@ -70,11 +70,11 @@
    :node-reveal-handler reveal-sidebar-node
    :node-open-handler open-sidebar-node})
 
-(fn graph-left-dock-builder [ctx]
-  (local world-runtime app.active-world-runtime)
-  (local manager (and world-runtime world-runtime.graph-map-manager))
-  (when manager
-    ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx)))
+(fn graph-left-dock-builder [ctx] (local world-runtime (assert app.active-world-runtime "Graph sidebar requires app.active-world-runtime"))
+  (local manager (assert world-runtime.graph-map-manager "Graph sidebar requires runtime.graph-map-manager"))
+  ((GraphMapSidebar.GraphMapSidebar (graph-sidebar-options manager)) ctx))
+
+
 
 (fn active-graph-map []
   (local world-runtime app.active-world-runtime)
@@ -115,7 +115,7 @@
   (when (and world-runtime graph-view graph-view.capture-state)
     (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or map-id "main"))
-         (graph-view:capture-state)))
+         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {}) (or map-id "main"))))
 
@@ -164,10 +164,9 @@
   (local world-runtime (assert app.active-world-runtime
                                   "Graph activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                           "Graph activity requires runtime.canvas"))
-  (local graph-map (active-graph-map))
-  (assert graph-map
-          "Graph activity requires runtime.graph-map or graph-map-manager")
+                            "Graph activity requires runtime.canvas"))
+  (local manager (assert world-runtime.graph-map-manager "Graph activity requires runtime.graph-map-manager"))
+  (local graph-map (assert (manager:get-active-map) "Graph activity requires runtime.graph-map-manager active graph map"))
   (local object-selector (assert world-runtime.object-selector
                                      "Graph activity requires runtime.object-selector"))
 
@@ -210,6 +209,16 @@
   (set world-runtime.graph-view-map-id map-id)
   (set app.graph-view graph-view)
   (set app.graph-map graph-map)
+  (local saved-camera-state
+    (and graph-view.persistence
+         graph-view.persistence.saved-camera-state
+         (graph-view.persistence:saved-camera-state)))
+  (if saved-camera-state
+      (ActivityCameraState.restore-camera! slot-camera saved-camera-state)
+      (do
+        (ActivityCameraState.restore-camera! slot-camera (default-graph-camera-state))
+        (when graph-view.apply-initial-camera-policy!
+          (graph-view:apply-initial-camera-policy!))))
   (local stored-state (. world-runtime.graph-view-states map-id))
   (if stored-state
       (restore-graph-view-state! graph-view stored-state map-id)
@@ -228,6 +237,7 @@
             (graph-view:restore-state {:extra_panels saved-extra-panels})))))
   graph-view)
 
+
 (fn capture-graph-view-state! []
   (local world-runtime app.active-world-runtime)
   (local graph-view (and world-runtime world-runtime.graph-view))
@@ -235,7 +245,7 @@
     (ensure-view-states world-runtime)
     (set (. world-runtime.graph-view-states (or world-runtime.graph-view-map-id
                                                 (view-state-key)))
-         (graph-view:capture-state)))
+         (do (when graph-view.capture-camera-state! (graph-view:capture-camera-state!)) (graph-view:capture-state))))
   (and world-runtime
        (. (or world-runtime.graph-view-states {})
           (or world-runtime.graph-view-map-id (view-state-key)))))
@@ -470,6 +480,7 @@
 {:graph-activity-owned-paths graph-activity-owned-paths
  :load-graph-activity! load-graph-activity!
  :unload-graph-activity! unload-graph-activity!
- :drop-graph-view! drop-graph-view!
- :snapshot-graph-activity! snapshot-graph-activity!
- :restore-graph-activity! restore-graph-activity!}
+  :drop-graph-view! drop-graph-view!
+  :snapshot-graph-activity! snapshot-graph-activity!
+  :restore-graph-activity! restore-graph-activity!
+  :default-graph-camera-state default-graph-camera-state}

@@ -65,8 +65,10 @@
   (local on-collapse (assert options.on-collapse "card-builder requires :on-collapse"))
   (local on-open (assert options.on-open "card-builder requires :on-open"))
   (local on-menu (assert options.on-menu "card-builder requires :on-menu"))
-
+  (local title-text ((. (require :graph/view/utils) :truncate-with-ellipsis) (tostring (or node.label node.key "node")) 42))
   (fn build-header-bar [ctx]
+    (fn title-builder [child-ctx]
+      (((require :text) {:text title-text :scale 0.8}) child-ctx))
     (fn spacer-builder [_ctx]
       (local layout (Layout {:name "graph-card-header-spacer"
                               :measurer (fn [self] (set self.measure (glm.vec3 0 0 0)))
@@ -75,22 +77,20 @@
     ((Flex {:axis 1
             :yalign :center
             :xspacing 0.25
-            :children [(FlexChild spacer-builder 1)
+            :children [(FlexChild title-builder 0)
+                       (FlexChild spacer-builder 1)
                        (FlexChild (Button {:icon "close_fullscreen"
-                                            :variant :ghost
-                                            :focusable? false
-                                            :text nil
-                                            :on-click (fn [_ _] (on-collapse))}) 0)
-                       (FlexChild (Button {:icon "open_in_new"
-                                            :variant :ghost
-                                            :focusable? false
-                                            :text nil
-                                            :on-click (fn [_ event] (on-open event))}) 0)
-                       (FlexChild (Button {:icon "more_vert"
-                                            :variant :ghost
-                                            :focusable? false
-                                            :text nil
-                                            :on-click (fn [_ event] (on-menu event))}) 0)]})
+                                             :variant :ghost
+                                             :focusable? false :text nil
+                                             :on-click (fn [_ _] (on-collapse))}) 0)
+                        (FlexChild (Button {:icon "open_in_new"
+                                             :variant :ghost
+                                             :focusable? false :text nil
+                                             :on-click (fn [_ event] (on-open event))}) 0)
+                        (FlexChild (Button {:icon "more_vert"
+                                             :variant :ghost
+                                             :focusable? false :text nil
+                                             :on-click (fn [_ event] (on-menu event))}) 0)]})
       ctx))
 
   (fn [ctx]
@@ -194,7 +194,7 @@
                 (- card.position.z (/ resolved.z 2.0))))
 
     (local header-bar (build-header-bar ctx))
-    (set card.header-bar header-bar)
+    (set card.header-bar header-bar) (set card.header-title (. header-bar.children 1 :element)) (set card.header-title-text title-text)
 
     (fn measurer [self]
       (header-bar.layout:measurer)

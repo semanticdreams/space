@@ -9,7 +9,7 @@
 (local InputState (require :input-state-router))
 (local StateSystemBindings (require :state-system-bindings))
 (local Units (require :units))
-(local UnitManager (require :unit-manager))
+(local UnitManager (require :unit-manager)) (local Signal (require :signal)) (local {: Layout} (require :layout))
 (local reset-engine-events
   (fn []
     (when _G.reset-engine-events
@@ -80,8 +80,8 @@
    :activity-registry
    :activity-root-actions
    :activity-selection-actions
-   :activities-changed
-   :workspace-shell-changed
+    :activities-changed :activity-dock-changed
+    :workspace-shell-changed
    :canvas-visible?
    :drawing-controller
    :drawing-render
@@ -861,24 +861,24 @@
       (Main.install-app-shell!)
       (set app.activity-registry nil)
       (set app.suppress-workspace-shell-change? false)
-      (set app.themes {:set-theme (fn [_theme] true)
-                       :get-active-theme (fn [] {})})
-      (set app.mark-active-world-hud-dirty (fn [] true))
-      (var events [])
-      (local handler
-        (app.workspace-shell-changed:connect
-          (fn [payload]
-            (table.insert events payload))))
-      (Activities.register-activity
-        {:id "graph"
-         :label "Graph"
-         :activate (fn [_ctx] {})})
+      (set app.themes {:set-theme (fn [_theme] true) :get-active-theme (fn [] {})})
+      (set app.mark-active-world-hud-dirty (fn [] true)) (set app.activity-dock-changed (Signal))
+      (var events []) (var dock-events [])
+      (local handler (app.workspace-shell-changed:connect (fn [payload] (table.insert events payload))))
+      (local dock-handler (app.activity-dock-changed:connect (fn [payload] (table.insert dock-events payload))))
+      (local dock-builder (fn [_dock-ctx] (local layout (Layout {:name "test-graph-dock"})) {:layout layout :drop (fn [_self] (layout:drop) true)}))
+      (local activate (fn [ctx] (ctx:set-left-dock-builder! dock-builder) {}))
+      (Activities.register-activity {:id "graph" :label "Graph" :activate activate})
       (Activities.activate-activity "graph")
       (set events [])
       (ThemeActions.apply-theme :dark)
-      (app.workspace-shell-changed:disconnect handler true)
+      (app.workspace-shell-changed:disconnect handler true) (app.activity-dock-changed:disconnect dock-handler true)
       (assert (= (# events) 0)
               "Theme reapply should suppress transient activity nil/reactivate shell events when final shell is unchanged")
+      (assert (> (# dock-events) 0)
+              "Theme reapply should emit activity-dock-changed for dock hook restoration")
+      (assert app.activity-left-dock-builder
+              "Theme reapply should restore graph activity left dock builder")
       (assert (= app.active-activity-id "graph")
               "Theme reapply should restore the previously active graph activity")
       true)))

@@ -2,7 +2,7 @@
 (local logging (require :logging))
 (local PanelUtils (require :target-panel-utils))
 (local NodeViewDialogBuilder (require :graph/view/node-view-dialog-builder))
-
+(local PanelBounds (require :graph/view/panel-bounds)) (fn new-canvas-float-panel? [target placement panel] (and (= (and target target.interaction-surface) :canvas) (= placement.location :float) (= placement.size nil) (= (and panel panel.size) nil)))
 (fn GraphViewNodeViews [opts]
     (local options (or opts {}))
     (local graph-map options.graph-map)
@@ -66,8 +66,8 @@
                    (= placement.location :float)
                    (= placement.position nil))
             (set placement.position (resolve-canvas-open-position target)))
+        (when (new-canvas-float-panel? target placement panel) (set placement.size (PanelBounds.default-panel-size)))
         placement)
-
     (fn drop-node-view [node]
         (local record (. node-views node))
         (when record

@@ -1162,7 +1162,7 @@
             (assert card.view-widget "Expanded node should build the node view inline")
             (assert (not (. view-controller.labels.labels start))
                     "Expanded node should not keep a compact label")
-            (local collapse-button (. card.header-bar.children 2 :element))
+            (local collapse-button (. card.header-bar.children 3 :element))
             (collapse-button:on-click {})
             (local compact (. view-controller.points start))
             (assert (not compact._card-size) "Collapse button should restore compact point")
@@ -1245,23 +1245,24 @@
                        1e-4)
                     "Expanded card header should be at card top")
             (assert (. view.pinned node) "Expanded node should be pinned")
-            (assert (and card.header-bar card.header-bar.children (= (length card.header-bar.children) 4))
-                    "Expanded card header should have four children (spacer + three buttons)")
-            (local spacer-layout (. (. card.header-bar.children 1 :element) :layout))
+            (assert (and card.header-bar card.header-bar.children (= (length card.header-bar.children) 5))
+                    "Expanded card header should have five children (title + spacer + three buttons)")
+            (local spacer-layout (. (. card.header-bar.children 2 :element) :layout))
             (assert (> spacer-layout.size.x 0)
                     "Header flex spacer should fill remaining horizontal space")
-            (local menu-button (. card.header-bar.children 4 :element))
+            (local menu-button (. card.header-bar.children 5 :element))
             (local menu-right-edge (+ menu-button.layout.position.x menu-button.layout.size.x))
             (local card-right-edge (+ card.layout.position.x card._card-size.x))
             (assert (< (math.abs (- menu-right-edge card-right-edge)) 1e-3)
                     "Header buttons should be right-aligned in the card")
-            (local collapse-button (. card.header-bar.children 2 :element))
+            (local collapse-button (. card.header-bar.children 3 :element))
             (collapse-button:on-click {})
             (assert (not (. view.points node :_card-size)) "Collapse button should collapse expanded card")
             (assert (not (. view.pinned node)) "Collapsing should restore unpinned state")
             (view:drop)
             (graph:drop))))
 
+(fn graph-expanded-card-header-shows-truncated-node-label [] (local ctx (make-ctx)) (local long-label "This graph node label is long enough to be truncated in compact expanded card headers") (local node (Graph.GraphNode {:key "compact-title-node" :label long-label :preview (tracked-preview {})})) (local GraphNodePresentation (require :graph/view/presentation)) (local card-builder (GraphNodePresentation.card-builder {:node node :position (glm.vec3 0 0 0) :default-size (glm.vec3 32 18 0) :on-collapse (fn [] nil) :on-open (fn [_] nil) :on-menu (fn [_] nil)})) (local card (card-builder ctx)) (assert card.header-title "Expanded card should expose a title text widget") (assert card.header-title-text "Expanded card should expose the display title string") (assert (string.find card.header-title-text (string.char 46 46 46) 1 true) "Expanded card display title should truncate long labels with an ellipsis") (assert (= node.label long-label) "Truncation should not mutate the source node label") (assert (= (length card.header-bar.children) 5) "Expanded card header should have title, spacer, and three buttons") (card:drop))
 (fn graph-expanded-toggle-preserves-selection []
     (with-temp-data-dir
         (fn [_root]
@@ -1287,7 +1288,7 @@
                     "Expanded card should replace compact point in selector selection")
             (assert (= (. view.selected-nodes 1) node)
                     "GraphView selection should stay on node after expansion")
-            (local collapse-button (. card.header-bar.children 2 :element))
+            (local collapse-button (. card.header-bar.children 3 :element))
             (collapse-button:on-click {})
             (local compact (. view.points node))
             (assert (not compact._card-size) "Second double-click should collapse selected node")
@@ -1298,7 +1299,6 @@
             (view:drop)
             (graph:drop)
             (selector:drop))))
-
 (fn graph-expanded-toggle-preserves-node-center []
     (with-temp-data-dir
         (fn [_root]
@@ -1327,7 +1327,7 @@
                     "GraphView position should stay anchored at node center while expanded")
             (assert (= expanded-pos.y center.y)
                     "GraphView position should stay anchored at node center while expanded")
-            (local collapse-button (. card.header-bar.children 2 :element))
+            (local collapse-button (. card.header-bar.children 3 :element))
             (collapse-button:on-click {})
             (local compact (. view.points node))
             (assert (not compact._card-size) "Fixture should collapse back to compact point")
@@ -1776,7 +1776,7 @@
             ;; Collapse back via header bar collapse button
             (local card (. view.points node))
             (assert card._card-size "Should be expanded before collapse")
-            (local collapse-button (. card.header-bar.children 2 :element))
+            (local collapse-button (. card.header-bar.children 3 :element))
             (collapse-button:on-click {})
             ;; Verify collapsed
             (local compact (. view.points node))
@@ -1829,11 +1829,11 @@
                         (local card (. view.points node))
                         (assert card._card-size "Should be expanded after double-click")
                         (assert card.header-bar "Expanded card should have a header bar")
-                        (assert (= (length card.header-bar.children) 4)
-                                "Header should have four children (spacer + three buttons)")
+                        (assert (= (length card.header-bar.children) 5)
+                                "Header should have five children (title + spacer + three buttons)")
                         ;; Test open button
                         (local initial-children (length target.children))
-                        (local open-button (. card.header-bar.children 3 :element))
+                        (local open-button (. card.header-bar.children 4 :element))
                         (open-button:on-click {})
                         (assert opened? "Header open button should invoke node view builder")
                         (assert (> (length target.children) initial-children)
@@ -1841,7 +1841,7 @@
                         (assert (= (ctx.focus.manager:get-focused-node) (. view.focus-nodes node))
                                 "Header Open button should focus the graph node first")
                         ;; Test menu button
-                        (local menu-button (. card.header-bar.children 4 :element))
+                        (local menu-button (. card.header-bar.children 5 :element))
                         (menu-button:on-click {})
                         (assert menu-opened? "Header menu button should open a menu")
                         (assert menu-actions "Header menu should include actions")
@@ -1851,7 +1851,7 @@
                         (assert (= (. menu-actions 2 :name) "Collapse"))
                         (assert (= (. menu-actions 4 :name) "Remove from Map"))
                         ;; Test collapse button
-                        (local collapse-button (. card.header-bar.children 2 :element))
+                        (local collapse-button (. card.header-bar.children 3 :element))
                         (collapse-button:on-click {})
                         (assert (not (. view.points node :_card-size))
                                 "Header collapse button should collapse the card back to compact")
@@ -1860,7 +1860,7 @@
                         (compact-after-collapse:on-double-click {})
                         (assert (. view.points node :_card-size)
                                 "Should be re-expanded after second double-click")
-                        (local menu-button-2 (. (. view.points node :header-bar :children 4) :element))
+                        (local menu-button-2 (. (. view.points node :header-bar :children 5) :element))
                         (menu-button-2:on-click {})
                         (assert menu-actions "Re-expanded header menu should include actions")
                         ((. menu-actions 4 :fn) nil {})
@@ -3608,9 +3608,10 @@
 (table.insert tests {:name "GraphView removing node closes live scene cube panel" :fn graph-removing-node-closes-live-scene-cube-panel})
 (table.insert tests {:name "GraphView expands node inline on double click" :fn graph-expands-node-inline-on-double-click})
 (table.insert tests {:name "GraphView expanded card uses preview and measures child"
-                     :fn graph-expanded-card-uses-preview-and-measures-child})
+                      :fn graph-expanded-card-uses-preview-and-measures-child})
+(table.insert tests {:name "Graph expanded card header shows truncated node label" :fn graph-expanded-card-header-shows-truncated-node-label})
 (table.insert tests {:name "GraphView expanded toggle preserves selection"
-                     :fn graph-expanded-toggle-preserves-selection})
+                      :fn graph-expanded-toggle-preserves-selection})
 (table.insert tests {:name "GraphView expanded toggle preserves node center"
                      :fn graph-expanded-toggle-preserves-node-center})
 (table.insert tests {:name "GraphView remove then expand keeps selector list synchronized"
@@ -3691,7 +3692,6 @@
 (table.insert tests {:name "GraphView keeps saved positions when rebuilt" :fn graph-keeps-saved-positions-when-rebuilt})
 (table.insert tests {:name "GraphView batches restore graph state" :fn graph-view-batches-restore-graph-state})
 (table.insert tests {:name "GraphView updates node labels without LOD change" :fn graph-view-updates-node-labels-without-lod-change})
-
 (fn graph-view-capture-restore-selected-node-keys []
     (with-temp-data-dir
         (fn [_root]
@@ -4262,6 +4262,10 @@
     (graph-map:drop)
     (graph:drop))
 
+(fn make-capturing-line-factory [state] (fn [_ctx opts] (table.insert state.colors opts.color) {:update (fn [_self _start _end] true) :drop (fn [_self] true)}))
+(fn edge-color-approx [actual expected] (and actual expected (< (math.abs (- actual.x expected.x)) 1e-4) (< (math.abs (- actual.y expected.y)) 1e-4) (< (math.abs (- actual.z expected.z)) 1e-4) (< (math.abs (- actual.w expected.w)) 1e-4)))
+(fn graph-edge-default-color-uses-layout-theme-color [] (local theme-color (glm.vec4 0.12 0.34 0.56 1)) (local explicit-color (glm.vec4 0.9 0.8 0.7 1)) (local state {:colors []}) (local positions {}) (local layout (GraphViewLayout {:ctx (make-ctx) :edge-color theme-color :make-line (make-capturing-line-factory state) :get-position (fn [_self node] (. positions node))})) (local a (Graph.GraphNode {:key "edge-theme-a"})) (local b (Graph.GraphNode {:key "edge-theme-b"})) (set (. positions a) (glm.vec3 0 0 0)) (set (. positions b) (glm.vec3 10 0 0)) (layout:add-node a (glm.vec3 0 0 0)) (layout:add-node b (glm.vec3 10 0 0)) (layout:add-edge (Graph.GraphEdge {:source a :target b})) (assert (edge-color-approx (. state.colors 1) theme-color) "Default graph edge should use the layout/theme edge color") (layout:add-edge (Graph.GraphEdge {:source a :target b :color explicit-color})) (assert (edge-color-approx (. state.colors 2) explicit-color) "Explicit graph edge color should override the layout/theme edge color"))
+
 (table.insert tests {:name "GraphView capture-state emits selected_node_keys" :fn graph-view-capture-restore-selected-node-keys})
 (table.insert tests {:name "GraphView capture/restore preserves node selection" :fn graph-view-capture-restore-preserves-selection})
 (table.insert tests {:name "GraphView node-view panel capture includes graph-map-id" :fn graph-node-view-capture-includes-graph-map-id})
@@ -4280,13 +4284,9 @@
                      :fn graph-view-reveal-node-selects-focuses-and-centers})
 (table.insert tests {:name "GraphView open-node reveals and opens"
                      :fn graph-view-open-node-reveals-and-opens})
+(table.insert tests {:name "Graph edge default color uses layout theme color" :fn graph-edge-default-color-uses-layout-theme-color})
 
-(local main
-  (fn []
-    (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))})
-    (runner.run-tests {:name "graph-view"
-                       :tests tests})))
+(local main (fn [] (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))}) (runner.run-tests {:name "graph-view" :tests tests})))
 
-{:name "graph-view"
- :tests tests
- :main main}
+
+{:name "graph-view" :tests tests :main main}
