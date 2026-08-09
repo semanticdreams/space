@@ -258,6 +258,16 @@ Metadata shape:
            :panel panel-state}]}
 ```
 
+Graph map camera state is interaction/view metadata, not graph topology. Each
+map stores its camera transform in `graph/maps/<graph-map-id>/metadata.json`:
+
+    :camera {:position [x y z]
+             :rotation [w x y z]}
+
+When switching maps, Graph captures the outgoing map camera and restores the
+target map camera into the stable graph canvas slot camera. Maps without saved
+camera state reset to the default camera and center the first/start node once.
+
 This is a direct extension of current `GraphViewPersistence`, which already stores positions, expanded presentations, and card sizes in `graph-view/metadata.json`.
 
 ## Panel Ownership
