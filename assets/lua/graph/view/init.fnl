@@ -84,7 +84,10 @@
     (var toggle-node-presentation nil)
     (var extra-panel-transfer-source nil)
     (var extra-panel-transfer-handler nil)
-    (var dropped? false) (var pending-initial-center? false) (var initial-center-consumed? false) (var consume-initial-center! nil)
+    (var dropped? false)
+    (var pending-initial-center? false)
+    (var initial-center-consumed? false)
+    (var consume-initial-center! nil)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
     (assert focus "GraphView requires ctx.focus")
@@ -803,7 +806,9 @@
                 (when clickables.register-right-click
                     (clickables:register-right-click point))
                 (clickables:register-double-click point)
-                (registry:add-node node point idx (and node-opts node-opts.pinned)) (when consume-initial-center! (consume-initial-center! node))
+                (registry:add-node node point idx (and node-opts node-opts.pinned))
+                (when consume-initial-center!
+                    (consume-initial-center! node))
                 (attach-focus-bounds node)
                 (register-movable node point)
                 (when selector
@@ -1247,7 +1252,44 @@
         (assert camera.position "GraphView reveal-node requires camera.position")
         (assert camera.set-position "GraphView reveal-node requires camera:set-position")
         (local center (presentation-center (. registry.points node)))
-        (camera:set-position (glm.vec3 center.x center.y camera.position.z))) (set consume-initial-center! (fn [node] (when (and pending-initial-center? (not initial-center-consumed?) node (. registry.points node)) (center-camera-on-node! node) (set pending-initial-center? false) (set initial-center-consumed? true) true))) (set view.apply-initial-camera-policy! (fn [_self] (assert-not-dropped "apply-initial-camera-policy!") (if initial-center-consumed? true (do (var target-node nil) (each [node _point (pairs registry.points) &until target-node] (set target-node node)) (if target-node (do (center-camera-on-node! target-node) (set initial-center-consumed? true) (set pending-initial-center? false)) (set pending-initial-center? true)) true))))
+        (camera:set-position (glm.vec3 center.x center.y camera.position.z)))
+
+    (fn find-initial-center-target []
+        (local start-node (and graph-map.lookup (graph-map:lookup "start")))
+        (if (and start-node (. registry.points start-node))
+            start-node
+            (do
+                (var target-node nil)
+                (each [_ node (ipairs nodes-by-index) &until target-node]
+                    (when (. registry.points node)
+                        (set target-node node)))
+                target-node)))
+
+    (set consume-initial-center!
+         (fn [node]
+             (when (and pending-initial-center?
+                        (not initial-center-consumed?)
+                        node
+                        (. registry.points node))
+                 (center-camera-on-node! node)
+                 (set pending-initial-center? false)
+                 (set initial-center-consumed? true)
+                 true)))
+
+    (set view.apply-initial-camera-policy!
+         (fn [_self]
+             (assert-not-dropped "apply-initial-camera-policy!")
+             (if initial-center-consumed?
+                 true
+                 (do
+                     (local target-node (find-initial-center-target))
+                     (if target-node
+                         (do
+                             (center-camera-on-node! target-node)
+                             (set initial-center-consumed? true)
+                             (set pending-initial-center? false))
+                         (set pending-initial-center? true))
+                     true))))
 
     (set view.remove-nodes (fn [_self nodes-to-remove]
                                 (assert-not-dropped "remove-nodes")

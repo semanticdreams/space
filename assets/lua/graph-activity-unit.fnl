@@ -208,7 +208,17 @@
   (set world-runtime.graph-view graph-view)
   (set world-runtime.graph-view-map-id map-id)
   (set app.graph-view graph-view)
-  (set app.graph-map graph-map) (local saved-camera-state (and graph-view.persistence graph-view.persistence.saved-camera-state (graph-view.persistence:saved-camera-state))) (if saved-camera-state (ActivityCameraState.restore-camera! slot-camera saved-camera-state) (do (ActivityCameraState.restore-camera! slot-camera (default-graph-camera-state)) (when graph-view.apply-initial-camera-policy! (graph-view:apply-initial-camera-policy!))))
+  (set app.graph-map graph-map)
+  (local saved-camera-state
+    (and graph-view.persistence
+         graph-view.persistence.saved-camera-state
+         (graph-view.persistence:saved-camera-state)))
+  (if saved-camera-state
+      (ActivityCameraState.restore-camera! slot-camera saved-camera-state)
+      (do
+        (ActivityCameraState.restore-camera! slot-camera (default-graph-camera-state))
+        (when graph-view.apply-initial-camera-policy!
+          (graph-view:apply-initial-camera-policy!))))
   (local stored-state (. world-runtime.graph-view-states map-id))
   (if stored-state
       (restore-graph-view-state! graph-view stored-state map-id)

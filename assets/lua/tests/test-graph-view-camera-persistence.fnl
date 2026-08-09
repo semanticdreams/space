@@ -128,6 +128,20 @@
           "initial camera policy should center existing node y")
   (drop-view-fixture! fixture))
 
+(fn no-saved-camera-prefers-mounted-start-node []
+  (local dir (reset-dir))
+  (local fixture (make-view-fixture dir))
+  (local other (Graph.GraphNode {:key "other"}))
+  (local start (Graph.GraphNode {:key "start"}))
+  (fixture.graph-map:add-node other {:position (glm.vec3 900 800 0)})
+  (fixture.graph-map:add-node start {:position (glm.vec3 12 34 0)})
+  (fixture.view:apply-initial-camera-policy!)
+  (assert (= fixture.camera.position.x 12)
+          "initial camera policy should prefer mounted start node x")
+  (assert (= fixture.camera.position.y 34)
+          "initial camera policy should prefer mounted start node y")
+  (drop-view-fixture! fixture))
+
 (fn no-saved-camera-empty-map-centers-first-added-node-once []
   (local dir (reset-dir))
   (local fixture (make-view-fixture dir))
@@ -160,6 +174,8 @@
                       :fn malformed-false-camera-rotation-fails-loudly})
 (table.insert tests {:name "no saved camera existing node centers node"
                      :fn no-saved-camera-existing-node-centers-node})
+(table.insert tests {:name "no saved camera prefers mounted start node"
+                     :fn no-saved-camera-prefers-mounted-start-node})
 (table.insert tests {:name "no saved camera empty map centers first added node once"
                      :fn no-saved-camera-empty-map-centers-first-added-node-once})
 
