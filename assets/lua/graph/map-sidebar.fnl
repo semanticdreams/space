@@ -344,6 +344,13 @@
             (local width (width-provider))
             (child.layout:measurer)
             (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
+        (fn constrained-measurer [self constraints]
+            (local width (width-provider))
+            (if (and constraints constraints.max)
+                (child.layout:measure-constrained
+                    {:max (glm.vec3 width constraints.max.y constraints.max.z)})
+                (child.layout:measurer))
+            (set self.measure (glm.vec3 width child.layout.measure.y child.layout.measure.z)))
         (fn layouter [self]
             (local width (width-provider))
             (set child.layout.position self.position)
@@ -354,6 +361,7 @@
             (child.layout:layouter))
         (local layout (Layout {:name name
                                :measurer measurer
+                               :constrained-measurer constrained-measurer
                                :layouter layouter
                                :children [child.layout]}))
         {:layout layout
@@ -457,8 +465,12 @@
              (set state.resolved-sidebar-width
                   (math.max sidebar-width state.content-entity.layout.measure.x))
              (measure-content state max-height)
+             (local measured-height
+                    (if max-height
+                        (math.min max-height state.content-entity.layout.measure.y)
+                        state.content-entity.layout.measure.y))
              (set self.measure (glm.vec3 (current-sidebar-width state)
-                                         state.content-entity.layout.measure.y
+                                         measured-height
                                          state.content-entity.layout.measure.z)))
         (do
             (set state.resolved-sidebar-width sidebar-width)
