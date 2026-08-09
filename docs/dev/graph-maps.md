@@ -268,7 +268,9 @@ When switching maps, Graph captures the outgoing map camera and restores the
 target map camera into the stable graph canvas slot camera. Maps without saved
 camera state reset to the default camera and center the first/start node once.
 
-This is a direct extension of current `GraphViewPersistence`, which already stores positions, expanded presentations, and card sizes in `graph-view/metadata.json`.
+Current graph map view metadata lives under `graph/maps/<graph-map-id>/metadata.json`.
+Legacy `graph-view/metadata.json` data is migration input only, not the current
+write location for graph map metadata.
 
 ## Panel Ownership
 

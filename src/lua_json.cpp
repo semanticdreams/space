@@ -18,7 +18,14 @@ json lua_to_json(const sol::object& obj);
 // Implementation
 
 sol::object json_loads(sol::this_state ts, const std::string& json_str) {
-    json j = json::parse(json_str);
+    json j;
+    try {
+        j = json::parse(json_str);
+    } catch (const json::exception& e) {
+        lua_State* lua = ts;
+        luaL_error(lua, "json.loads parse error: %s", e.what());
+        return sol::nil;
+    }
     sol::state_view lua(ts);
     return json_to_lua(lua, j);
 }
