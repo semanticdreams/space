@@ -18,11 +18,11 @@
   (local text-color (glm.vec4 0.11 0.14 0.18 1))
   (local secondary-base (glm.vec4 0.885 0.905 0.935 1))
   (local input-base (glm.vec4 0.982 0.989 0.996 1))
-  (local rail-surface (glm.vec4 0.885 0.902 0.93 0.98))
-  (local app-background (glm.vec4 0.918 0.932 0.955 1))
-  (local chrome-panel-surface (glm.vec4 0.948 0.958 0.976 0.98))
-  (local card-surface (glm.vec4 0.975 0.982 0.992 1))
-  (local panel-outline (glm.vec4 0.74 0.79 0.87 0.98))
+  (local rail-surface (glm.vec4 0.82 0.85 0.89 0.98))
+  (local app-background (glm.vec4 0.89 0.908 0.936 1))
+  (local chrome-panel-surface (glm.vec4 0.94 0.952 0.972 0.98))
+  (local card-surface (glm.vec4 0.972 0.98 0.992 1))
+  (local panel-outline (glm.vec4 0.72 0.77 0.85 0.98))
   {:name :light
    :font font
    :italic-font italic-font
