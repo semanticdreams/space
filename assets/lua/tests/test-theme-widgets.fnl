@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local _ (require :main))
 (local Card (require :card))
+(local LightTheme (require :light-theme))
 (local Text (require :text))
 (local TextStyle (require :text-style))
 (local MathUtils (require :math-utils))
@@ -15,6 +16,17 @@
        (approx a.y b.y)
        (approx a.z b.z)
        (approx a.w b.w)))
+
+(fn luminance [color]
+  (+ (* color.x 0.2126)
+     (* color.y 0.7152)
+     (* color.z 0.0722)))
+
+(fn assert-between [label value lower upper]
+  (assert (<= lower value)
+          (.. label " should be at least " lower ", got " value))
+  (assert (<= value upper)
+          (.. label " should be at most " upper ", got " value)))
 
 (fn make-vector-buffer []
   (local buffer {})
@@ -158,6 +170,52 @@
           "should resolve default scale from ctx.theme.text.scale")
   (span:drop))
 
+(fn light-theme-exposes-tonal-layering []
+  (local theme (LightTheme))
+  (local rail theme.chrome.rail-background)
+  (local background theme.graph.background)
+  (local panel theme.chrome.panel-background)
+  (local card theme.card.background)
+  (local border theme.panel-border)
+  (local secondary theme.button.variants.secondary.background)
+  (local rail-luminance (luminance rail))
+  (local background-luminance (luminance background))
+  (local panel-luminance (luminance panel))
+  (local card-luminance (luminance card))
+  (local border-luminance (luminance border))
+  (local secondary-luminance (luminance secondary))
+  (local rail-background-gap (- background-luminance rail-luminance))
+  (local background-panel-gap (- panel-luminance background-luminance))
+  (local panel-card-gap (- card-luminance panel-luminance))
+  (local secondary-rail-gap (- secondary-luminance rail-luminance))
+  (assert (< rail-luminance background-luminance)
+           "Light rail surface should be darker than graph/background")
+  (assert (<= background-luminance 0.915)
+          "Light graph/background should stay below the too-white luminance range")
+  (assert (< background-luminance panel-luminance)
+           "Light panel surface should be lighter than graph/background")
+  (assert (< panel-luminance card-luminance)
+           "Light card/dialog surface should be lighter than panel surface")
+  (assert-between "Light rail/background luminance gap"
+                  rail-background-gap 0.05 0.09)
+  (assert-between "Light secondary button/rail luminance gap"
+                  secondary-rail-gap 0.04 0.08)
+  (assert-between "Light background/panel luminance gap"
+                  background-panel-gap 0.035 0.06)
+  (assert-between "Light panel/card luminance gap"
+                  panel-card-gap 0.018 0.04)
+  (assert (<= 0.95 border.w)
+          "Light panel border should be mostly opaque")
+  (assert (< border-luminance panel-luminance)
+          "Light panel border should be darker than panel surface")
+  (assert (< border-luminance card-luminance)
+          "Light panel border should be darker than card surface")
+  (assert (<= 0.12 (- panel-luminance border-luminance))
+          "Light panel border should visibly separate panels")
+  (assert (<= 0.14 (- card-luminance border-luminance))
+          "Light panel border should visibly separate cards/dialogs")
+  true)
+
 (table.insert tests {:name "Card pulls colors from theme" :fn card-defaults-to-theme-colors})
 (table.insert tests {:name "Text defaults to theme foreground color" :fn text-defaults-to-theme-color})
 (table.insert tests {:name "Text supports :scale without explicit TextStyle" :fn text-supports-scale-without-style})
@@ -169,7 +227,9 @@
 (table.insert tests {:name "Chrome background resolves theme tokens"
                      :fn chrome-background-resolves-theme-tokens})
 (table.insert tests {:name "Chrome background falls back without black"
-                     :fn chrome-background-falls-back-without-black})
+                      :fn chrome-background-falls-back-without-black})
+(table.insert tests {:name "Light theme exposes Material-style tonal layering"
+                     :fn light-theme-exposes-tonal-layering})
 
 (local main
   (fn []

@@ -52,7 +52,7 @@ See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/d
 - **Board** — Structured board activity with connectors, selection, resizable items. See [Activities Architecture](/dev/features/activities); legacy notes: [Board Canvas Mode](/dev/features/board-canvas-mode)
 - **Terrain** — Heightfield terrain with physics, painting, selection tools. See [Terrain Heightfield System](/dev/features/terrain-heightfield-system)
 - **HUD** — Heads-up display with control panel, status panel, command hints, panel persistence
-- **Theming** — Dark/light theme system with widget-level utilities
+- **Theming** — Dark/light theme system with widget-level utilities. See [Light Theme Layering](/dev/notes/light-theme-layering)
 
 ## Application Model (Fennel)
 

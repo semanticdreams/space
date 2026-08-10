@@ -18,6 +18,11 @@
   (local text-color (glm.vec4 0.11 0.14 0.18 1))
   (local secondary-base (glm.vec4 0.885 0.905 0.935 1))
   (local input-base (glm.vec4 0.982 0.989 0.996 1))
+  (local rail-surface (glm.vec4 0.82 0.85 0.89 0.98))
+  (local app-background (glm.vec4 0.89 0.908 0.936 1))
+  (local chrome-panel-surface (glm.vec4 0.94 0.952 0.972 0.98))
+  (local card-surface (glm.vec4 0.972 0.98 0.992 1))
+  (local panel-outline (glm.vec4 0.72 0.77 0.85 0.98))
   {:name :light
    :font font
    :italic-font italic-font
@@ -43,22 +48,22 @@
                :item-selected-background (glm.vec4 0.78 0.85 0.97 0.9)
                :item-foreground text-color}
    :combo-box {:items-per-page 10}
-   :graph {:background (glm.vec4 0.91 0.925 0.95 1)
+   :graph {:background app-background
            :edge-color (glm.vec4 0.28 0.34 0.45 0.82)
            :edge-thickness 4.0
            :label-color (glm.vec4 0.22 0.27 0.35 0.95)
            :label-target-pixels 13.0
            :label-min-scale 4.0
            :selection-border-color (glm.vec4 0.18 0.5 0.9 0.9)}
-   :chrome {:rail-background (glm.vec4 0.88 0.9 0.935 0.98)
-            :panel-background (glm.vec4 0.945 0.958 0.978 0.98)}
-   :panel-border (glm.vec4 0.76 0.81 0.89 0.96)
+   :chrome {:rail-background rail-surface
+            :panel-background chrome-panel-surface}
+   :panel-border panel-outline
    :terrain-selection {:fill (glm.vec4 0.18 0.5 0.9 0.18)
                        :border (glm.vec4 0.16 0.47 0.88 0.95)}
    :physics-containment {:visualization {:color (glm.vec4 0.14 0.31 0.58 0.42)}}
    :flat-terrain {:dark (glm.vec4 0.86 0.89 0.93 1.0)
                   :light (glm.vec4 0.945 0.962 0.982 1.0)}
-   :card {:background (glm.vec4 0.945 0.958 0.978 1)
+   :card {:background card-surface
           :foreground text-color}
    :qr-code {:foreground (glm.vec4 0.08 0.1 0.13 1)
              :background (glm.vec4 1 1 1 1)}
