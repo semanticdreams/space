@@ -389,12 +389,10 @@
 (fn dialog-titlebar-uses-action-button-color []
   (with-dialog-stubs
     (fn [env]
-      (local action-color (glm.vec4 0.33 0.18 0.61 1))
-      (set env.ctx.theme
-           {:button {:default-variant :secondary
-                     :variants
-                     {:secondary {:background (glm.vec4 0.2 0.2 0.24 1)}
-                      :tertiary {:background action-color}}}})
+      (local theme ((require :light-theme)))
+      (local action-color theme.button.variants.tertiary.background)
+      (assert action-color "LightTheme must expose tertiary background for default dialog titlebars")
+      (set env.ctx.theme theme)
       (local child (make-probe-widget "color-match"))
       (local dialog ((Dialog {:title "Themed"
                               :child child.builder
@@ -410,6 +408,8 @@
       (local button button-meta.element)
       (assert (color= title-color action-color))
       (assert (color= button.background-color action-color))
+      (assert (not (color= title-color theme.button.variants.secondary.background))
+              "Default light dialog titlebar should not fall back to secondary")
       (dialog:drop)
       (assert child.state.drop-called))))
 

@@ -216,6 +216,20 @@
           "Light panel border should visibly separate cards/dialogs")
   true)
 
+(fn light-theme-exposes-distinct-tertiary-titlebar-surface []
+  (local theme (LightTheme))
+  (local tertiary theme.button.variants.tertiary)
+  (assert tertiary "Light theme should define a tertiary button/dialog titlebar variant")
+  (local titlebar tertiary.background)
+  (assert titlebar "Light tertiary variant should expose a background")
+  (local titlebar-luminance (luminance titlebar))
+  (local background-gap (math.abs (- (luminance theme.graph.background) titlebar-luminance)))
+  (local card-gap (math.abs (- (luminance theme.card.background) titlebar-luminance)))
+  (assert (<= 0.04 background-gap)
+          "Light tertiary titlebar should visibly separate from app/background")
+  (assert (<= 0.08 card-gap)
+          "Light tertiary titlebar should visibly separate from card/dialog body"))
+
 (table.insert tests {:name "Card pulls colors from theme" :fn card-defaults-to-theme-colors})
 (table.insert tests {:name "Text defaults to theme foreground color" :fn text-defaults-to-theme-color})
 (table.insert tests {:name "Text supports :scale without explicit TextStyle" :fn text-supports-scale-without-style})
@@ -229,7 +243,9 @@
 (table.insert tests {:name "Chrome background falls back without black"
                       :fn chrome-background-falls-back-without-black})
 (table.insert tests {:name "Light theme exposes Material-style tonal layering"
-                     :fn light-theme-exposes-tonal-layering})
+                      :fn light-theme-exposes-tonal-layering})
+(table.insert tests {:name "Light theme exposes distinct tertiary dialog titlebar surface"
+                     :fn light-theme-exposes-distinct-tertiary-titlebar-surface})
 
 (local main
   (fn []
