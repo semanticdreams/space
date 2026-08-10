@@ -17,6 +17,7 @@
                                  :texture-name "font-UbuntuMono-BI"}))
   (local text-color (glm.vec4 0.11 0.14 0.18 1))
   (local secondary-base (glm.vec4 0.885 0.905 0.935 1))
+  (local tertiary-base (glm.vec4 0.83 0.86 0.91 1))
   (local input-base (glm.vec4 0.982 0.989 0.996 1))
   (local rail-surface (glm.vec4 0.82 0.85 0.89 0.98))
   (local app-background (glm.vec4 0.89 0.908 0.936 1))
@@ -88,6 +89,11 @@
                                       :hover-delta -0.028
                                       :pressed-delta -0.06
                                       :focus-outline (glm.vec4 0.9 0.52 0.12 0.9)})
+     :tertiary (make-button-variant tertiary-base
+                                    {:foreground text-color
+                                     :hover-delta -0.03
+                                     :pressed-delta -0.065
+                                     :focus-outline (glm.vec4 0.9 0.52 0.12 0.9)})
      :success (make-button-variant (glm.vec4 0.2 0.64 0.32 1)
                                    {:foreground (glm.vec4 0.96 0.99 0.97 1)
                                     :hover-delta -0.04
