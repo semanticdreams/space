@@ -1883,7 +1883,9 @@
                    :tools app.agent-tool-surface
                    :approvals app.agent-approvals
                    :agents app.agent-registry
-                   :providers app.agent-providers}})))
+                   :providers app.agent-providers
+                   :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")
+                   :opencode-mcp-bridge app.agent-opencode-mcp-bridge}})))
 
   ;; Rebuild HUD to show agent panel now that runner is available
   (when (and app.hud app.agent-runner)

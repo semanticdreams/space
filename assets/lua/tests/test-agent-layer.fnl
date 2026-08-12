@@ -1658,6 +1658,66 @@
   (runner:drop)
   (clean-dir dir))
 
+(fn test-runner-creates-artifact-context []
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local SessionMod (require :llm/agent/session))
+  (local dir (temp-dir))
+  (local artifact-root (fs.join-path dir "agent-artifacts"))
+  (local registry (AgentRegistry {:deps {}}))
+  (var captured-artifacts nil)
+  (var captured-runtime-context nil)
+  (registry:register "space-agent"
+    (fn [_deps]
+      {:id "space-agent"
+       :run (fn [_self _input _session ctx]
+              (set captured-artifacts ctx.artifacts)
+              (set captured-runtime-context ctx.runtime-context)
+              (ctx.turn:finish {:content "ok"}))}))
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry registry
+     :deps {:app :stub
+            :presets {}
+            :tools {}
+            :approvals {}
+            :agents registry
+            :providers {}
+            :artifact-root artifact-root}}))
+  (local session (runner:create-session "space-agent"))
+  (runner:run-turn session.id "capture artifacts" {})
+  (local expected-session-dir (fs.join-path artifact-root session.id))
+  (local expected-report-path (fs.join-path expected-session-dir "report.md"))
+  (assert captured-artifacts "agent context should include artifacts")
+  (assert (= captured-artifacts.root artifact-root) "artifact context should include root")
+  (assert (= captured-artifacts.session-dir expected-session-dir)
+          "artifact context should include session directory")
+  (assert (= captured-artifacts.report-path expected-report-path)
+          "artifact context should include report path")
+  (assert (fs.exists expected-session-dir) "artifact session directory should exist")
+  (assert captured-runtime-context "agent context should include runtime-context")
+  (assert (= captured-runtime-context.artifact-dir expected-session-dir)
+          "runtime-context should use the session artifact directory")
+  (assert (= captured-runtime-context.report-path expected-report-path)
+          "runtime-context should use the artifact report path")
+  (assert (= captured-runtime-context.agent-session-id session.id)
+          "runtime-context should persist agent session id")
+  (assert (= captured-runtime-context.validation-mode "disk-only")
+          "runtime-context should start as disk-only")
+  (SessionMod.invalidate-cache session.id)
+  (local persisted (runner:get-session session.id))
+  (local runtime-context persisted.data.runtime-context)
+  (assert (= runtime-context.artifact-dir expected-session-dir)
+          "persisted runtime-context should include artifact-dir")
+  (assert (= runtime-context.report-path expected-report-path)
+          "persisted runtime-context should include report-path")
+  (assert (= runtime-context.agent-session-id session.id)
+          "persisted runtime-context should include agent-session-id")
+  (assert (= runtime-context.validation-mode "disk-only")
+          "persisted runtime-context should default to disk-only")
+  (runner:drop)
+  (clean-dir dir))
+
 ;; ═══════════════════════════════════════
 ;; SpaceAgent fixture tests
 ;; ═══════════════════════════════════════
@@ -1676,6 +1736,7 @@
   (local {: AgentRegistry} (require :llm/agent/registry))
   (local {: AgentRunner} (require :llm/agent/runner))
   (local dir (temp-dir))
+  (local artifact-root (fs.join-path dir "agent-artifacts"))
 
   ;; Mock opencode client
   (var create-calls [])
@@ -1731,7 +1792,8 @@
             :tools mock-tools
             :approvals {}
             :agents reg
-            :providers {:opencode mock-opencode}}}))
+            :providers {:opencode mock-opencode}
+            :artifact-root artifact-root}}))
 
   (local session (runner:create-session "space-agent"))
   (var items-log [])
@@ -1754,6 +1816,24 @@
   (assert (string.match first-part.text "draw a red circle") "prompt should contain user input")
   (assert (string.match first-call.body.system "Use drawing shape tools")
           "system prompt should include active preset guidance")
+  (local expected-report-path
+    (fs.join-path artifact-root session.id "report.md"))
+  (assert (string.find first-call.body.system expected-report-path 1 true)
+          "system prompt should include artifact report path")
+  (assert (string.find first-call.body.system "validation-mode: live" 1 true)
+          "system prompt should document live validation mode")
+  (assert (string.find first-call.body.system "validation-mode: disk-only" 1 true)
+          "system prompt should document disk-only validation mode")
+  (assert (string.find first-call.body.system "compile check" 1 true)
+          "system prompt should mention compile check evidence")
+  (assert (string.find first-call.body.system "constraints" 1 true)
+          "system prompt should mention constraints evidence")
+  (assert (string.find first-call.body.system "focused test" 1 true)
+          "system prompt should mention focused test evidence")
+  (assert (string.find first-call.body.system
+                       "Do not claim the running app was validated from disk-only evidence"
+                       1 true)
+          "system prompt should warn against live claims after disk-only validation")
 
   ;; Verify session items persisted
   (local reloaded (runner:get-session session.id))
@@ -2480,6 +2560,7 @@
 (table.insert tests {:name "runner delete session" :fn test-runner-delete-session})
 (table.insert tests {:name "runner list sessions" :fn test-runner-list-sessions})
 (table.insert tests {:name "runner turn fail persists error item" :fn test-runner-turn-fail-persists-error-item})
+(table.insert tests {:name "runner creates artifact context" :fn test-runner-creates-artifact-context})
 
 (table.insert tests {:name "space-agent registers with registry" :fn test-space-agent-registers-with-registry})
 (table.insert tests {:name "space-agent run with mock opencode" :fn test-space-agent-run-with-mock-opencode})

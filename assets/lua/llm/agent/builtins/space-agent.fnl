@@ -457,6 +457,23 @@
           (table.insert fragments prompt))
         (table.concat fragments "\n"))))
 
+(fn format-runtime-guidance [ctx]
+  (local artifacts (if ctx.artifacts ctx.artifacts {}))
+  (local session-dir (if artifacts.session-dir
+                         artifacts.session-dir
+                         "<agent artifact session directory>"))
+  (local report-path (if artifacts.report-path
+                         artifacts.report-path
+                         (.. session-dir "/report.md")))
+  (table.concat
+    [(.. "Write implementer, reviewer, and supervisor reports under: " session-dir)
+     (.. "Prefer this report handoff path: " report-path)
+     "Each report validation section must include compile check evidence, constraints evidence or scoped non-applicability, focused test evidence, and live smoke evidence when available."
+     "Use validation-mode: live only after a live MCP reload/smoke succeeds."
+     "Use validation-mode: disk-only when validation did not use the running app."
+     "Do not claim the running app was validated from disk-only evidence."]
+    "\n"))
+
 (fn build-agent [deps]
   ;; Return a plain table with :id, :name, and :run.
   ;; The :run method is defined as a named function for scoping clarity.
@@ -478,6 +495,7 @@
     (local context-block (PromptUtils.format-context ctx))
     (local preset-block (PromptUtils.format-presets ctx.presets))
     (local capability-guidance (format-capability-guidance ctx.tools))
+    (local runtime-guidance (format-runtime-guidance ctx))
     (local system-prompt
       (PromptUtils.assemble-blocks
         [{:name "Instructions"
@@ -488,7 +506,8 @@
                      "\n")}
          {:name "Context" :content context-block}
          {:name "Available Capabilities" :content preset-block}
-         {:name "Capability Guidance" :content capability-guidance}]))
+         {:name "Capability Guidance" :content capability-guidance}
+         {:name "Runtime Artifact and Validation Guidance" :content runtime-guidance}]))
 
     (fn fail [message]
       (close-live-events)
@@ -572,4 +591,5 @@
   (registry:register "space-agent" (fn [_registry-deps] (build-agent deps))))
 
 {:SpaceAgent build-agent
+ :format-runtime-guidance format-runtime-guidance
  :register register}

@@ -11,6 +11,51 @@
 (fn now []
   (os.time))
 
+(fn default-artifact-root [data-dir]
+  (local parent (and fs.parent (fs.parent data-dir)))
+  (if (and parent (not (= parent "")) (not (= parent data-dir)))
+      (fs.join-path parent "agent-artifacts")
+      (fs.join-path data-dir "agent-artifacts")))
+
+(fn bridge-status [deps]
+  (when deps.opencode-mcp-bridge
+    (deps.opencode-mcp-bridge:status)))
+
+(fn build-runtime-context [session artifact-root session-dir report-path deps]
+  (local existing (if session.data.runtime-context session.data.runtime-context {}))
+  (local status (bridge-status deps))
+  (local mcp-endpoint (if (and status status.url)
+                          status.url
+                          existing.mcp-endpoint))
+  (local opencode-session-id (if existing.opencode-session-id
+                                 existing.opencode-session-id
+                                 (. session.data :opencode-session-id)))
+  (local validation-mode (if existing.validation-mode
+                             existing.validation-mode
+                             "disk-only"))
+  {:agent-session-id session.id
+   :artifact-dir session-dir
+   :report-path report-path
+   :mcp-endpoint mcp-endpoint
+   :opencode-server-url existing.opencode-server-url
+   :opencode-session-id opencode-session-id
+   :last-live-connection-at existing.last-live-connection-at
+   :validation-mode validation-mode})
+
+(fn ensure-artifact-context! [session data-dir deps]
+  (local artifact-root (if deps.artifact-root
+                           deps.artifact-root
+                           (default-artifact-root data-dir)))
+  (local session-dir (fs.join-path artifact-root session.id))
+  (local report-path (fs.join-path session-dir "report.md"))
+  (when (not (fs.exists session-dir))
+    (fs.create-dirs session-dir))
+  (tset session.data :runtime-context
+        (build-runtime-context session artifact-root session-dir report-path deps))
+  {:root artifact-root
+   :session-dir session-dir
+   :report-path report-path})
+
 (fn AgentRunner [opts]
   (local data-dir (or opts.data-dir (error "AgentRunner requires :data-dir")))
   (local registry (or opts.registry (error "AgentRunner requires :registry")))
@@ -41,9 +86,11 @@
 
   (fn build-context [self session]
     (do
-      (local callbacks {:on-item (or deps.on-item nil)
-                        :on-finish (or deps.on-finish nil)
-                        :on-error (or deps.on-error nil)})
+      (local artifacts (ensure-artifact-context! session data-dir deps))
+      (SessionMod.save-session session data-dir)
+      (local callbacks {:on-item deps.on-item
+                        :on-finish deps.on-finish
+                        :on-error deps.on-error})
       {:app deps.app
        :presets deps.presets
        :tools deps.tools
@@ -52,9 +99,11 @@
        :providers deps.providers
        :callbacks callbacks
        :turn nil  ;; set after TurnPair creation
-       :session session
-       :session-id session.id
-       :data-dir data-dir}))
+        :session session
+        :session-id session.id
+        :artifacts artifacts
+        :runtime-context session.data.runtime-context
+        :data-dir data-dir}))
 
   (fn run-turn [self session-id input callbacks]
     (assert (= (type session-id) "string") "session-id must be a string")
