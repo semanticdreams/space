@@ -2468,7 +2468,7 @@
              (on-response {:ok false :error "Session not found"}))
       :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
   (local second-provider
-    {:server {:url "http://127.0.0.1:9999"}
+    {:server {:url (fn [] "http://127.0.0.1:9999")}
      :session
      {:create (fn [_body on-response]
                 (set fresh-create-calls (+ fresh-create-calls 1))
@@ -2533,6 +2533,100 @@
           "runtime context should record OpenCode server URL")
   (assert reloaded.data.runtime-context.last-live-connection-at
           "runtime context should record live connection timestamp")
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-fails-non-stale-opencode-get-error []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var create-calls 0)
+  (var refresh-calls 0)
+  (local provider
+    {:session
+     {:create (fn [_body _on-response] (set create-calls (+ create-calls 1)))
+      :prompt (fn [_id _body _on-response] nil)
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id on-response]
+             (on-response {:ok false :error "permission denied"}))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local providers {:opencode provider
+                    :refresh-opencode (fn []
+                                        (set refresh-calls (+ refresh-calls 1))
+                                        provider)})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets {:get-active-presets (fn [] []) :get-prompt-fragments (fn [] []) :get-tool-defs (fn [] [])}
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "existing-oc-session")
+  (var error-received nil)
+  (local handle (runner:run-turn session.id "non-stale get error"
+    {:on-error (fn [e] (set error-received e))}))
+  (assert (= (handle:status) :failed) "non-stale get error should fail the turn")
+  (assert (= create-calls 0) "non-stale get error should not create a fresh session")
+  (assert (= refresh-calls 0) "non-stale get error should not refresh provider")
+  (assert (string.match error-received.error "permission denied") "failure should include OpenCode error")
+  (local reloaded (runner:get-session session.id))
+  (assert (= reloaded.data.opencode-session-id "existing-oc-session")
+          "non-stale get error should preserve saved OpenCode session id")
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-fails-when-opencode-refresh-raises []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var get-callback nil)
+  (var create-calls 0)
+  (local provider
+    {:session
+     {:create (fn [_body _on-response] (set create-calls (+ create-calls 1)))
+      :prompt (fn [_id _body _on-response] nil)
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id on-response] (set get-callback on-response))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local providers {:opencode provider
+                    :refresh-opencode (fn [] (error "bridge refresh failed"))})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets {:get-active-presets (fn [] []) :get-prompt-fragments (fn [] []) :get-tool-defs (fn [] [])}
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "stale-oc-session")
+  (var error-received nil)
+  (local handle (runner:run-turn session.id "refresh raises"
+    {:on-error (fn [e] (set error-received e))}))
+  (assert (= (handle:status) :running) "turn should wait for async get callback")
+  (assert get-callback "test should capture async get callback")
+  (get-callback {:ok false :error "Session not found"})
+  (assert (= (handle:status) :failed) "refresh exception should fail the turn")
+  (assert (= create-calls 0) "refresh exception should not create a fresh session")
+  (assert (string.match error-received.error "OpenCode reconnect failed")
+          "failure should identify reconnect failure")
+  (assert (string.match error-received.error "bridge refresh failed")
+          "failure should include refresh error")
+  (local reloaded (runner:get-session session.id))
+  (assert (string.match reloaded.data.runtime-context.last-reconnect-error "bridge refresh failed")
+          "runtime context should record refresh failure")
   (runner:drop)
   (clean-dir dir))
 
@@ -2736,6 +2830,8 @@
 (table.insert tests {:name "space-agent waits for async opencode callbacks" :fn test-space-agent-waits-for-async-opencode-callbacks})
 (table.insert tests {:name "space-agent reuses opencode session" :fn test-space-agent-reuses-opencode-session})
 (table.insert tests {:name "space-agent refreshes stale opencode session" :fn test-space-agent-refreshes-stale-opencode-session})
+(table.insert tests {:name "space-agent fails non-stale opencode get error" :fn test-space-agent-fails-non-stale-opencode-get-error})
+(table.insert tests {:name "space-agent fails when opencode refresh raises" :fn test-space-agent-fails-when-opencode-refresh-raises})
 (table.insert tests {:name "space-agent handles opencode error" :fn test-space-agent-handles-opencode-error})
 (table.insert tests {:name "space-agent handles prompt error" :fn test-space-agent-handles-prompt-error})
 

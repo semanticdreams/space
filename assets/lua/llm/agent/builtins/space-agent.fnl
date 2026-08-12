@@ -493,13 +493,17 @@
     ((. providers :refresh-opencode))))
 
 (fn provider-server-url [opencode]
-  (if (and opencode opencode.server opencode.server.url)
-      opencode.server.url
-      (and opencode opencode.base-url)
-      opencode.base-url
-      (and opencode opencode.base_url)
-      opencode.base_url
-      nil))
+  (local url-value
+    (if (and opencode opencode.server opencode.server.url)
+        opencode.server.url
+        (and opencode opencode.base-url)
+        opencode.base-url
+        (and opencode opencode.base_url)
+        opencode.base_url
+        nil))
+  (if (= (type url-value) "function")
+      (url-value)
+      url-value))
 
 (fn ensure-session-runtime-context! [session]
   (when (not session.data.runtime-context)
@@ -533,7 +537,7 @@
      {:name "Capability Guidance" :content (format-capability-guidance ctx.tools)}
      {:name "Runtime Artifact and Validation Guidance" :content (format-runtime-guidance ctx)}]))
 
-(fn handle-get-response [session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt]
+(fn handle-get-response [session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt fail]
   (if (and resp resp.ok)
       (do
         (local existing (response-data resp))
@@ -541,13 +545,20 @@
         (send-prompt existing))
       (do
         (local get-error (response-error resp "unknown error"))
-        (tset session.data :opencode-session-id nil)
-        (when (stale-opencode-error? get-error)
-          (local refreshed (refresh-opencode-provider ctx))
-          (if refreshed
-              (refresh! refreshed)
-              (record-reconnect-error! session get-error)))
-        (create-session))))
+        (if (stale-opencode-error? get-error)
+            (do
+              (local (ok reconnect-err)
+                (pcall (fn []
+                         (tset session.data :opencode-session-id nil)
+                         (local refreshed (refresh-opencode-provider ctx))
+                         (if refreshed
+                             (refresh! refreshed)
+                             (record-reconnect-error! session get-error))
+                         (create-session))))
+              (when (not ok)
+                (record-reconnect-error! session (tostring reconnect-err))
+                (fail (.. "OpenCode reconnect failed: " (tostring reconnect-err)))))
+            (fail (.. "OpenCode session get failed: " get-error))))))
 
 (fn build-agent [deps]
   ;; Return a plain table with :id, :name, and :run.
@@ -638,7 +649,7 @@
             (local (ok err)
               (pcall opencode.session.get opencode-session-id
                       (fn [resp]
-                        (handle-get-response session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt))))
+                        (handle-get-response session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt fail))))
             (when (not ok)
               (fail (.. "OpenCode session get submit failed: " (tostring err)))))
           (create-session)))
