@@ -2183,9 +2183,9 @@
 (table.insert tests {:name "Board selection action always shows connect (idempotent)"
                      :fn board-selection-action-shows-connect-even-when-already-connected})
 (table.insert tests {:name "Board context enricher sets selected-items"
-                     :fn board-selection-action-enriches-context-with-selected-items})
+                      :fn board-selection-action-enriches-context-with-selected-items})
 (table.insert tests {:name "Board selection action uses selector wiring through runtime"
-                      :fn board-selection-action-uses-selector-wiring-through-runtime})
+                       :fn board-selection-action-uses-selector-wiring-through-runtime})
 (table.insert tests {:name "BoardView remove-item deletes string entity from store"
                       :fn board-view-remove-item-deletes-string-entity})
 (table.insert tests {:name "BoardView remove-item rolls back entity on board failure"
