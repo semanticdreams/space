@@ -1616,6 +1616,58 @@
     (error err))
   true)
 
+(local board-prune-valid-string-entity-id "board-prune-valid-string-entity")
+(local board-prune-missing-string-entity-id "board-prune-missing-string-entity")
+
+(fn board-prune-stale-string-entity-state []
+  {:items [{:id "valid-string"
+            :type "string-entity"
+            :subject-key (.. "string-entity:" board-prune-valid-string-entity-id)
+            :position [0 0 0]
+            :rotation [1 0 0 0]
+            :size [32 16 0]}
+           {:id "missing-string"
+            :type "string-entity"
+            :subject-key (.. "string-entity:" board-prune-missing-string-entity-id)
+            :position [40 0 0]
+            :rotation [1 0 0 0]
+            :size [32 16 0]}]
+   :connectors [{:id "stale-connector"
+                 :source-item-id "valid-string"
+                 :target-item-id "missing-string"}]})
+
+(fn assert-board-pruned-stale-string-entity-item []
+  (assert app.board "Board activity should activate with stale persisted string entity item pruned")
+  (assert (. app.board.items "valid-string")
+          "Valid string entity board item should remain restored")
+  (assert (not (. app.board.items "missing-string"))
+          "Stale string entity board item should be pruned before restore")
+  (each [_ connector (ipairs app.board.connectors-in-order)]
+    (assert (not (or (= connector.source-item-id "missing-string")
+                     (= connector.target-item-id "missing-string")))
+            "Connectors referencing pruned string entity items should be pruned")))
+
+(fn cleanup-board-prune-string-entities [store]
+  (pcall (fn [] (store:delete-entity board-prune-valid-string-entity-id)))
+  (pcall (fn [] (store:delete-entity board-prune-missing-string-entity-id))))
+
+(fn board-activity-prunes-stale-string-entity-items []
+  (local store (StringEntityStore.get-default))
+  (local valid-id board-prune-valid-string-entity-id)
+  (local missing-id board-prune-missing-string-entity-id)
+  (pcall (fn [] (store:delete-entity valid-id)))
+  (pcall (fn [] (store:delete-entity missing-id)))
+  (store:create-entity {:id valid-id :value "valid"})
+  (local (ok err)
+    (pcall
+      (fn []
+        (with-board-activity-runtime
+          (fn [_env]
+            (assert-board-pruned-stale-string-entity-item))
+          {:board-state (board-prune-stale-string-entity-state)}))))
+  (cleanup-board-prune-string-entities store)
+  (if ok true (error err)))
+
 (fn mock-selector []
   (local changed (Signal))
   (local self {:selectables []
@@ -2183,9 +2235,11 @@
 (table.insert tests {:name "Board selection action always shows connect (idempotent)"
                      :fn board-selection-action-shows-connect-even-when-already-connected})
 (table.insert tests {:name "Board context enricher sets selected-items"
-                     :fn board-selection-action-enriches-context-with-selected-items})
+                      :fn board-selection-action-enriches-context-with-selected-items})
+(table.insert tests {:name "Board activity prunes stale string entity items"
+                     :fn board-activity-prunes-stale-string-entity-items})
 (table.insert tests {:name "Board selection action uses selector wiring through runtime"
-                      :fn board-selection-action-uses-selector-wiring-through-runtime})
+                       :fn board-selection-action-uses-selector-wiring-through-runtime})
 (table.insert tests {:name "BoardView remove-item deletes string entity from store"
                       :fn board-view-remove-item-deletes-string-entity})
 (table.insert tests {:name "BoardView remove-item rolls back entity on board failure"

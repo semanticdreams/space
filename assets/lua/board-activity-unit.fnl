@@ -7,6 +7,7 @@
 (local {:Board Board} (require :board/core))
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
+(local StringEntityStore (require :entities/string))
 (local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 (local ActivityCameraState (require :activity-camera-state))
 
@@ -21,6 +22,27 @@
 (fn ensure-board-state [world-runtime]
   (set world-runtime.board-state (or world-runtime.board-state {}))
   world-runtime.board-state)
+
+(fn reconcile-stale-string-entity-items! [state]
+  (local payload (or state {}))
+  (local store (StringEntityStore.get-default))
+  (local pruned-item-ids {})
+  (local items [])
+  (each [_ item (ipairs (or payload.items []))]
+    (local entity-id (and (= item.type BuiltinStringEntity.item-type)
+                          (BuiltinStringEntity.entity-id-from-subject item.subject-key)))
+    (if (and entity-id (not (store:get-entity entity-id)))
+        (set (. pruned-item-ids item.id) true)
+        (table.insert items item)))
+  (when (next pruned-item-ids)
+    (local connectors [])
+    (each [_ connector (ipairs (or payload.connectors []))]
+      (when (not (or (. pruned-item-ids connector.source-item-id)
+                     (. pruned-item-ids connector.target-item-id)))
+        (table.insert connectors connector)))
+    (set payload.items items)
+    (set payload.connectors connectors))
+  payload)
 
 (fn screen-world-position [event]
   (local canvas (assert app.canvas "Board screen-world-position requires app.canvas"))
@@ -81,7 +103,8 @@
   (when (not retained-view?)
     (local (ok err)
       (pcall (fn []
-               (board:restore-state (ensure-board-state world-runtime)))))
+               (board:restore-state (reconcile-stale-string-entity-items!
+                                      (ensure-board-state world-runtime))))))
     (when (not ok)
       (view:drop)
       (set world-runtime.board nil)
