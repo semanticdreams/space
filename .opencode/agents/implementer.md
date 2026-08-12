@@ -60,6 +60,9 @@ permission:
     "git branch --show-current*": allow
     "git diff --staged*": allow
     "git push*": deny
+    "git fetch*": deny
+    "git pull*": deny
+    "git merge*": deny
     "git reset*": deny
     "git clean*": deny
     "git restore*": deny
@@ -68,8 +71,13 @@ permission:
     "git rebase*": deny
     "git switch -C*": deny
     "git checkout -B*": deny
+    "git branch -d*": deny
     "git branch -D*": deny
+    "git branch --delete*": deny
     "git -C * push*": deny
+    "git -C * fetch*": deny
+    "git -C * pull*": deny
+    "git -C * merge*": deny
     "git -C * reset*": deny
     "git -C * clean*": deny
     "git -C * restore*": deny
@@ -78,7 +86,9 @@ permission:
     "git -C * rebase*": deny
     "git -C * switch -C*": deny
     "git -C * checkout -B*": deny
+    "git -C * branch -d*": deny
     "git -C * branch -D*": deny
+    "git -C * branch --delete*": deny
     "rm -rf*": deny
     "rm -fr*": deny
     "rm -r*": deny

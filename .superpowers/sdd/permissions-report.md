@@ -28,3 +28,31 @@ Files Changed
 
 Concerns
 - The reported recent blocker was the guarded git-integrator trusted-remote check, not an OpenCode shell prompt. The repository now reports origin as `https://github.com/semanticdreams/space2`, so the wrapper should accept it if its trusted-remote list includes that corrected URL.
+
+Review Fix R1-1
+
+Implemented
+- Added implementer denies for direct privileged integration commands that must remain wrapper-only:
+  - `git fetch*`, `git pull*`, `git merge*`
+  - `git branch -d*`, `git branch --delete*`
+  - `git -C * fetch*`, `git -C * pull*`, `git -C * merge*`
+  - `git -C * branch -d*`, `git -C * branch --delete*`
+- Kept read-only Git inspection allow entries intact and before the later denies.
+
+Validation Evidence
+- Basic frontmatter/YAML parse check:
+  `python3 - <<'PY' ... yaml.safe_load(frontmatter) ... PY`
+  Result: `frontmatter parse ok: 11 agent files`.
+
+Coverage Rationale
+- The parse check covers all project agent frontmatter after the permission-key additions. Diff review confirms the added rules are later than the read-only allow entries, preserving last-match denial for integration operations.
+
+Constraint Impact
+- not applicable: OpenCode agent permission metadata only.
+
+Files Changed
+- `.opencode/agents/implementer.md`
+- `.superpowers/sdd/permissions-report.md`
+
+Self-Review Findings
+- Confirmed no production source/test files were edited and no permissions were broadened.
