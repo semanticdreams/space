@@ -13,7 +13,11 @@
 
 (fn default-artifact-root [data-dir]
   (local parent (and fs.parent (fs.parent data-dir)))
-  (if (and parent (not (= parent "")) (not (= parent data-dir)))
+  (local basename (string.match data-dir "[^/]+$"))
+  (if (and (= basename "agent-sessions")
+           parent
+           (not (= parent ""))
+           (not (= parent data-dir)))
       (fs.join-path parent "agent-artifacts")
       (fs.join-path data-dir "agent-artifacts")))
 

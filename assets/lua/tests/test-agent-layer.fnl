@@ -1718,6 +1718,53 @@
   (runner:drop)
   (clean-dir dir))
 
+(fn capture-runner-artifacts [data-dir]
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local registry (AgentRegistry {:deps {}}))
+  (var captured-artifacts nil)
+  (registry:register "space-agent"
+    (fn [_deps]
+      {:id "space-agent"
+       :run (fn [_self _input _session ctx]
+              (set captured-artifacts ctx.artifacts)
+              (ctx.turn:finish {:content "ok"}))}))
+  (local runner (AgentRunner
+    {:data-dir data-dir
+     :registry registry
+     :deps {:app :stub :presets {} :tools {} :approvals {} :agents registry :providers {}}}))
+  (local session (runner:create-session "space-agent"))
+  (runner:run-turn session.id "capture default artifacts" {})
+  (runner:drop)
+  {:artifacts captured-artifacts :session-id session.id})
+
+(fn test-runner-default-artifacts-nested-under-non-session-data-dir []
+  (local dir (temp-dir))
+  (local result (capture-runner-artifacts dir))
+  (local expected-root (fs.join-path dir "agent-artifacts"))
+  (local expected-session-dir (fs.join-path expected-root result.session-id))
+  (assert (= result.artifacts.root expected-root)
+          "non-agent-sessions data-dir should use nested artifact root")
+  (assert (= result.artifacts.session-dir expected-session-dir)
+          "non-agent-sessions data-dir should create nested session artifact dir")
+  (assert (fs.exists expected-session-dir)
+          "nested default session artifact directory should exist")
+  (clean-dir dir))
+
+(fn test-runner-default-artifacts-sibling-for-agent-sessions-data-dir []
+  (local root (temp-dir))
+  (local data-dir (fs.join-path root "agent-sessions"))
+  (local result (capture-runner-artifacts data-dir))
+  (local expected-root (fs.join-path root "agent-artifacts"))
+  (local expected-session-dir (fs.join-path expected-root result.session-id))
+  (assert (= result.artifacts.root expected-root)
+          "agent-sessions data-dir should use sibling artifact root")
+  (assert (= result.artifacts.session-dir expected-session-dir)
+          "agent-sessions data-dir should create sibling session artifact dir")
+  (assert (fs.exists expected-session-dir)
+          "sibling default session artifact directory should exist")
+  (clean-dir root))
+
 ;; ═══════════════════════════════════════
 ;; SpaceAgent fixture tests
 ;; ═══════════════════════════════════════
@@ -2561,6 +2608,10 @@
 (table.insert tests {:name "runner list sessions" :fn test-runner-list-sessions})
 (table.insert tests {:name "runner turn fail persists error item" :fn test-runner-turn-fail-persists-error-item})
 (table.insert tests {:name "runner creates artifact context" :fn test-runner-creates-artifact-context})
+(table.insert tests {:name "runner default artifacts nested under non-session data-dir"
+                     :fn test-runner-default-artifacts-nested-under-non-session-data-dir})
+(table.insert tests {:name "runner default artifacts sibling for agent-sessions data-dir"
+                     :fn test-runner-default-artifacts-sibling-for-agent-sessions-data-dir})
 
 (table.insert tests {:name "space-agent registers with registry" :fn test-space-agent-registers-with-registry})
 (table.insert tests {:name "space-agent run with mock opencode" :fn test-space-agent-run-with-mock-opencode})
