@@ -1268,7 +1268,7 @@
                   (.. "error should mention lack of test support, got: " (or err ""))))))))
 
 (table.insert tests {:name "external-unit-mcp: run-tests rejects unknown loader without run-test capability"
-                     :fn test-run-tests-rejects-unknown-loader})
+                      :fn test-run-tests-rejects-unknown-loader})
 
 ;; ── Task 4: External Unit MCP Tool Registry ──
 
@@ -1487,7 +1487,7 @@
                   (.. "risk map should have exactly 10 entries, got " risk-count)))))))
 
 (table.insert tests {:name "external-unit-mcp: external tools carry explicit risk labels for write/test operations"
-                     :fn test-external-tools-carry-explicit-risk-labels})
+                      :fn test-external-tools-carry-explicit-risk-labels})
 
 ;; ── Task 5: External Unit MCP Bridge ──
 

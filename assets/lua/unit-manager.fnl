@@ -43,7 +43,14 @@
   (fn reload-unit [self id ctx]
     (local unit (self:get id))
     (assert unit (.. "Unit " id " not found"))
-    (unit:reload (or ctx {})))
+    (local Activities (require :activities))
+    (local active-before (Activities.active-activity-id))
+    (unit:reload (or ctx {}))
+    (local result {:unit-id id
+                   :reloaded true})
+    (when active-before
+      (tset result :activity (Activities.reactivate-active-activity active-before)))
+    result)
 
   (fn clear [self]
     (for [i (length unit-order) 1 -1]

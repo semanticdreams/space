@@ -171,6 +171,21 @@ Important details:
 - `:restore` defaults to a no-op returning `true`
 - `:reload` is a convenience method that runs `snapshot -> unload -> load -> restore`
 
+`UnitManager.reload-unit` wraps the unit reload and returns structured evidence:
+
+```fennel
+{:unit-id id
+ :reloaded true
+ :activity evidence-or-nil}
+```
+
+When an activity was active before reload, the manager attempts to reactivate
+that same activity after the unit reload completes. The `:activity` evidence
+records the active activity before and after reload, whether reactivation was
+attempted, whether the activity is registered after reload, whether an active
+session exists after reload, and any activation error. Unit reload failures still
+throw; they are not converted into successful evidence responses.
+
 `ModuleUnit` is a convenience wrapper for units backed by a Lua/Fennel module export table.
 
 The root app reload uses `ModuleUnit` to call:

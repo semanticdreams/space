@@ -102,7 +102,8 @@ External unit development follows this high-level workflow:
 6. **Test** — `space_unit_run_tests` runs tests for a unit by executing its test
    module in a subprocess.
 7. **Reload** — `space_unit_reload` triggers a reload of the unit to reflect
-   its current source state.
+   its current source state and reports active activity reactivation evidence
+   when an activity was active before reload.
 8. **Read log** — `space_unit_read_log` reads recent lines from the application
    log with optional filtering and pagination.
 9. **Snapshot** — `space_unit_snapshot` captures a unit's current state for
@@ -237,7 +238,19 @@ headless engine. Returns `passed`, `exit-code`, `stdout`, and `stderr`.
 ### space_unit_reload
 
 Reload a unit to reflect its current source state. Accepts `unit_id` (string,
-required). Returns `unit-id` and `reloaded` status.
+required). Returns structured reload evidence:
+
+- `unit-id`
+- `reloaded`
+- `activity.active-activity-before`
+- `activity.active-activity-after`
+- `activity.reactivation-attempted`
+- `activity.registered-after?`
+- `activity.has-active-session-after?`
+- `activity.error` when reactivation fails
+
+Successful `space_unit_apply_patch` and `space_unit_create_source` responses also
+include `reload-result` and `activity` fields from the post-write reload.
 
 ### space_unit_read_log
 

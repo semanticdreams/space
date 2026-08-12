@@ -594,8 +594,8 @@
                               next-spec
                               previous-id
                               previous-spec
-                              previous-state
-                              previous-shell-state)))))
+                               previous-state
+                               previous-shell-state)))))
 
 (fn snapshot-active-activity []
   (local registry (ensure-registry))
@@ -647,9 +647,45 @@
                 (values activity-id false nil)))
           (values nil
                   true
-                  (.. "invalid persisted activity.active_id "
-                      (tostring activity-id)
-                      "; clearing to nil")))))
+                   (.. "invalid persisted activity.active_id "
+                       (tostring activity-id)
+                       "; clearing to nil")))))
+
+(fn activity-status []
+  (local registry (ensure-registry))
+  (local activity-id registry.active-activity-id)
+  {:active-activity-id activity-id
+   :registered? (and (not (= activity-id nil))
+                     (not (= (. registry.activities activity-id) nil)))
+   :has-active-session? (not (= registry.active-activity-session nil))})
+
+(fn reactivate-active-activity [activity-id]
+  (var registry (ensure-registry))
+  (local active-before activity-id)
+  (local registered-after? (and (not (= active-before nil))
+                                (not (= (. registry.activities active-before) nil))))
+  (var evidence {:attempted false
+                 :reactivation-attempted false
+                 :active-activity-before active-before
+                 :active-activity-after registry.active-activity-id
+                 :registered-after? registered-after?
+                 :has-active-session-after? (not (= registry.active-activity-session nil))
+                 :reactivated false
+                 :error nil})
+  (when (and active-before registered-after?)
+    (tset evidence :attempted true)
+    (tset evidence :reactivation-attempted true)
+    (local (ok err) (pcall activate-activity active-before))
+    (when (not ok)
+      (tset evidence :error (tostring err)))
+    (set registry (ensure-registry))
+    (tset evidence :active-activity-after registry.active-activity-id)
+    (tset evidence :registered-after? (not (= (. registry.activities active-before) nil)))
+    (tset evidence :has-active-session-after? (not (= registry.active-activity-session nil)))
+    (tset evidence :reactivated (and ok
+                                     (= registry.active-activity-id active-before)
+                                     (not (= registry.active-activity-session nil)))))
+  evidence)
 
 {:clear-activity-runtime-hooks! clear-activity-runtime-hooks!
  :ensure-registry ensure-registry
@@ -667,10 +703,12 @@
   :drop-activity-session! drop-activity-session!
   :drop-all-activity-sessions! drop-all-activity-sessions!
   :with-workspace-shell-change-suppressed with-workspace-shell-change-suppressed
-  :active-activity-id active-activity-id
-  :active-activity-spec active-activity-spec
-  :active-activity-session active-activity-session
-  :snapshot-active-activity snapshot-active-activity
+   :active-activity-id active-activity-id
+   :active-activity-spec active-activity-spec
+   :active-activity-session active-activity-session
+   :activity-status activity-status
+   :reactivate-active-activity reactivate-active-activity
+   :snapshot-active-activity snapshot-active-activity
   :restore-active-activity restore-active-activity
   :snapshot-activity-sessions snapshot-activity-sessions
   :normalize-persisted-activity-id normalize-persisted-activity-id}
