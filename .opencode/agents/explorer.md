@@ -17,7 +17,9 @@ permission:
   lsp: allow
   edit: deny
   task: deny
-  external_directory: deny
+  external_directory:
+    "*": deny
+    "/home/sam/.cache/space/log/**": allow
   webfetch: deny
   websearch: deny
   question: deny

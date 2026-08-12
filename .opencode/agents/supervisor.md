@@ -23,6 +23,7 @@ permission:
   external_directory:
     "*": deny
     "~/space/**": allow
+    "/home/sam/.cache/space/log/**": allow
   webfetch: deny
   websearch: deny
   question: deny
