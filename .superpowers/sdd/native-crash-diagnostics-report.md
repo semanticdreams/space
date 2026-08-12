@@ -151,3 +151,40 @@ Self-review findings
 Concerns
 --------
 - Always-on HTTP client worker start/exit emits one line per worker. This is default-on as requested when low volume; current tests show up to hardware-concurrency worker lines at process startup/shutdown, but no per-request diagnostics are default-on.
+
+Review fix R1-1
+================
+
+What changed
+------------
+- Moved HTTP client `worker-start` and `worker-exit` markers back behind `SPACE_HTTP_CLIENT_DEBUG=1`.
+- Preserved default-on HTTP client lifecycle summary markers for `shutdown-begin`, `shutdown-end`, and `shutdown-already-stopped`.
+- Kept diagnostic-only scope; no runtime lifecycle behavior was changed.
+
+Validation
+----------
+- `rtk make build` with 14400000 ms timeout: passed.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-agent-layer:main`: passed, `Executed 97 Lua tests`.
+
+Coverage rationale
+------------------
+- Build validates the C++ diagnostic routing change compiles and links.
+- Agent-layer tests exercise HTTP client construction/shutdown paths and confirm the focused surface still runs with sparse default-on shutdown markers only.
+
+Constraint Impact
+-----------------
+- not applicable.
+
+Files changed
+-------------
+- `src/http_client.cpp`
+- `.superpowers/sdd/native-crash-diagnostics-report.md`
+
+Self-review findings
+--------------------
+- Confirmed HTTP client per-worker markers now use `diagnostic_emit`, which returns before `active_count()` unless `SPACE_HTTP_CLIENT_DEBUG=1` is enabled.
+- Confirmed default-on shutdown begin/end/already-stopped markers remain intact.
+
+Concerns
+--------
+- None.

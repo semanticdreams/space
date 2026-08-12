@@ -252,7 +252,7 @@ void HttpClient::lifecycle_emit(const char* event, uint64_t id, const char* url)
 
 void HttpClient::worker_loop()
 {
-    lifecycle_emit("worker-start");
+    diagnostic_emit("worker-start");
     while (!stop.load()) {
         QueuedRequest req;
         if (!pop_request(req)) {
@@ -282,7 +282,7 @@ void HttpClient::worker_loop()
             cancel_flags.erase(req.id);
         }
     }
-    lifecycle_emit("worker-exit");
+    diagnostic_emit("worker-exit");
 }
 
 HttpResponse HttpClient::make_cancelled_response(const QueuedRequest& req)
