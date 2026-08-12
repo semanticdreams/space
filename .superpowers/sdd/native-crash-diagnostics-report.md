@@ -59,3 +59,32 @@ Self-review findings
 Concerns
 --------
 - Diagnostics add mutex-protected count sampling around lifecycle events. They are gated and should be low risk, but when enabled they may slightly perturb timing of shutdown races.
+
+Review fix R1-1
+================
+
+What changed
+------------
+- Fixed disabled-path diagnostics in `src/lua_http_server.cpp` and `src/http_client.cpp` so call sites check the env-gated diagnostic flag before sampling mutex-protected counts.
+- Added/used object-local `diagnostic_emit` wrappers so disabled `SPACE_HTTP_LIFECYCLE_DEBUG` and `SPACE_HTTP_CLIENT_DEBUG` paths return before calling `pending_count()`, `stream_count()`, or `active_count()`.
+- Kept diagnostic-only scope; no behavior fix attempted.
+
+Validation
+----------
+- `rtk make build` with 14400000 ms timeout: passed.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-http-server:main`: passed, `Executed 13 Lua tests`.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-mcp-http:main`: passed, `Executed 11 Lua tests`.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-agent-layer:main`: passed, `Executed 97 Lua tests`.
+
+Coverage rationale
+------------------
+- Build validates the C++ signature and call-site changes compile/link.
+- The same focused HTTP/MCP/agent tests cover the native lifecycle surfaces where diagnostics were amended.
+
+Constraint Impact
+-----------------
+- not applicable.
+
+Concerns
+--------
+- None beyond the existing note that diagnostics can perturb timing when explicitly enabled.

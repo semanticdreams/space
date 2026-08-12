@@ -183,11 +183,11 @@ void HttpClient::shutdown()
 {
     bool expected = false;
     if (!stop.compare_exchange_strong(expected, true)) {
-        http_client_diag("shutdown-already-stopped", this, 0, nullptr, active_count());
+        diagnostic_emit("shutdown-already-stopped");
         return;
     }
 
-    http_client_diag("shutdown-begin", this, 0, nullptr, active_count());
+    diagnostic_emit("shutdown-begin");
     queue_cv.notify_all();
     for (auto& worker : workers) {
         if (worker.joinable()) {
@@ -201,7 +201,7 @@ void HttpClient::shutdown()
         pending.swap(empty);
         cancel_flags.clear();
     }
-    http_client_diag("shutdown-end", this, 0, nullptr, active_count());
+    diagnostic_emit("shutdown-end");
 }
 
 bool HttpClient::pop_request(QueuedRequest& out)
@@ -222,9 +222,17 @@ std::size_t HttpClient::active_count()
     return cancel_flags.size();
 }
 
+void HttpClient::diagnostic_emit(const char* event, uint64_t id, const char* url)
+{
+    if (!http_client_debug_enabled()) {
+        return;
+    }
+    http_client_diag(event, this, id, url, active_count());
+}
+
 void HttpClient::worker_loop()
 {
-    http_client_diag("worker-start", this, 0, nullptr, active_count());
+    diagnostic_emit("worker-start");
     while (!stop.load()) {
         QueuedRequest req;
         if (!pop_request(req)) {
@@ -254,7 +262,7 @@ void HttpClient::worker_loop()
             cancel_flags.erase(req.id);
         }
     }
-    http_client_diag("worker-exit", this, 0, nullptr, active_count());
+    diagnostic_emit("worker-exit");
 }
 
 HttpResponse HttpClient::make_cancelled_response(const QueuedRequest& req)
@@ -277,7 +285,7 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         out.error = "curl_easy_init failed";
         return out;
     }
-    http_client_diag("perform-begin", this, req.id, req.request.url.c_str(), active_count());
+    diagnostic_emit("perform-begin", req.id, req.request.url.c_str());
 
     std::string body;
     std::vector<std::pair<std::string, std::string>> headers_out;
@@ -347,6 +355,6 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         curl_slist_free_all(header_list);
     }
     curl_easy_cleanup(curl);
-    http_client_diag("perform-end", this, req.id, req.request.url.c_str(), active_count());
+    diagnostic_emit("perform-end", req.id, req.request.url.c_str());
     return out;
 }
