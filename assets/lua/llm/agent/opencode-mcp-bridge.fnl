@@ -59,8 +59,10 @@
   (local patterns [])
   (each [_ allowed-pattern (ipairs allowed-patterns)]
     (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])]
-      (local pattern (string.gsub allowed-pattern "%*%*$" (.. "*" marker "*")))
-      (table.insert patterns pattern)))
+      (local immediate-pattern (string.gsub allowed-pattern "%*%*$" (.. "*" marker "*")))
+      (local nested-pattern (string.gsub allowed-pattern "/%*%*$" (.. "/**/*" marker "*")))
+      (table.insert patterns immediate-pattern)
+      (table.insert patterns nested-pattern)))
   patterns)
 
 (fn bounded-permission-map [allowed-patterns]
