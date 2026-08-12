@@ -1331,25 +1331,25 @@
   (local {: AgentOpencodeMcpBridge} (require :llm/agent/opencode-mcp-bridge))
   (local ToolRegistry (require :mcp/tool-registry))
   (local dir (temp-dir))
-  (local tool-reg (ToolRegistry {:namespace-prefix "space_"}))
-  (local bridge (AgentOpencodeMcpBridge {:tools tool-reg :data-dir dir}))
-  (bridge:start)
-  (local status (bridge:status))
-  (assert status.started? "bridge should report started")
-  (assert (> status.port 0) "bridge should bind a port")
-  (local env (bridge:opencode-env))
-  (assert (= env.XDG_CONFIG_HOME status.config-root) "OpenCode env should point to bridge config root")
-  (local config (json.loads (fs.read-file status.config-path)))
+  (local space-data-dir (fs.join-path dir "space-data")) (local space-cache-dir (fs.join-path dir "space-cache")) (local code-dir (fs.join-path space-data-dir "code")) (local artifact-root (fs.join-path space-data-dir "agent-artifacts"))
+  (local tool-reg (ToolRegistry {:namespace-prefix "space_"})) (local bridge (AgentOpencodeMcpBridge {:tools tool-reg :data-dir dir :space-data-dir space-data-dir :space-cache-dir space-cache-dir :code-dir code-dir :artifact-root artifact-root}))
+  (bridge:start) (local status (bridge:status)) (assert status.started? "bridge should report started")
+  (assert (> status.port 0) "bridge should bind a port") (assert (= status.artifact-root artifact-root) "bridge status should report artifact root") (assert (fs.exists artifact-root) "bridge should ensure artifact root exists") (assert (= (bridge:config-path) status.config-path) "bridge should expose config path")
+  (local env (bridge:opencode-env)) (assert (= env.XDG_CONFIG_HOME status.config-root) "OpenCode env should point to bridge config root") (local config (json.loads (fs.read-file status.config-path)))
   (assert (= config.mcp.space.type "remote") "config should create remote MCP server")
-  (assert (= config.mcp.space.url status.url) "config URL should match bridge URL")
-  (assert (= config.mcp.space.enabled true) "config should enable MCP server")
-  (each [_ name (ipairs ["invalid" "read" "write" "edit" "grep" "glob" "list" "bash"
-                         "task" "external_directory" "todowrite" "webfetch"
-                         "websearch" "lsp" "skill" "question"])]
-    (assert (= (. config.permission name) "deny")
-            (.. "config should deny native OpenCode tool: " name)))
-  (bridge:stop)
-  (clean-dir dir))
+  (assert (= config.mcp.space.url status.url) "config URL should match bridge URL") (assert (= config.mcp.space.enabled true) "config should enable MCP server")
+  (each [_ name (ipairs ["invalid" "write" "edit" "bash" "task" "todowrite" "webfetch" "websearch" "lsp" "skill" "question"])] (assert (= (. config.permission name) "deny") (.. "config should deny native OpenCode tool: " name)))
+  (local allowed-patterns [(.. space-data-dir "/agent-sessions/**") (.. space-data-dir "/agent-opencode/**") (.. space-data-dir "/agent-approvals/**") (.. space-data-dir "/agent-artifacts/**") (.. space-data-dir "/code/**") (.. space-cache-dir "/log/**")])
+  (fn assert-bounded-tool [tool-name]
+    (local permissions (. config.permission tool-name)) (assert (= (type permissions) "table") (.. tool-name " should use bounded permission patterns")) (assert (= (. permissions "*") "deny") (.. tool-name " should deny broad access"))
+    (each [_ pattern (ipairs allowed-patterns)] (assert (= (. permissions pattern) "allow") (.. tool-name " should allow bounded root: " pattern))
+      (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])]
+        (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (assert (= (. permissions deny-pattern) "deny") (.. tool-name " should deny secret-looking path: " deny-pattern)))))
+  (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
+  (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
+  (each [i pattern (ipairs allowed-patterns)] (assert (= (. status.allowed-roots i) pattern) (.. "bridge status allowed root should match: " pattern)))
+  (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL")
+  (bridge:stop) (clean-dir dir))
 
 ;; ═══════════════════════════════════════
 ;; Prompt utilities tests

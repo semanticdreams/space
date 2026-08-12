@@ -1787,9 +1787,9 @@
     (app.agent-mcp-sync:start))
   (when (not app.agent-opencode-mcp-bridge)
     (set app.agent-opencode-mcp-bridge
-         (AgentOpencodeMcpBridge.AgentOpencodeMcpBridge
-           {:tools app.mcp-tools
-            :data-dir (fs.join-path app.user-data-dir "agent-opencode")}))
+          (AgentOpencodeMcpBridge.AgentOpencodeMcpBridge
+            {:tools app.mcp-tools :data-dir (fs.join-path app.user-data-dir "agent-opencode") :space-data-dir app.user-data-dir
+             :space-cache-dir (appdirs.user-cache-dir "space") :code-dir app.code-dir :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")}))
     (app.agent-opencode-mcp-bridge:start))
   (when (and app.workspace-shell-changed (not app.agent-presets-workspace-handler))
     (set app.agent-presets-workspace-handler
