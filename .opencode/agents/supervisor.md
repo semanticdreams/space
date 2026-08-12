@@ -52,6 +52,15 @@ permission:
   question: deny
   bash:
     "*": allow
+    # Routine read-only Git inspection is allowed directly for coordination.
+    # Privileged Git/GitHub operations remain denied below and must use guarded wrappers.
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git rev-parse*": allow
+    "git remote get-url*": allow
+    "git branch --show-current*": allow
+    "git diff --staged*": allow
     "git push*": deny
     "git push origin opencode/workflow-debug/*": deny
     "git push origin main": deny

@@ -7,6 +7,7 @@
 (local {:Board Board} (require :board/core))
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
+(local StringEntityStore (require :entities/string))
 (local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 (local ActivityCameraState (require :activity-camera-state))
 
@@ -21,6 +22,31 @@
 (fn ensure-board-state [world-runtime]
   (set world-runtime.board-state (or world-runtime.board-state {}))
   world-runtime.board-state)
+
+(fn reconcile-stale-string-entity-items! [state]
+  (local payload (assert state "Board string entity reconciliation requires board state"))
+  (when (= payload.items nil)
+    (set payload.items []))
+  (when (= payload.connectors nil)
+    (set payload.connectors []))
+  (local store (StringEntityStore.get-default))
+  (local pruned-item-ids {})
+  (local items [])
+  (each [_ item (ipairs payload.items)]
+    (local entity-id (and (= item.type BuiltinStringEntity.item-type)
+                          (BuiltinStringEntity.entity-id-from-subject item.subject-key)))
+    (if (and entity-id (not (store:get-entity entity-id)))
+        (set (. pruned-item-ids item.id) true)
+        (table.insert items item)))
+  (when (next pruned-item-ids)
+    (local connectors [])
+    (each [_ connector (ipairs payload.connectors)]
+      (when (not (or (. pruned-item-ids connector.source-item-id)
+                     (. pruned-item-ids connector.target-item-id)))
+        (table.insert connectors connector)))
+    (set payload.items items)
+    (set payload.connectors connectors))
+  payload)
 
 (fn screen-world-position [event]
   (local canvas (assert app.canvas "Board screen-world-position requires app.canvas"))
@@ -81,7 +107,8 @@
   (when (not retained-view?)
     (local (ok err)
       (pcall (fn []
-               (board:restore-state (ensure-board-state world-runtime)))))
+               (board:restore-state (reconcile-stale-string-entity-items!
+                                      (ensure-board-state world-runtime))))))
     (when (not ok)
       (view:drop)
       (set world-runtime.board nil)
@@ -246,7 +273,9 @@
 (fn restore-board-activity! [first session maybe-state]
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
-    (set app.active-world-runtime.board-state state.board-state))
+    (local board-state (reconcile-stale-string-entity-items! state.board-state))
+    (set state.board-state board-state)
+    (set app.active-world-runtime.board-state board-state))
   ;; Restore canvas camera position from persisted session state
   (when (and state state.canvas-camera
              app.active-world-runtime
@@ -263,10 +292,10 @@
       (scene:restore-activity-slot-state "board" state.scene)))
   (when (and state state.active?)
     (if (and state.board-state
-             (= (Activities.active-activity-id) "board")
-             app.active-world-runtime
-             app.active-world-runtime.board)
-        (app.active-world-runtime.board:restore-state state.board-state)
+              (= (Activities.active-activity-id) "board")
+              app.active-world-runtime
+              app.active-world-runtime.board)
+        (app.active-world-runtime.board:restore-state app.active-world-runtime.board-state)
         (if app.set-active-activity
             (app.set-active-activity "board")
             (Activities.activate-activity "board"))))

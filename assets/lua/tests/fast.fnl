@@ -81,6 +81,7 @@
       :tests.test-graph-activity-slots
      :tests.test-drawing-activity-slots
      :tests.test-board
+     :tests.test-board-activity-string-entities
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
     :tests.test-terrain-query
