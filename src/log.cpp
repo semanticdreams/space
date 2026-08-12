@@ -2,7 +2,11 @@
 
 #include <atomic>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 
 #include <spdlog/async.h>
@@ -20,6 +24,7 @@ std::shared_ptr<spdlog::logger> async_logger;
 std::vector<spdlog::sink_ptr> log_sinks;
 spdlog::sink_ptr log_file_sink;
 bool log_ready = false;
+std::atomic<bool> log_shutdown_started { false };
 std::atomic<const std::atomic<uint64_t>*> frame_id_provider { nullptr };
 std::string log_output_path = std::string(GL_LOG_FILE);
 std::unordered_map<std::string, LogLevel> configured_logger_levels;
@@ -37,6 +42,36 @@ spdlog::level::level_enum to_spd_level(LogLevel level)
             return spdlog::level::err;
     }
     return spdlog::level::info;
+}
+
+bool log_lifecycle_debug_enabled()
+{
+    // Enable with SPACE_LOG_LIFECYCLE_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_LOG_LIFECYCLE_DEBUG");
+        return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+unsigned long long diagnostic_thread_id()
+{
+    return static_cast<unsigned long long>(std::hash<std::thread::id> {}(std::this_thread::get_id()));
+}
+
+void log_lifecycle_diag(const char* event, const char* logger_name = nullptr)
+{
+    if (!log_lifecycle_debug_enabled()) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "space-log-lifecycle event=%s thread=%llu logger=%s shutdown_started=%d ready=%d\n",
+                 event,
+                 diagnostic_thread_id(),
+                 logger_name ? logger_name : "-",
+                 log_shutdown_started.load(std::memory_order_relaxed) ? 1 : 0,
+                 log_ready ? 1 : 0);
+    std::fflush(stderr);
 }
 
 LogLevel from_spd_level(spdlog::level::level_enum level)
@@ -60,6 +95,9 @@ LogLevel from_spd_level(spdlog::level::level_enum level)
 
 void ensure_logger()
 {
+    if (log_shutdown_started.load(std::memory_order_relaxed)) {
+        log_lifecycle_diag("ensure-after-shutdown-begin");
+    }
     if (!log_ready) {
         LogConfig config;
         log_init(config);
@@ -238,6 +276,9 @@ public:
 
 std::shared_ptr<spdlog::logger> log_get_logger(const std::string& name)
 {
+    if (log_shutdown_started.load(std::memory_order_relaxed)) {
+        log_lifecycle_diag("get-logger-after-shutdown-begin", name.c_str());
+    }
     ensure_logger();
 
     if (auto existing = spdlog::get(name)) {
@@ -260,7 +301,9 @@ std::shared_ptr<spdlog::logger> log_get_logger(const std::string& name)
 void log_init(const LogConfig& config)
 {
     std::lock_guard<std::mutex> lock(log_mutex);
+    log_lifecycle_diag("init-begin");
     spdlog::shutdown();
+    log_shutdown_started.store(false, std::memory_order_relaxed);
 
     std::string selected_output_path = config.output_path.empty()
         ? log_output_path
@@ -322,16 +365,20 @@ void log_init(const LogConfig& config)
     async_logger = log_get_logger("space");
     async_logger->flush_on(spdlog::level::warn);
     spdlog::set_default_logger(async_logger);
+    log_lifecycle_diag("init-end");
 }
 
 void log_shutdown()
 {
     std::lock_guard<std::mutex> lock(log_mutex);
+    log_shutdown_started.store(true, std::memory_order_relaxed);
+    log_lifecycle_diag("shutdown-begin");
     spdlog::shutdown();
     async_logger.reset();
     log_sinks.clear();
     log_file_sink.reset();
     log_ready = false;
+    log_lifecycle_diag("shutdown-end");
 }
 
 void log_set_level(LogLevel level)

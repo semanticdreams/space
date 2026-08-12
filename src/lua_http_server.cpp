@@ -4,6 +4,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -25,6 +27,58 @@ class HttpServer;
 
 std::mutex g_servers_mutex;
 std::vector<HttpServer*> g_servers;
+
+bool http_lifecycle_debug_enabled()
+{
+    // Enable with SPACE_HTTP_LIFECYCLE_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_HTTP_LIFECYCLE_DEBUG");
+        return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+unsigned long long diagnostic_thread_id()
+{
+    return static_cast<unsigned long long>(std::hash<std::thread::id> {}(std::this_thread::get_id()));
+}
+
+void http_lifecycle_diag(const char* event,
+                         const void* server,
+                         bool running,
+                         std::size_t pending_count,
+                         std::size_t stream_count)
+{
+    if (!http_lifecycle_debug_enabled()) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "space-http-lifecycle event=%s server=%p thread=%llu running=%d pending=%zu streams=%zu\n",
+                 event,
+                 server,
+                 diagnostic_thread_id(),
+                 running ? 1 : 0,
+                 pending_count,
+                 stream_count);
+    std::fflush(stderr);
+}
+
+void http_lifecycle_diag_global(const char* event, std::size_t count, const std::vector<HttpServer*>& servers)
+{
+    if (!http_lifecycle_debug_enabled()) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "space-http-lifecycle event=%s thread=%llu server_count=%zu servers=",
+                 event,
+                 diagnostic_thread_id(),
+                 count);
+    for (HttpServer* server : servers) {
+        std::fprintf(stderr, "%s%p", server == servers.front() ? "" : ",", static_cast<void*>(server));
+    }
+    std::fprintf(stderr, "\n");
+    std::fflush(stderr);
+}
 
 class SSEStream
 {
@@ -215,21 +269,26 @@ public:
     explicit HttpServer(sol::state_view lua)
     {
         (void)lua;
+        http_lifecycle_diag("ctor-enter", this, running_.load(), pending_count(), stream_count());
         std::lock_guard<std::mutex> lock(g_servers_mutex);
         g_servers.push_back(this);
+        http_lifecycle_diag("register", this, running_.load(), pending_count(), stream_count());
     }
 
     ~HttpServer()
     {
+        http_lifecycle_diag("dtor-enter", this, running_.load(), pending_count(), stream_count());
         stop();
         {
             std::lock_guard<std::mutex> lock(g_servers_mutex);
             auto it = std::find(g_servers.begin(), g_servers.end(), this);
             if (it != g_servers.end()) {
                 g_servers.erase(it);
+                http_lifecycle_diag("unregister", this, running_.load(), pending_count(), stream_count());
             }
         }
         fail_pending("HTTP server stopped");
+        http_lifecycle_diag("dtor-exit", this, running_.load(), pending_count(), stream_count());
     }
 
     HttpServer(const HttpServer&) = delete;
@@ -269,15 +328,25 @@ public:
 
     void stop()
     {
+        http_lifecycle_diag("stop-enter", this, running_.load(), pending_count(), stream_count());
         const bool was_running = running_.exchange(false);
         if (was_running) {
+            http_lifecycle_diag("stop-close-streams-before", this, running_.load(), pending_count(), stream_count());
             close_streams();
+            http_lifecycle_diag("stop-close-streams-after", this, running_.load(), pending_count(), stream_count());
+            http_lifecycle_diag("stop-svr-stop-before", this, running_.load(), pending_count(), stream_count());
             svr_.stop();
+            http_lifecycle_diag("stop-svr-stop-after", this, running_.load(), pending_count(), stream_count());
+            http_lifecycle_diag("stop-fail-pending-before", this, running_.load(), pending_count(), stream_count());
             fail_pending("HTTP server stopped");
+            http_lifecycle_diag("stop-fail-pending-after", this, running_.load(), pending_count(), stream_count());
             if (server_thread_.joinable()) {
+                http_lifecycle_diag("stop-join-before", this, running_.load(), pending_count(), stream_count());
                 server_thread_.join();
+                http_lifecycle_diag("stop-join-after", this, running_.load(), pending_count(), stream_count());
             }
         }
+        http_lifecycle_diag("stop-exit", this, running_.load(), pending_count(), stream_count());
     }
 
     int port() const { return port_; }
@@ -319,6 +388,7 @@ public:
         handlers_.emplace(handler_id, std::move(handler));
 
         svr_.Get(path, [this, handler_id](const httplib::Request& req, httplib::Response& res) {
+            http_lifecycle_diag("sse-route-begin", this, running_.load(), pending_count(), stream_count());
             auto stream = std::make_shared<SSEStream>();
             track_stream(stream);
             auto pending = std::make_shared<PendingCall>();
@@ -334,6 +404,7 @@ public:
                 for (const auto& [key, value] : pending->response.headers) {
                     res.set_header(key, value);
                 }
+                http_lifecycle_diag("sse-route-end-error", this, running_.load(), pending_count(), stream_count());
                 return;
             }
 
@@ -344,6 +415,7 @@ public:
                 [stream = std::move(stream)](uint64_t offset, httplib::DataSink& sink) -> bool {
                     return stream->write_chunks(offset, sink);
                 });
+            http_lifecycle_diag("sse-route-end", this, running_.load(), pending_count(), stream_count());
         });
     }
 
@@ -363,12 +435,29 @@ public:
         }
     }
 
+    void diagnostic_emit(const char* event)
+    {
+        http_lifecycle_diag(event, this, running_.load(), pending_count(), stream_count());
+    }
+
 private:
     void assert_can_register_route() const
     {
         if (port_ != 0 || running_) {
             throw std::runtime_error("HTTP server: routes must be registered before listen");
         }
+    }
+
+    std::size_t pending_count()
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        return pending_.size();
+    }
+
+    std::size_t stream_count()
+    {
+        std::lock_guard<std::mutex> lock(streams_mutex_);
+        return active_streams_.size();
     }
 
     void track_stream(const std::shared_ptr<SSEStream>& stream)
@@ -509,7 +598,9 @@ private:
                         stream->set_close_handler(
                             handler_id,
                             [this, stream](uint64_t close_handler_id) {
+                                http_lifecycle_diag("sse-on-close-callback-begin", this, running_.load(), pending_count(), stream_count());
                                 enqueue_sse_close(close_handler_id, stream);
+                                http_lifecycle_diag("sse-on-close-callback-end", this, running_.load(), pending_count(), stream_count());
                             });
                         return;
                     }
@@ -623,9 +714,12 @@ void lua_http_server_shutdown_all()
         std::lock_guard<std::mutex> lock(g_servers_mutex);
         servers = g_servers;
     }
+    http_lifecycle_diag_global("shutdown-all-copy", servers.size(), servers);
     for (HttpServer* server : servers) {
         if (server) {
+            server->diagnostic_emit("shutdown-all-stop-before");
             server->stop();
+            server->diagnostic_emit("shutdown-all-stop-after");
         }
     }
 }

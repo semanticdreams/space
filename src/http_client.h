@@ -61,6 +61,7 @@ private:
     HttpResponse perform(const QueuedRequest& req);
     HttpResponse make_cancelled_response(const QueuedRequest& req);
     bool pop_request(QueuedRequest& out);
+    std::size_t active_count();
 
     std::atomic<bool> stop { false };
     std::atomic<uint64_t> next_id { 1 };

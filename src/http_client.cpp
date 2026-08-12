@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <curl/curl.h>
+#include <cstdlib>
 #include <functional>
 #include <stdexcept>
 #include <utility>
@@ -77,6 +79,41 @@ public:
 
 CurlGlobalInit curl_global_init_guard;
 
+bool http_client_debug_enabled()
+{
+    // Enable with SPACE_HTTP_CLIENT_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_HTTP_CLIENT_DEBUG");
+        return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+unsigned long long diagnostic_thread_id()
+{
+    return static_cast<unsigned long long>(std::hash<std::thread::id> {}(std::this_thread::get_id()));
+}
+
+void http_client_diag(const char* event,
+                      const void* client,
+                      uint64_t id,
+                      const char* url,
+                      std::size_t active_count)
+{
+    if (!http_client_debug_enabled()) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "space-http-client event=%s client=%p thread=%llu id=%llu active=%zu url=%s\n",
+                 event,
+                 client,
+                 diagnostic_thread_id(),
+                 static_cast<unsigned long long>(id),
+                 active_count,
+                 url ? url : "-");
+    std::fflush(stderr);
+}
+
 } // namespace
 
 HttpClient::HttpClient(std::size_t thread_count)
@@ -108,6 +145,7 @@ uint64_t HttpClient::submit(const HttpRequest& request)
         std::lock_guard<std::mutex> lock(queue_mutex);
         pending.push(QueuedRequest { id, request, cancel_flag });
         cancel_flags[id] = cancel_flag;
+        http_client_diag("submit", this, id, request.url.c_str(), cancel_flags.size());
     }
     queue_cv.notify_one();
     return id;
@@ -118,9 +156,11 @@ bool HttpClient::cancel(uint64_t id)
     std::lock_guard<std::mutex> lock(queue_mutex);
     auto it = cancel_flags.find(id);
     if (it == cancel_flags.end()) {
+        http_client_diag("cancel-miss", this, id, nullptr, cancel_flags.size());
         return false;
     }
     it->second->store(true);
+    http_client_diag("cancel-hit", this, id, nullptr, cancel_flags.size());
     return true;
 }
 
@@ -143,9 +183,11 @@ void HttpClient::shutdown()
 {
     bool expected = false;
     if (!stop.compare_exchange_strong(expected, true)) {
+        http_client_diag("shutdown-already-stopped", this, 0, nullptr, active_count());
         return;
     }
 
+    http_client_diag("shutdown-begin", this, 0, nullptr, active_count());
     queue_cv.notify_all();
     for (auto& worker : workers) {
         if (worker.joinable()) {
@@ -159,6 +201,7 @@ void HttpClient::shutdown()
         pending.swap(empty);
         cancel_flags.clear();
     }
+    http_client_diag("shutdown-end", this, 0, nullptr, active_count());
 }
 
 bool HttpClient::pop_request(QueuedRequest& out)
@@ -173,8 +216,15 @@ bool HttpClient::pop_request(QueuedRequest& out)
     return true;
 }
 
+std::size_t HttpClient::active_count()
+{
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    return cancel_flags.size();
+}
+
 void HttpClient::worker_loop()
 {
+    http_client_diag("worker-start", this, 0, nullptr, active_count());
     while (!stop.load()) {
         QueuedRequest req;
         if (!pop_request(req)) {
@@ -204,6 +254,7 @@ void HttpClient::worker_loop()
             cancel_flags.erase(req.id);
         }
     }
+    http_client_diag("worker-exit", this, 0, nullptr, active_count());
 }
 
 HttpResponse HttpClient::make_cancelled_response(const QueuedRequest& req)
@@ -226,6 +277,7 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         out.error = "curl_easy_init failed";
         return out;
     }
+    http_client_diag("perform-begin", this, req.id, req.request.url.c_str(), active_count());
 
     std::string body;
     std::vector<std::pair<std::string, std::string>> headers_out;
@@ -295,5 +347,6 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         curl_slist_free_all(header_list);
     }
     curl_easy_cleanup(curl);
+    http_client_diag("perform-end", this, req.id, req.request.url.c_str(), active_count());
     return out;
 }
