@@ -46,10 +46,21 @@ spdlog::level::level_enum to_spd_level(LogLevel level)
 
 bool log_lifecycle_debug_enabled()
 {
-    // Enable with SPACE_LOG_LIFECYCLE_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    // Enable high-volume log init diagnostics with SPACE_LOG_LIFECYCLE_DEBUG=1.
     static const bool enabled = []() {
         const char* value = std::getenv("SPACE_LOG_LIFECYCLE_DEBUG");
         return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+bool native_lifecycle_diagnostics_enabled()
+{
+    // Sparse native lifecycle diagnostics are on by default for spontaneous crash evidence.
+    // Disable with SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 when stderr noise is not acceptable.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS");
+        return !(value && value[0] == '0' && value[1] == '\0');
     }();
     return enabled;
 }
@@ -59,9 +70,9 @@ unsigned long long diagnostic_thread_id()
     return static_cast<unsigned long long>(std::hash<std::thread::id> {}(std::this_thread::get_id()));
 }
 
-void log_lifecycle_diag(const char* event, const char* logger_name = nullptr)
+void log_lifecycle_diag(const char* event, const char* logger_name = nullptr, bool always_on = false)
 {
-    if (!log_lifecycle_debug_enabled()) {
+    if (!(always_on ? native_lifecycle_diagnostics_enabled() : log_lifecycle_debug_enabled())) {
         return;
     }
     std::fprintf(stderr,
@@ -96,7 +107,7 @@ LogLevel from_spd_level(spdlog::level::level_enum level)
 void ensure_logger()
 {
     if (log_shutdown_started.load(std::memory_order_relaxed)) {
-        log_lifecycle_diag("ensure-after-shutdown-begin");
+        log_lifecycle_diag("ensure-after-shutdown-begin", nullptr, true);
     }
     if (!log_ready) {
         LogConfig config;
@@ -277,7 +288,7 @@ public:
 std::shared_ptr<spdlog::logger> log_get_logger(const std::string& name)
 {
     if (log_shutdown_started.load(std::memory_order_relaxed)) {
-        log_lifecycle_diag("get-logger-after-shutdown-begin", name.c_str());
+        log_lifecycle_diag("get-logger-after-shutdown-begin", name.c_str(), true);
     }
     ensure_logger();
 
@@ -372,13 +383,13 @@ void log_shutdown()
 {
     std::lock_guard<std::mutex> lock(log_mutex);
     log_shutdown_started.store(true, std::memory_order_relaxed);
-    log_lifecycle_diag("shutdown-begin");
+    log_lifecycle_diag("shutdown-begin", nullptr, true);
     spdlog::shutdown();
     async_logger.reset();
     log_sinks.clear();
     log_file_sink.reset();
     log_ready = false;
-    log_lifecycle_diag("shutdown-end");
+    log_lifecycle_diag("shutdown-end", nullptr, true);
 }
 
 void log_set_level(LogLevel level)

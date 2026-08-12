@@ -63,6 +63,7 @@ private:
     bool pop_request(QueuedRequest& out);
     std::size_t active_count();
     void diagnostic_emit(const char* event, uint64_t id = 0, const char* url = nullptr);
+    void lifecycle_emit(const char* event, uint64_t id = 0, const char* url = nullptr);
 
     std::atomic<bool> stop { false };
     std::atomic<uint64_t> next_id { 1 };

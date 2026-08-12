@@ -81,10 +81,21 @@ CurlGlobalInit curl_global_init_guard;
 
 bool http_client_debug_enabled()
 {
-    // Enable with SPACE_HTTP_CLIENT_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    // Enable high-volume request diagnostics with SPACE_HTTP_CLIENT_DEBUG=1.
     static const bool enabled = []() {
         const char* value = std::getenv("SPACE_HTTP_CLIENT_DEBUG");
         return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+bool native_lifecycle_diagnostics_enabled()
+{
+    // Sparse native lifecycle diagnostics are on by default for spontaneous crash evidence.
+    // Disable with SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 when stderr noise is not acceptable.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS");
+        return !(value && value[0] == '0' && value[1] == '\0');
     }();
     return enabled;
 }
@@ -98,9 +109,10 @@ void http_client_diag(const char* event,
                       const void* client,
                       uint64_t id,
                       const char* url,
-                      std::size_t active_count)
+                      std::size_t active_count,
+                      bool always_on)
 {
-    if (!http_client_debug_enabled()) {
+    if (!(always_on ? native_lifecycle_diagnostics_enabled() : http_client_debug_enabled())) {
         return;
     }
     std::fprintf(stderr,
@@ -145,7 +157,7 @@ uint64_t HttpClient::submit(const HttpRequest& request)
         std::lock_guard<std::mutex> lock(queue_mutex);
         pending.push(QueuedRequest { id, request, cancel_flag });
         cancel_flags[id] = cancel_flag;
-        http_client_diag("submit", this, id, request.url.c_str(), cancel_flags.size());
+        http_client_diag("submit", this, id, request.url.c_str(), cancel_flags.size(), false);
     }
     queue_cv.notify_one();
     return id;
@@ -156,11 +168,11 @@ bool HttpClient::cancel(uint64_t id)
     std::lock_guard<std::mutex> lock(queue_mutex);
     auto it = cancel_flags.find(id);
     if (it == cancel_flags.end()) {
-        http_client_diag("cancel-miss", this, id, nullptr, cancel_flags.size());
+        http_client_diag("cancel-miss", this, id, nullptr, cancel_flags.size(), false);
         return false;
     }
     it->second->store(true);
-    http_client_diag("cancel-hit", this, id, nullptr, cancel_flags.size());
+    http_client_diag("cancel-hit", this, id, nullptr, cancel_flags.size(), false);
     return true;
 }
 
@@ -183,11 +195,11 @@ void HttpClient::shutdown()
 {
     bool expected = false;
     if (!stop.compare_exchange_strong(expected, true)) {
-        diagnostic_emit("shutdown-already-stopped");
+        lifecycle_emit("shutdown-already-stopped");
         return;
     }
 
-    diagnostic_emit("shutdown-begin");
+    lifecycle_emit("shutdown-begin");
     queue_cv.notify_all();
     for (auto& worker : workers) {
         if (worker.joinable()) {
@@ -201,7 +213,7 @@ void HttpClient::shutdown()
         pending.swap(empty);
         cancel_flags.clear();
     }
-    diagnostic_emit("shutdown-end");
+    lifecycle_emit("shutdown-end");
 }
 
 bool HttpClient::pop_request(QueuedRequest& out)
@@ -227,12 +239,20 @@ void HttpClient::diagnostic_emit(const char* event, uint64_t id, const char* url
     if (!http_client_debug_enabled()) {
         return;
     }
-    http_client_diag(event, this, id, url, active_count());
+    http_client_diag(event, this, id, url, active_count(), false);
+}
+
+void HttpClient::lifecycle_emit(const char* event, uint64_t id, const char* url)
+{
+    if (!native_lifecycle_diagnostics_enabled()) {
+        return;
+    }
+    http_client_diag(event, this, id, url, active_count(), true);
 }
 
 void HttpClient::worker_loop()
 {
-    diagnostic_emit("worker-start");
+    lifecycle_emit("worker-start");
     while (!stop.load()) {
         QueuedRequest req;
         if (!pop_request(req)) {
@@ -262,7 +282,7 @@ void HttpClient::worker_loop()
             cancel_flags.erase(req.id);
         }
     }
-    diagnostic_emit("worker-exit");
+    lifecycle_emit("worker-exit");
 }
 
 HttpResponse HttpClient::make_cancelled_response(const QueuedRequest& req)

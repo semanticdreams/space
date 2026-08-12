@@ -88,3 +88,66 @@ Constraint Impact
 Concerns
 --------
 - None beyond the existing note that diagnostics can perturb timing when explicitly enabled.
+
+Follow-up: always-on sparse lifecycle markers
+=============================================
+
+What changed
+------------
+- Changed sparse native lifecycle diagnostics from opt-in to default-on so spontaneous crashes capture evidence without prior environment setup.
+- Added `SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0` as a shared opt-out for always-on sparse lifecycle markers.
+- Kept potentially high-volume callback/request diagnostics gated by the existing variables:
+  - `SPACE_HTTP_LIFECYCLE_DEBUG=1` still gates SSE route/on-close callback markers.
+  - `SPACE_HTTP_CLIENT_DEBUG=1` still gates submit/cancel/perform request markers.
+  - `SPACE_LOG_LIFECYCLE_DEBUG=1` still gates `log_init` begin/end markers.
+- Always-on direct-`stderr` markers now cover:
+  - `src/lua_http_server.cpp`: HttpServer ctor/dtor/register/unregister, `stop()` entry/exit and close_streams/svr.stop/fail_pending/join phase boundaries, and `lua_http_server_shutdown_all` copied server pointers plus per-server stop boundaries.
+  - `src/http_client.cpp`: shutdown begin/end/already-stopped and worker start/exit.
+  - `src/log.cpp`: `log_shutdown` begin/end and late ensure/get-logger-after-shutdown markers.
+- Preserved `std::fprintf(stderr, ...)` plus `std::fflush(stderr)` and did not route diagnostics through spdlog.
+- Preserved disabled-path thread safety for high-volume gated diagnostics by retaining early flag checks before mutex-protected count sampling. Always-on lifecycle paths sample only the existing lifecycle counts immediately before direct emission.
+
+Validation
+----------
+- `rtk make build` with 14400000 ms timeout: passed.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-http-server:main`: passed, `Executed 13 Lua tests`.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-mcp-http:main`: passed, `Executed 11 Lua tests`.
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-agent-layer:main`: passed, `Executed 97 Lua tests`.
+
+Coverage rationale
+------------------
+- Build validates the changed C++ diagnostics compile and link.
+- HTTP server tests exercise native server lifecycle, repeated stop/dtor/shutdown-all paths, and demonstrate the default-on lifecycle markers are emitted without opt-in variables.
+- MCP HTTP tests exercise repeated MCP server start/stop and SSE lifecycle paths near the suspected crash boundary.
+- Agent-layer tests exercise HTTP client worker startup/shutdown and the OpenCode/MCP bridge surfaces touched by diagnostics.
+
+Constraint Impact
+-----------------
+- not applicable (native diagnostic-only instrumentation; no Fennel behavior or constraint contract changed).
+
+TDD Evidence
+------------
+- TDD was not used. This diagnostic-only follow-up changes native stderr instrumentation defaults and was validated through the requested focused runtime/build checks rather than fragile assertions over incidental stderr output.
+
+Files changed
+-------------
+- `src/lua_http_server.cpp`
+- `src/http_client.cpp`
+- `src/http_client.h`
+- `src/log.cpp`
+- `.superpowers/sdd/native-crash-diagnostics-report.md`
+
+Design/refactor decisions
+-------------------------
+- Used a small file-local `native_lifecycle_diagnostics_enabled()` helper in each touched native file to keep scope narrow and avoid cross-file refactors.
+- Split sparse lifecycle emission from high-volume diagnostics so per-request/callback code remains env-gated while lifecycle/shutdown markers are captured by default.
+- Added only an opt-out environment variable, not new config files, to preserve spontaneous crash evidence by default and avoid editing `.opencode/opencode.json`.
+
+Self-review findings
+--------------------
+- Confirmed no edits to `.opencode/opencode.json` or bubbles/user-code areas.
+- Confirmed submit/cancel/perform and SSE callback diagnostics remain gated and still avoid mutex count sampling when disabled.
+
+Concerns
+--------
+- Always-on HTTP client worker start/exit emits one line per worker. This is default-on as requested when low volume; current tests show up to hardware-concurrency worker lines at process startup/shutdown, but no per-request diagnostics are default-on.

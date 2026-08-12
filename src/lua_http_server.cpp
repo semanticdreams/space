@@ -30,10 +30,21 @@ std::vector<HttpServer*> g_servers;
 
 bool http_lifecycle_debug_enabled()
 {
-    // Enable with SPACE_HTTP_LIFECYCLE_DEBUG=1 for crash-path diagnostics that avoid spdlog.
+    // Enable high-volume callback/request diagnostics with SPACE_HTTP_LIFECYCLE_DEBUG=1.
     static const bool enabled = []() {
         const char* value = std::getenv("SPACE_HTTP_LIFECYCLE_DEBUG");
         return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+bool native_lifecycle_diagnostics_enabled()
+{
+    // Sparse native lifecycle diagnostics are on by default for spontaneous crash evidence.
+    // Disable with SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 when stderr noise is not acceptable.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS");
+        return !(value && value[0] == '0' && value[1] == '\0');
     }();
     return enabled;
 }
@@ -47,9 +58,10 @@ void http_lifecycle_diag(const char* event,
                          const void* server,
                          bool running,
                          std::size_t pending_count,
-                         std::size_t stream_count)
+                         std::size_t stream_count,
+                         bool always_on)
 {
-    if (!http_lifecycle_debug_enabled()) {
+    if (!(always_on ? native_lifecycle_diagnostics_enabled() : http_lifecycle_debug_enabled())) {
         return;
     }
     std::fprintf(stderr,
@@ -65,7 +77,7 @@ void http_lifecycle_diag(const char* event,
 
 void http_lifecycle_diag_global(const char* event, std::size_t count, const std::vector<HttpServer*>& servers)
 {
-    if (!http_lifecycle_debug_enabled()) {
+    if (!native_lifecycle_diagnostics_enabled()) {
         return;
     }
     std::fprintf(stderr,
@@ -269,26 +281,32 @@ public:
     explicit HttpServer(sol::state_view lua)
     {
         (void)lua;
-        diagnostic_emit("ctor-enter");
-        std::lock_guard<std::mutex> lock(g_servers_mutex);
-        g_servers.push_back(this);
-        diagnostic_emit("register");
+        lifecycle_emit("ctor-enter");
+        {
+            std::lock_guard<std::mutex> lock(g_servers_mutex);
+            g_servers.push_back(this);
+        }
+        lifecycle_emit("register");
     }
 
     ~HttpServer()
     {
-        diagnostic_emit("dtor-enter");
+        lifecycle_emit("dtor-enter");
         stop();
+        bool unregistered = false;
         {
             std::lock_guard<std::mutex> lock(g_servers_mutex);
             auto it = std::find(g_servers.begin(), g_servers.end(), this);
             if (it != g_servers.end()) {
                 g_servers.erase(it);
-                diagnostic_emit("unregister");
+                unregistered = true;
             }
         }
+        if (unregistered) {
+            lifecycle_emit("unregister");
+        }
         fail_pending("HTTP server stopped");
-        diagnostic_emit("dtor-exit");
+        lifecycle_emit("dtor-exit");
     }
 
     HttpServer(const HttpServer&) = delete;
@@ -328,25 +346,25 @@ public:
 
     void stop()
     {
-        diagnostic_emit("stop-enter");
+        lifecycle_emit("stop-enter");
         const bool was_running = running_.exchange(false);
         if (was_running) {
-            diagnostic_emit("stop-close-streams-before");
+            lifecycle_emit("stop-close-streams-before");
             close_streams();
-            diagnostic_emit("stop-close-streams-after");
-            diagnostic_emit("stop-svr-stop-before");
+            lifecycle_emit("stop-close-streams-after");
+            lifecycle_emit("stop-svr-stop-before");
             svr_.stop();
-            diagnostic_emit("stop-svr-stop-after");
-            diagnostic_emit("stop-fail-pending-before");
+            lifecycle_emit("stop-svr-stop-after");
+            lifecycle_emit("stop-fail-pending-before");
             fail_pending("HTTP server stopped");
-            diagnostic_emit("stop-fail-pending-after");
+            lifecycle_emit("stop-fail-pending-after");
             if (server_thread_.joinable()) {
-                diagnostic_emit("stop-join-before");
+                lifecycle_emit("stop-join-before");
                 server_thread_.join();
-                diagnostic_emit("stop-join-after");
+                lifecycle_emit("stop-join-after");
             }
         }
-        diagnostic_emit("stop-exit");
+        lifecycle_emit("stop-exit");
     }
 
     int port() const { return port_; }
@@ -440,7 +458,15 @@ public:
         if (!http_lifecycle_debug_enabled()) {
             return;
         }
-        http_lifecycle_diag(event, this, running_.load(), pending_count(), stream_count());
+        http_lifecycle_diag(event, this, running_.load(), pending_count(), stream_count(), false);
+    }
+
+    void lifecycle_emit(const char* event)
+    {
+        if (!native_lifecycle_diagnostics_enabled()) {
+            return;
+        }
+        http_lifecycle_diag(event, this, running_.load(), pending_count(), stream_count(), true);
     }
 
 private:
@@ -720,9 +746,9 @@ void lua_http_server_shutdown_all()
     http_lifecycle_diag_global("shutdown-all-copy", servers.size(), servers);
     for (HttpServer* server : servers) {
         if (server) {
-            server->diagnostic_emit("shutdown-all-stop-before");
+            server->lifecycle_emit("shutdown-all-stop-before");
             server->stop();
-            server->diagnostic_emit("shutdown-all-stop-after");
+            server->lifecycle_emit("shutdown-all-stop-after");
         }
     }
 }
