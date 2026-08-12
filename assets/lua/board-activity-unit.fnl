@@ -24,11 +24,15 @@
   world-runtime.board-state)
 
 (fn reconcile-stale-string-entity-items! [state]
-  (local payload (or state {}))
+  (local payload (assert state "Board string entity reconciliation requires board state"))
+  (when (= payload.items nil)
+    (set payload.items []))
+  (when (= payload.connectors nil)
+    (set payload.connectors []))
   (local store (StringEntityStore.get-default))
   (local pruned-item-ids {})
   (local items [])
-  (each [_ item (ipairs (or payload.items []))]
+  (each [_ item (ipairs payload.items)]
     (local entity-id (and (= item.type BuiltinStringEntity.item-type)
                           (BuiltinStringEntity.entity-id-from-subject item.subject-key)))
     (if (and entity-id (not (store:get-entity entity-id)))
@@ -36,7 +40,7 @@
         (table.insert items item)))
   (when (next pruned-item-ids)
     (local connectors [])
-    (each [_ connector (ipairs (or payload.connectors []))]
+    (each [_ connector (ipairs payload.connectors)]
       (when (not (or (. pruned-item-ids connector.source-item-id)
                      (. pruned-item-ids connector.target-item-id)))
         (table.insert connectors connector)))
