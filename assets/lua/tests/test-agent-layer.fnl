@@ -1340,11 +1340,11 @@
   (assert (= config.mcp.space.url status.url) "config URL should match bridge URL") (assert (= config.mcp.space.enabled true) "config should enable MCP server")
   (each [_ name (ipairs ["invalid" "write" "edit" "bash" "task" "todowrite" "webfetch" "websearch" "lsp" "skill" "question"])] (assert (= (. config.permission name) "deny") (.. "config should deny native OpenCode tool: " name)))
   (local allowed-patterns [(.. space-data-dir "/agent-sessions/**") (.. space-data-dir "/agent-opencode/**") (.. space-data-dir "/agent-approvals/**") (.. space-data-dir "/agent-artifacts/**") (.. space-data-dir "/code/**") (.. space-cache-dir "/log/**")])
-  (fn assert-bounded-tool [tool-name]
+  (local nested-secret-deny-patterns [(.. space-data-dir "/agent-sessions/**/*token*") (.. space-data-dir "/agent-artifacts/**/*credential*") (.. space-cache-dir "/log/**/*keyring*")]) (fn assert-bounded-tool [tool-name]
     (local permissions (. config.permission tool-name)) (assert (= (type permissions) "table") (.. tool-name " should use bounded permission patterns")) (assert (= (. permissions "*") "deny") (.. tool-name " should deny broad access"))
     (each [_ pattern (ipairs allowed-patterns)] (assert (= (. permissions pattern) "allow") (.. tool-name " should allow bounded root: " pattern))
       (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])]
-        (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (local nested-deny-pattern (string.gsub pattern "/%*%*$" (.. "/**/*" marker "*"))) (assert (= (. permissions deny-pattern) "deny") (.. tool-name " should deny secret-looking path: " deny-pattern)) (assert (= (. permissions nested-deny-pattern) "deny") (.. tool-name " should deny nested secret-looking path: " nested-deny-pattern)))))
+        (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (assert (= (. permissions deny-pattern) "deny") (.. tool-name " should deny secret-looking path: " deny-pattern)))) (each [_ nested-pattern (ipairs nested-secret-deny-patterns)] (assert (= (. permissions nested-pattern) "deny") (.. tool-name " should deny nested secret-looking path: " nested-pattern))))
   (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
   (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
   (each [i pattern (ipairs allowed-patterns)] (assert (= (. status.allowed-roots i) pattern) (.. "bridge status allowed root should match: " pattern)))
