@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <curl/curl.h>
+#include <cstdlib>
 #include <functional>
 #include <stdexcept>
 #include <utility>
@@ -77,6 +79,53 @@ public:
 
 CurlGlobalInit curl_global_init_guard;
 
+bool http_client_debug_enabled()
+{
+    // Enable high-volume request diagnostics with SPACE_HTTP_CLIENT_DEBUG=1.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_HTTP_CLIENT_DEBUG");
+        return value && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+bool native_lifecycle_diagnostics_enabled()
+{
+    // Sparse native lifecycle diagnostics are on by default for spontaneous crash evidence.
+    // Disable with SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS=0 when stderr noise is not acceptable.
+    static const bool enabled = []() {
+        const char* value = std::getenv("SPACE_NATIVE_LIFECYCLE_DIAGNOSTICS");
+        return !(value && value[0] == '0' && value[1] == '\0');
+    }();
+    return enabled;
+}
+
+unsigned long long diagnostic_thread_id()
+{
+    return static_cast<unsigned long long>(std::hash<std::thread::id> {}(std::this_thread::get_id()));
+}
+
+void http_client_diag(const char* event,
+                      const void* client,
+                      uint64_t id,
+                      const char* url,
+                      std::size_t active_count,
+                      bool always_on)
+{
+    if (!(always_on ? native_lifecycle_diagnostics_enabled() : http_client_debug_enabled())) {
+        return;
+    }
+    std::fprintf(stderr,
+                 "space-http-client event=%s client=%p thread=%llu id=%llu active=%zu url=%s\n",
+                 event,
+                 client,
+                 diagnostic_thread_id(),
+                 static_cast<unsigned long long>(id),
+                 active_count,
+                 url ? url : "-");
+    std::fflush(stderr);
+}
+
 } // namespace
 
 HttpClient::HttpClient(std::size_t thread_count)
@@ -108,6 +157,7 @@ uint64_t HttpClient::submit(const HttpRequest& request)
         std::lock_guard<std::mutex> lock(queue_mutex);
         pending.push(QueuedRequest { id, request, cancel_flag });
         cancel_flags[id] = cancel_flag;
+        http_client_diag("submit", this, id, request.url.c_str(), cancel_flags.size(), false);
     }
     queue_cv.notify_one();
     return id;
@@ -118,9 +168,11 @@ bool HttpClient::cancel(uint64_t id)
     std::lock_guard<std::mutex> lock(queue_mutex);
     auto it = cancel_flags.find(id);
     if (it == cancel_flags.end()) {
+        http_client_diag("cancel-miss", this, id, nullptr, cancel_flags.size(), false);
         return false;
     }
     it->second->store(true);
+    http_client_diag("cancel-hit", this, id, nullptr, cancel_flags.size(), false);
     return true;
 }
 
@@ -143,9 +195,11 @@ void HttpClient::shutdown()
 {
     bool expected = false;
     if (!stop.compare_exchange_strong(expected, true)) {
+        lifecycle_emit("shutdown-already-stopped");
         return;
     }
 
+    lifecycle_emit("shutdown-begin");
     queue_cv.notify_all();
     for (auto& worker : workers) {
         if (worker.joinable()) {
@@ -159,6 +213,7 @@ void HttpClient::shutdown()
         pending.swap(empty);
         cancel_flags.clear();
     }
+    lifecycle_emit("shutdown-end");
 }
 
 bool HttpClient::pop_request(QueuedRequest& out)
@@ -173,8 +228,31 @@ bool HttpClient::pop_request(QueuedRequest& out)
     return true;
 }
 
+std::size_t HttpClient::active_count()
+{
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    return cancel_flags.size();
+}
+
+void HttpClient::diagnostic_emit(const char* event, uint64_t id, const char* url)
+{
+    if (!http_client_debug_enabled()) {
+        return;
+    }
+    http_client_diag(event, this, id, url, active_count(), false);
+}
+
+void HttpClient::lifecycle_emit(const char* event, uint64_t id, const char* url)
+{
+    if (!native_lifecycle_diagnostics_enabled()) {
+        return;
+    }
+    http_client_diag(event, this, id, url, active_count(), true);
+}
+
 void HttpClient::worker_loop()
 {
+    diagnostic_emit("worker-start");
     while (!stop.load()) {
         QueuedRequest req;
         if (!pop_request(req)) {
@@ -204,6 +282,7 @@ void HttpClient::worker_loop()
             cancel_flags.erase(req.id);
         }
     }
+    diagnostic_emit("worker-exit");
 }
 
 HttpResponse HttpClient::make_cancelled_response(const QueuedRequest& req)
@@ -226,6 +305,7 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         out.error = "curl_easy_init failed";
         return out;
     }
+    diagnostic_emit("perform-begin", req.id, req.request.url.c_str());
 
     std::string body;
     std::vector<std::pair<std::string, std::string>> headers_out;
@@ -295,5 +375,6 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
         curl_slist_free_all(header_list);
     }
     curl_easy_cleanup(curl);
+    diagnostic_emit("perform-end", req.id, req.request.url.c_str());
     return out;
 }

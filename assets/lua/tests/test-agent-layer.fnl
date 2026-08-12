@@ -1331,25 +1331,49 @@
   (local {: AgentOpencodeMcpBridge} (require :llm/agent/opencode-mcp-bridge))
   (local ToolRegistry (require :mcp/tool-registry))
   (local dir (temp-dir))
-  (local tool-reg (ToolRegistry {:namespace-prefix "space_"}))
-  (local bridge (AgentOpencodeMcpBridge {:tools tool-reg :data-dir dir}))
-  (bridge:start)
-  (local status (bridge:status))
-  (assert status.started? "bridge should report started")
-  (assert (> status.port 0) "bridge should bind a port")
-  (local env (bridge:opencode-env))
-  (assert (= env.XDG_CONFIG_HOME status.config-root) "OpenCode env should point to bridge config root")
-  (local config (json.loads (fs.read-file status.config-path)))
+  (local space-data-dir (fs.join-path dir "space-data")) (local space-cache-dir (fs.join-path dir "space-cache")) (local code-dir (fs.join-path space-data-dir "code")) (local artifact-root (fs.join-path space-data-dir "agent-artifacts"))
+  (local tool-reg (ToolRegistry {:namespace-prefix "space_"})) (local bridge (AgentOpencodeMcpBridge {:tools tool-reg :data-dir dir :space-data-dir space-data-dir :space-cache-dir space-cache-dir :code-dir code-dir :artifact-root artifact-root}))
+  (bridge:start) (local status (bridge:status)) (assert status.started? "bridge should report started")
+  (assert (> status.port 0) "bridge should bind a port") (assert (= status.artifact-root artifact-root) "bridge status should report artifact root") (assert (fs.exists artifact-root) "bridge should ensure artifact root exists") (assert (= (bridge:config-path) status.config-path) "bridge should expose config path")
+  (local env (bridge:opencode-env)) (assert (= env.XDG_CONFIG_HOME status.config-root) "OpenCode env should point to bridge config root") (local config (json.loads (fs.read-file status.config-path)))
   (assert (= config.mcp.space.type "remote") "config should create remote MCP server")
-  (assert (= config.mcp.space.url status.url) "config URL should match bridge URL")
-  (assert (= config.mcp.space.enabled true) "config should enable MCP server")
-  (each [_ name (ipairs ["invalid" "read" "write" "edit" "grep" "glob" "list" "bash"
-                         "task" "external_directory" "todowrite" "webfetch"
-                         "websearch" "lsp" "skill" "question"])]
-    (assert (= (. config.permission name) "deny")
-            (.. "config should deny native OpenCode tool: " name)))
-  (bridge:stop)
-  (clean-dir dir))
+  (assert (= config.mcp.space.url status.url) "config URL should match bridge URL") (assert (= config.mcp.space.enabled true) "config should enable MCP server")
+  (each [_ name (ipairs ["invalid" "write" "edit" "bash" "task" "todowrite" "webfetch" "websearch" "lsp" "skill" "question"])] (assert (= (. config.permission name) "deny") (.. "config should deny native OpenCode tool: " name)))
+  (local allowed-patterns [(.. space-data-dir "/agent-sessions/**") (.. space-data-dir "/agent-opencode/**") (.. space-data-dir "/agent-approvals/**") (.. space-data-dir "/agent-artifacts/**") (.. space-data-dir "/code/**") (.. space-cache-dir "/log/**")])
+  (local nested-secret-deny-patterns [(.. space-data-dir "/agent-sessions/**/*token*") (.. space-data-dir "/agent-artifacts/**/*credential*") (.. space-cache-dir "/log/**/*keyring*")]) (fn assert-bounded-tool [tool-name]
+    (local permissions (. config.permission tool-name)) (assert (= (type permissions) "table") (.. tool-name " should use bounded permission patterns")) (assert (= (. permissions "*") "deny") (.. tool-name " should deny broad access"))
+    (each [_ pattern (ipairs allowed-patterns)] (assert (= (. permissions pattern) "allow") (.. tool-name " should allow bounded root: " pattern))
+      (each [_ marker (ipairs ["auth" "token" "secret" "credential" "keyring"])]
+        (local deny-pattern (string.gsub pattern "%*%*$" (.. "*" marker "*"))) (assert (= (. permissions deny-pattern) "deny") (.. tool-name " should deny secret-looking path: " deny-pattern)))) (each [_ nested-pattern (ipairs nested-secret-deny-patterns)] (assert (= (. permissions nested-pattern) "deny") (.. tool-name " should deny nested secret-looking path: " nested-pattern))))
+  (each [_ name (ipairs ["read" "list" "glob" "grep" "external_directory"])] (assert-bounded-tool name))
+  (assert (= (length status.allowed-roots) (length allowed-patterns)) "bridge status should report allowed roots")
+  (each [i pattern (ipairs allowed-patterns)] (assert (= (. status.allowed-roots i) pattern) (.. "bridge status allowed root should match: " pattern)))
+  (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL")
+  (bridge:stop) (clean-dir dir))
+
+(fn test-opencode-mcp-bridge-refreshes-provider-table []
+  (local BridgeMod (require :llm/agent/opencode-mcp-bridge))
+  (var old-closed false)
+  (var refresh-called 0)
+  (var factory-called 0)
+  (local old-provider {:close (fn [] (set old-closed true))})
+  (local new-provider {:id "new-provider"})
+  (local bridge
+    {:refresh-config! (fn [self]
+                        (set refresh-called (+ refresh-called 1))
+                        {:url "http://127.0.0.1:4321/mcp"})
+     :opencode-env (fn [self] {:XDG_CONFIG_HOME "/tmp/space/test-opencode-config"})})
+  (local providers
+    {:opencode old-provider
+     :opencode-factory (fn []
+                         (set factory-called (+ factory-called 1))
+                         new-provider)})
+  (local refreshed (BridgeMod.refresh-opencode-provider! providers bridge))
+  (assert old-closed "refresh should close existing provider")
+  (assert (= refresh-called 1) "refresh should refresh bridge config exactly once")
+  (assert (= factory-called 1) "refresh should create replacement provider exactly once")
+  (assert (= refreshed new-provider) "refresh should return the replacement provider")
+  (assert (= providers.opencode new-provider) "refresh should store replacement provider"))
 
 ;; ═══════════════════════════════════════
 ;; Prompt utilities tests
@@ -1658,6 +1682,113 @@
   (runner:drop)
   (clean-dir dir))
 
+(fn test-runner-creates-artifact-context []
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local SessionMod (require :llm/agent/session))
+  (local dir (temp-dir))
+  (local artifact-root (fs.join-path dir "agent-artifacts"))
+  (local registry (AgentRegistry {:deps {}}))
+  (var captured-artifacts nil)
+  (var captured-runtime-context nil)
+  (registry:register "space-agent"
+    (fn [_deps]
+      {:id "space-agent"
+       :run (fn [_self _input _session ctx]
+              (set captured-artifacts ctx.artifacts)
+              (set captured-runtime-context ctx.runtime-context)
+              (ctx.turn:finish {:content "ok"}))}))
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry registry
+     :deps {:app :stub
+            :presets {}
+            :tools {}
+            :approvals {}
+            :agents registry
+            :providers {}
+            :artifact-root artifact-root}}))
+  (local session (runner:create-session "space-agent"))
+  (runner:run-turn session.id "capture artifacts" {})
+  (local expected-session-dir (fs.join-path artifact-root session.id))
+  (local expected-report-path (fs.join-path expected-session-dir "report.md"))
+  (assert captured-artifacts "agent context should include artifacts")
+  (assert (= captured-artifacts.root artifact-root) "artifact context should include root")
+  (assert (= captured-artifacts.session-dir expected-session-dir)
+          "artifact context should include session directory")
+  (assert (= captured-artifacts.report-path expected-report-path)
+          "artifact context should include report path")
+  (assert (fs.exists expected-session-dir) "artifact session directory should exist")
+  (assert captured-runtime-context "agent context should include runtime-context")
+  (assert (= captured-runtime-context.artifact-dir expected-session-dir)
+          "runtime-context should use the session artifact directory")
+  (assert (= captured-runtime-context.report-path expected-report-path)
+          "runtime-context should use the artifact report path")
+  (assert (= captured-runtime-context.agent-session-id session.id)
+          "runtime-context should persist agent session id")
+  (assert (= captured-runtime-context.validation-mode "disk-only")
+          "runtime-context should start as disk-only")
+  (SessionMod.invalidate-cache session.id)
+  (local persisted (runner:get-session session.id))
+  (local runtime-context persisted.data.runtime-context)
+  (assert (= runtime-context.artifact-dir expected-session-dir)
+          "persisted runtime-context should include artifact-dir")
+  (assert (= runtime-context.report-path expected-report-path)
+          "persisted runtime-context should include report-path")
+  (assert (= runtime-context.agent-session-id session.id)
+          "persisted runtime-context should include agent-session-id")
+  (assert (= runtime-context.validation-mode "disk-only")
+          "persisted runtime-context should default to disk-only")
+  (runner:drop)
+  (clean-dir dir))
+
+(fn capture-runner-artifacts [data-dir]
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local registry (AgentRegistry {:deps {}}))
+  (var captured-artifacts nil)
+  (registry:register "space-agent"
+    (fn [_deps]
+      {:id "space-agent"
+       :run (fn [_self _input _session ctx]
+              (set captured-artifacts ctx.artifacts)
+              (ctx.turn:finish {:content "ok"}))}))
+  (local runner (AgentRunner
+    {:data-dir data-dir
+     :registry registry
+     :deps {:app :stub :presets {} :tools {} :approvals {} :agents registry :providers {}}}))
+  (local session (runner:create-session "space-agent"))
+  (runner:run-turn session.id "capture default artifacts" {})
+  (runner:drop)
+  {:artifacts captured-artifacts :session-id session.id})
+
+(fn test-runner-default-artifacts-nested-under-non-session-data-dir []
+  (local dir (temp-dir))
+  (local result (capture-runner-artifacts dir))
+  (local expected-root (fs.join-path dir "agent-artifacts"))
+  (local expected-session-dir (fs.join-path expected-root result.session-id))
+  (assert (= result.artifacts.root expected-root)
+          "non-agent-sessions data-dir should use nested artifact root")
+  (assert (= result.artifacts.session-dir expected-session-dir)
+          "non-agent-sessions data-dir should create nested session artifact dir")
+  (assert (fs.exists expected-session-dir)
+          "nested default session artifact directory should exist")
+  (clean-dir dir))
+
+(fn test-runner-default-artifacts-sibling-for-agent-sessions-data-dir []
+  (local root (temp-dir))
+  (local data-dir (fs.join-path root "agent-sessions"))
+  (local result (capture-runner-artifacts data-dir))
+  (local expected-root (fs.join-path root "agent-artifacts"))
+  (local expected-session-dir (fs.join-path expected-root result.session-id))
+  (assert (= result.artifacts.root expected-root)
+          "agent-sessions data-dir should use sibling artifact root")
+  (assert (= result.artifacts.session-dir expected-session-dir)
+          "agent-sessions data-dir should create sibling session artifact dir")
+  (assert (fs.exists expected-session-dir)
+          "sibling default session artifact directory should exist")
+  (clean-dir root))
+
 ;; ═══════════════════════════════════════
 ;; SpaceAgent fixture tests
 ;; ═══════════════════════════════════════
@@ -1676,6 +1807,7 @@
   (local {: AgentRegistry} (require :llm/agent/registry))
   (local {: AgentRunner} (require :llm/agent/runner))
   (local dir (temp-dir))
+  (local artifact-root (fs.join-path dir "agent-artifacts"))
 
   ;; Mock opencode client
   (var create-calls [])
@@ -1731,7 +1863,8 @@
             :tools mock-tools
             :approvals {}
             :agents reg
-            :providers {:opencode mock-opencode}}}))
+            :providers {:opencode mock-opencode}
+            :artifact-root artifact-root}}))
 
   (local session (runner:create-session "space-agent"))
   (var items-log [])
@@ -1754,6 +1887,24 @@
   (assert (string.match first-part.text "draw a red circle") "prompt should contain user input")
   (assert (string.match first-call.body.system "Use drawing shape tools")
           "system prompt should include active preset guidance")
+  (local expected-report-path
+    (fs.join-path artifact-root session.id "report.md"))
+  (assert (string.find first-call.body.system expected-report-path 1 true)
+          "system prompt should include artifact report path")
+  (assert (string.find first-call.body.system "validation-mode: live" 1 true)
+          "system prompt should document live validation mode")
+  (assert (string.find first-call.body.system "validation-mode: disk-only" 1 true)
+          "system prompt should document disk-only validation mode")
+  (assert (string.find first-call.body.system "compile check" 1 true)
+          "system prompt should mention compile check evidence")
+  (assert (string.find first-call.body.system "constraints" 1 true)
+          "system prompt should mention constraints evidence")
+  (assert (string.find first-call.body.system "focused test" 1 true)
+          "system prompt should mention focused test evidence")
+  (assert (string.find first-call.body.system
+                       "Do not claim the running app was validated from disk-only evidence"
+                       1 true)
+          "system prompt should warn against live claims after disk-only validation")
 
   ;; Verify session items persisted
   (local reloaded (runner:get-session session.id))
@@ -2295,6 +2446,190 @@
   (runner:drop)
   (clean-dir dir))
 
+(fn test-space-agent-refreshes-stale-opencode-session []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var first-get-calls 0)
+  (var refresh-calls 0)
+  (var fresh-create-calls 0)
+  (var prompt-calls 0)
+  (local first-provider
+    {:session
+     {:create (fn [_body on-response]
+                (on-response {:ok false :error "old provider should not create after stale get"}))
+      :prompt (fn [_id _body _on-response]
+                (error "old provider should not prompt after stale get"))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [id on-response]
+             (set first-get-calls (+ first-get-calls 1))
+             (assert (= id "stale-oc-session") "should look up stale OpenCode session id")
+             (on-response {:ok false :error "Session not found"}))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local second-provider
+    {:server {:url (fn [] "http://127.0.0.1:9999")}
+     :session
+     {:create (fn [_body on-response]
+                (set fresh-create-calls (+ fresh-create-calls 1))
+                (on-response {:ok true :data {:id "fresh-oc-session"}}))
+      :prompt (fn [id _body on-response]
+                (set prompt-calls (+ prompt-calls 1))
+                (assert (= id "fresh-oc-session") "prompt should use fresh session")
+                (on-response {:ok true
+                              :data {:info {:model {:modelID "mock-live"}}
+                                     :parts [{:type "text" :text "fresh response"}]
+                                     :usage {}}}))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id _on-response]
+             (error "refreshed provider should create, not retry stale get"))
+      :messages (fn [_id on-response]
+                  (on-response {:ok true
+                                :data [{:info {:id "fresh-msg" :role "assistant" :model {:modelID "mock-live"}}
+                                        :parts [{:type "text" :text "fresh response"}]}]}))}})
+  (var providers nil)
+  (set providers
+       {:opencode first-provider
+        :refresh-opencode (fn []
+                            (set refresh-calls (+ refresh-calls 1))
+                            (tset providers :opencode second-provider)
+                            second-provider)})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local mock-presets
+    {:get-active-presets (fn [] [])
+     :get-prompt-fragments (fn [] [])
+     :get-tool-defs (fn [] [])})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets mock-presets
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers
+            :opencode-mcp-bridge {:status (fn [self]
+                                           {:url "http://127.0.0.1:4321/mcp"})}}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "stale-oc-session")
+  (local handle (runner:run-turn session.id "recover stale session" {}))
+  (assert (= (handle:status) :completed) "turn should complete after bounded refresh")
+  (assert (= first-get-calls 1) "stale get should be attempted exactly once")
+  (assert (= refresh-calls 1) "refresh-opencode should be called exactly once")
+  (assert (= fresh-create-calls 1) "fresh provider should create one new session")
+  (assert (= prompt-calls 1) "prompt should run exactly once")
+  (local reloaded (runner:get-session session.id))
+  (assert (= reloaded.data.opencode-session-id "fresh-oc-session")
+          "session should store fresh OpenCode session id")
+  (assert (= reloaded.data.runtime-context.validation-mode "live")
+          "runtime context should record live validation mode")
+  (assert (= reloaded.data.runtime-context.opencode-session-id "fresh-oc-session")
+          "runtime context should record fresh OpenCode session id")
+  (assert (= reloaded.data.runtime-context.mcp-endpoint "http://127.0.0.1:4321/mcp")
+          "runtime context should record MCP endpoint evidence")
+  (assert (= reloaded.data.runtime-context.opencode-server-url "http://127.0.0.1:9999")
+          "runtime context should record OpenCode server URL")
+  (assert reloaded.data.runtime-context.last-live-connection-at
+          "runtime context should record live connection timestamp")
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-fails-non-stale-opencode-get-error []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var create-calls 0)
+  (var refresh-calls 0)
+  (local provider
+    {:session
+     {:create (fn [_body _on-response] (set create-calls (+ create-calls 1)))
+      :prompt (fn [_id _body _on-response] nil)
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id on-response]
+             (on-response {:ok false :error "permission denied"}))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local providers {:opencode provider
+                    :refresh-opencode (fn []
+                                        (set refresh-calls (+ refresh-calls 1))
+                                        provider)})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets {:get-active-presets (fn [] []) :get-prompt-fragments (fn [] []) :get-tool-defs (fn [] [])}
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "existing-oc-session")
+  (var error-received nil)
+  (local handle (runner:run-turn session.id "non-stale get error"
+    {:on-error (fn [e] (set error-received e))}))
+  (assert (= (handle:status) :failed) "non-stale get error should fail the turn")
+  (assert (= create-calls 0) "non-stale get error should not create a fresh session")
+  (assert (= refresh-calls 0) "non-stale get error should not refresh provider")
+  (assert (string.match error-received.error "permission denied") "failure should include OpenCode error")
+  (local reloaded (runner:get-session session.id))
+  (assert (= reloaded.data.opencode-session-id "existing-oc-session")
+          "non-stale get error should preserve saved OpenCode session id")
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-fails-when-opencode-refresh-raises []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var get-callback nil)
+  (var create-calls 0)
+  (local provider
+    {:session
+     {:create (fn [_body _on-response] (set create-calls (+ create-calls 1)))
+      :prompt (fn [_id _body _on-response] nil)
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id on-response] (set get-callback on-response))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local providers {:opencode provider
+                    :refresh-opencode (fn [] (error "bridge refresh failed"))})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets {:get-active-presets (fn [] []) :get-prompt-fragments (fn [] []) :get-tool-defs (fn [] [])}
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "stale-oc-session")
+  (var error-received nil)
+  (local handle (runner:run-turn session.id "refresh raises"
+    {:on-error (fn [e] (set error-received e))}))
+  (assert (= (handle:status) :running) "turn should wait for async get callback")
+  (assert get-callback "test should capture async get callback")
+  (get-callback {:ok false :error "Session not found"})
+  (assert (= (handle:status) :failed) "refresh exception should fail the turn")
+  (assert (= create-calls 0) "refresh exception should not create a fresh session")
+  (assert (string.match error-received.error "OpenCode reconnect failed")
+          "failure should identify reconnect failure")
+  (assert (string.match error-received.error "bridge refresh failed")
+          "failure should include refresh error")
+  (local reloaded (runner:get-session session.id))
+  (assert (string.match reloaded.data.runtime-context.last-reconnect-error "bridge refresh failed")
+          "runtime context should record refresh failure")
+  (runner:drop)
+  (clean-dir dir))
+
 (fn test-space-agent-handles-opencode-error []
   (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
   (local {: AgentRegistry} (require :llm/agent/registry))
@@ -2459,6 +2794,7 @@
 (table.insert tests {:name "agent mcp sync registers surface tools" :fn test-agent-mcp-sync-registers-surface-tools})
 (table.insert tests {:name "agent mcp sync does not bypass surface gating" :fn test-agent-mcp-sync-does-not_bypass_surface_gating})
 (table.insert tests {:name "opencode mcp bridge starts and writes config" :fn test-opencode-mcp-bridge-starts-and-writes-config})
+(table.insert tests {:name "opencode mcp bridge refreshes provider table" :fn test-opencode-mcp-bridge-refreshes-provider-table})
 
 (table.insert tests {:name "prompt assemble blocks" :fn test-prompt-assemble-blocks})
 (table.insert tests {:name "prompt assemble blocks skips nameless" :fn test-prompt-assemble-blocks-skips-nameless})
@@ -2480,6 +2816,11 @@
 (table.insert tests {:name "runner delete session" :fn test-runner-delete-session})
 (table.insert tests {:name "runner list sessions" :fn test-runner-list-sessions})
 (table.insert tests {:name "runner turn fail persists error item" :fn test-runner-turn-fail-persists-error-item})
+(table.insert tests {:name "runner creates artifact context" :fn test-runner-creates-artifact-context})
+(table.insert tests {:name "runner default artifacts nested under non-session data-dir"
+                     :fn test-runner-default-artifacts-nested-under-non-session-data-dir})
+(table.insert tests {:name "runner default artifacts sibling for agent-sessions data-dir"
+                     :fn test-runner-default-artifacts-sibling-for-agent-sessions-data-dir})
 
 (table.insert tests {:name "space-agent registers with registry" :fn test-space-agent-registers-with-registry})
 (table.insert tests {:name "space-agent run with mock opencode" :fn test-space-agent-run-with-mock-opencode})
@@ -2488,6 +2829,9 @@
 (table.insert tests {:name "space-agent streams live text and reasoning" :fn test-space-agent-streams-live_text_and_reasoning})
 (table.insert tests {:name "space-agent waits for async opencode callbacks" :fn test-space-agent-waits-for-async-opencode-callbacks})
 (table.insert tests {:name "space-agent reuses opencode session" :fn test-space-agent-reuses-opencode-session})
+(table.insert tests {:name "space-agent refreshes stale opencode session" :fn test-space-agent-refreshes-stale-opencode-session})
+(table.insert tests {:name "space-agent fails non-stale opencode get error" :fn test-space-agent-fails-non-stale-opencode-get-error})
+(table.insert tests {:name "space-agent fails when opencode refresh raises" :fn test-space-agent-fails-when-opencode-refresh-raises})
 (table.insert tests {:name "space-agent handles opencode error" :fn test-space-agent-handles-opencode-error})
 (table.insert tests {:name "space-agent handles prompt error" :fn test-space-agent-handles-prompt-error})
 

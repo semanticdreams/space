@@ -17,7 +17,32 @@ permission:
   lsp: allow
   edit: deny
   task: deny
-  external_directory: deny
+  external_directory:
+    "*": deny
+    "~/.local/share/space/**": allow
+    "~/.config/space/**": allow
+    "~/.cache/space/**": allow
+    "/tmp/space/**": allow
+    "~/.local/share/space/**/*auth*": deny
+    "~/.local/share/space/**/*token*": deny
+    "~/.local/share/space/**/*secret*": deny
+    "~/.local/share/space/**/*credential*": deny
+    "~/.local/share/space/**/*keyring*": deny
+    "~/.config/space/**/*auth*": deny
+    "~/.config/space/**/*token*": deny
+    "~/.config/space/**/*secret*": deny
+    "~/.config/space/**/*credential*": deny
+    "~/.config/space/**/*keyring*": deny
+    "~/.cache/space/**/*auth*": deny
+    "~/.cache/space/**/*token*": deny
+    "~/.cache/space/**/*secret*": deny
+    "~/.cache/space/**/*credential*": deny
+    "~/.cache/space/**/*keyring*": deny
+    "/tmp/space/**/*auth*": deny
+    "/tmp/space/**/*token*": deny
+    "/tmp/space/**/*secret*": deny
+    "/tmp/space/**/*credential*": deny
+    "/tmp/space/**/*keyring*": deny
   webfetch: deny
   websearch: deny
   question: deny
@@ -39,6 +64,13 @@ find information, answer specific questions, and report facts.
 6. Do not ask clarifying questions — report uncertainties in your output.
 7. Keep your output concise. The supervisor uses it to make decisions, not as
    a document.
+
+## External Runtime Artifacts
+
+Use the configured Space app-dir scopes only for focused Space runtime debugging.
+Report uncertainties instead of broadening the search, and avoid raw credential
+files or files whose names look like auth, token, secret, credential, or keyring
+material.
 
 ## Output
 

@@ -23,6 +23,30 @@ permission:
   external_directory:
     "*": deny
     "~/space/**": allow
+    "~/.local/share/space/**": allow
+    "~/.config/space/**": allow
+    "~/.cache/space/**": allow
+    "/tmp/space/**": allow
+    "~/.local/share/space/**/*auth*": deny
+    "~/.local/share/space/**/*token*": deny
+    "~/.local/share/space/**/*secret*": deny
+    "~/.local/share/space/**/*credential*": deny
+    "~/.local/share/space/**/*keyring*": deny
+    "~/.config/space/**/*auth*": deny
+    "~/.config/space/**/*token*": deny
+    "~/.config/space/**/*secret*": deny
+    "~/.config/space/**/*credential*": deny
+    "~/.config/space/**/*keyring*": deny
+    "~/.cache/space/**/*auth*": deny
+    "~/.cache/space/**/*token*": deny
+    "~/.cache/space/**/*secret*": deny
+    "~/.cache/space/**/*credential*": deny
+    "~/.cache/space/**/*keyring*": deny
+    "/tmp/space/**/*auth*": deny
+    "/tmp/space/**/*token*": deny
+    "/tmp/space/**/*secret*": deny
+    "/tmp/space/**/*credential*": deny
+    "/tmp/space/**/*keyring*": deny
   webfetch: deny
   websearch: deny
   question: deny
@@ -318,6 +342,14 @@ Follow these rules:
 - **Protect sensitive data.** Do not browse raw credentials, auth files, tokens,
   secrets, private logs, or databases unless an explicit configured capability
   wrapper requires and bounds that access.
+
+- **Space runtime artifacts only.** The Space app-dir scopes are for
+  Space-created or Space-used runtime artifacts needed to debug Space internal
+  agent behavior, especially `~/.local/share/space/agent-sessions/**`,
+  `~/.local/share/space/agent-approvals/**`,
+  `~/.local/share/space/agent-opencode/**`, `~/.local/share/space/code/**`, and
+  `~/.cache/space/log/**`. Do not inspect raw credentials or files whose names
+  look like auth, token, secret, credential, or keyring material.
 
 ## Core Workflow
 

@@ -197,6 +197,7 @@
     :tests.test-panel-transfer
     :tests.test-sandbox-scene-world-data
     :tests.test-external-unit-mcp
+    :tests.test-external-unit-mcp-reload-evidence
     :tests.test-constraints-runner
     :tests.test-constraints-source
     :tests.test-constraints-facts

@@ -182,6 +182,30 @@ Once your agent environment is connected to a Space checkout, these repository c
 - **PR CI** is the full integration gate. Do not claim ready-to-merge until the applicable PR CI gate is green.
 - **Required validation failures**: see [Validation continuation and current base](#validation-continuation-and-current-base) for the full contract.
 
+### Internal Space agent artifact handoffs
+
+Internal Space agent sessions get a session-scoped artifact directory under
+`~/.local/share/space/agent-artifacts/<agent-session-id>/`. Implementer,
+reviewer, and supervisor reports should be written there; `report.md` in that
+directory is the preferred handoff path when an explicit report file is not
+otherwise assigned.
+
+Report validation sections must state either `validation-mode: live` or
+`validation-mode: disk-only`. Use `validation-mode: live` only when validation
+included a successful live MCP reload or smoke check against the running app.
+Use `validation-mode: disk-only` for compile checks, constraints, focused tests,
+and other checks that did not exercise the running app. Disk-only reports are
+not live app validation, so supervisors must not describe the running app as
+validated until a live reload or smoke step succeeds.
+
+Internal SpaceAgent OpenCode reconnect is advisory and bounded. If a saved
+OpenCode session lookup reports a stale-session or connect-style error, Space
+refreshes the bridge config and OpenCode provider once, then creates a fresh
+session for that turn. Prompt submission is not blindly retried: prompt failures
+are reported as blockers. If a live OpenCode session cannot be established, the
+agent report must not claim live validation; use `validation-mode: disk-only`
+until a later live MCP reload or smoke check succeeds.
+
 ## Permission capability model
 
 Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.

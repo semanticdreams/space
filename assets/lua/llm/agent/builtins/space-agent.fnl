@@ -457,13 +457,116 @@
           (table.insert fragments prompt))
         (table.concat fragments "\n"))))
 
+(fn format-runtime-guidance [ctx]
+  (local artifacts (if ctx.artifacts ctx.artifacts {}))
+  (local session-dir (if artifacts.session-dir
+                         artifacts.session-dir
+                         "<agent artifact session directory>"))
+  (local report-path (if artifacts.report-path
+                         artifacts.report-path
+                         (.. session-dir "/report.md")))
+  (table.concat
+    [(.. "Write implementer, reviewer, and supervisor reports under: " session-dir)
+     (.. "Prefer this report handoff path: " report-path)
+     "Each report validation section must include compile check evidence, constraints evidence or scoped non-applicability, focused test evidence, and live smoke evidence when available."
+     "Use validation-mode: live only after a live MCP reload/smoke succeeds."
+     "Use validation-mode: disk-only when validation did not use the running app."
+     "Do not claim the running app was validated from disk-only evidence."]
+    "\n"))
+
+(fn stale-opencode-error? [message]
+  (local text (if (= message nil) "" (tostring message)))
+  (local lower (string.lower text))
+  (var stale? false)
+  (each [_ marker (ipairs ["session not found"
+                           "unable to connect"
+                           "socket closed"
+                           "sse disconnected"
+                           "connection refused"])]
+    (when (string.find lower marker 1 true)
+      (set stale? true)))
+  stale?)
+
+(fn refresh-opencode-provider [ctx]
+  (local providers (and ctx ctx.providers))
+  (when (and providers (. providers :refresh-opencode))
+    ((. providers :refresh-opencode))))
+
+(fn provider-server-url [opencode]
+  (local url-value
+    (if (and opencode opencode.server opencode.server.url)
+        opencode.server.url
+        (and opencode opencode.base-url)
+        opencode.base-url
+        (and opencode opencode.base_url)
+        opencode.base_url
+        nil))
+  (if (= (type url-value) "function")
+      (url-value)
+      url-value))
+
+(fn ensure-session-runtime-context! [session]
+  (when (not session.data.runtime-context)
+    (tset session.data :runtime-context {}))
+  session.data.runtime-context)
+
+(fn record-live-context! [session ctx opencode-session-id opencode]
+  (local runtime-context (ensure-session-runtime-context! session))
+  (local mcp-endpoint (and ctx ctx.runtime-context ctx.runtime-context.mcp-endpoint))
+  (tset runtime-context :opencode-session-id opencode-session-id)
+  (when mcp-endpoint
+    (tset runtime-context :mcp-endpoint mcp-endpoint))
+  (tset runtime-context :opencode-server-url (provider-server-url opencode))
+  (tset runtime-context :last-live-connection-at (now))
+  (tset runtime-context :validation-mode "live"))
+
+(fn record-reconnect-error! [session message]
+  (local runtime-context (ensure-session-runtime-context! session))
+  (tset runtime-context :last-reconnect-error message))
+
+(fn build-system-prompt [PromptUtils ctx]
+  (PromptUtils.assemble-blocks
+    [{:name "Instructions"
+      :content (table.concat
+                 ["You are Space Agent. Help with drawing, graph, scene, and app tasks using only approved available tools."
+                  "For tools that may require approval, call space_agent_request_tool_approval first with the exact tool name and exact arguments you intend to use."
+                  "After approval is granted, call the approved tool with exactly those arguments. If approval is denied, do not retry that tool call."]
+                 "\n")}
+     {:name "Context" :content (PromptUtils.format-context ctx)}
+     {:name "Available Capabilities" :content (PromptUtils.format-presets ctx.presets)}
+     {:name "Capability Guidance" :content (format-capability-guidance ctx.tools)}
+     {:name "Runtime Artifact and Validation Guidance" :content (format-runtime-guidance ctx)}]))
+
+(fn handle-get-response [session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt fail]
+  (if (and resp resp.ok)
+      (do
+        (local existing (response-data resp))
+        (record-live-context! session ctx existing.id (current-opencode))
+        (send-prompt existing))
+      (do
+        (local get-error (response-error resp "unknown error"))
+        (if (stale-opencode-error? get-error)
+            (do
+              (local (ok reconnect-err)
+                (pcall (fn []
+                         (tset session.data :opencode-session-id nil)
+                         (local refreshed (refresh-opencode-provider ctx))
+                         (if refreshed
+                             (refresh! refreshed)
+                             (record-reconnect-error! session get-error))
+                         (create-session))))
+              (when (not ok)
+                (record-reconnect-error! session (tostring reconnect-err))
+                (fail (.. "OpenCode reconnect failed: " (tostring reconnect-err)))))
+            (fail (.. "OpenCode session get failed: " get-error))))))
+
 (fn build-agent [deps]
   ;; Return a plain table with :id, :name, and :run.
   ;; The :run method is defined as a named function for scoping clarity.
   (local model deps.model)
   (fn run [self_ input session ctx]
     (local PromptUtils (require :llm/agent/prompt-utils))
-    (local opencode (resolve-opencode ctx))
+    (var opencode (resolve-opencode ctx))
     (var live-events nil)
     (local stream-state (new-stream-state input))
 
@@ -474,21 +577,13 @@
         (logging.info "[space-agent] unsubscribed from OpenCode live event stream")
         (set live-events nil)))
 
-    ;; Build system prompt
-    (local context-block (PromptUtils.format-context ctx))
-    (local preset-block (PromptUtils.format-presets ctx.presets))
-    (local capability-guidance (format-capability-guidance ctx.tools))
-    (local system-prompt
-      (PromptUtils.assemble-blocks
-        [{:name "Instructions"
-          :content (table.concat
-                     ["You are Space Agent. Help with drawing, graph, scene, and app tasks using only approved available tools."
-                      "For tools that may require approval, call space_agent_request_tool_approval first with the exact tool name and exact arguments you intend to use."
-                      "After approval is granted, call the approved tool with exactly those arguments. If approval is denied, do not retry that tool call."]
-                     "\n")}
-         {:name "Context" :content context-block}
-         {:name "Available Capabilities" :content preset-block}
-         {:name "Capability Guidance" :content capability-guidance}]))
+    (local system-prompt (build-system-prompt PromptUtils ctx))
+
+    (fn current-opencode []
+      opencode)
+
+    (fn refresh! [provider]
+      (set opencode provider))
 
     (fn fail [message]
       (close-live-events)
@@ -541,8 +636,9 @@
                        (if (not created.id)
                            (fail "OpenCode create response missing session id")
                            (do
-                             (tset session.data :opencode-session-id created.id)
-                             (send-prompt created))))))))
+                              (tset session.data :opencode-session-id created.id)
+                              (record-live-context! session ctx created.id opencode)
+                              (send-prompt created))))))))
       (when (not ok)
         (fail (.. "OpenCode session create submit failed: " (tostring err)))))
 
@@ -552,12 +648,8 @@
           (do
             (local (ok err)
               (pcall opencode.session.get opencode-session-id
-                     (fn [resp]
-                       (if (and resp resp.ok)
-                           (send-prompt (response-data resp))
-                           (do
-                             (tset session.data :opencode-session-id nil)
-                             (create-session))))))
+                      (fn [resp]
+                        (handle-get-response session ctx current-opencode opencode-session-id resp refresh! create-session send-prompt fail))))
             (when (not ok)
               (fail (.. "OpenCode session get submit failed: " (tostring err)))))
           (create-session)))
@@ -572,4 +664,5 @@
   (registry:register "space-agent" (fn [_registry-deps] (build-agent deps))))
 
 {:SpaceAgent build-agent
+ :format-runtime-guidance format-runtime-guidance
  :register register}

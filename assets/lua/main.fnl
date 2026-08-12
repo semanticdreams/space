@@ -1787,9 +1787,9 @@
     (app.agent-mcp-sync:start))
   (when (not app.agent-opencode-mcp-bridge)
     (set app.agent-opencode-mcp-bridge
-         (AgentOpencodeMcpBridge.AgentOpencodeMcpBridge
-           {:tools app.mcp-tools
-            :data-dir (fs.join-path app.user-data-dir "agent-opencode")}))
+          (AgentOpencodeMcpBridge.AgentOpencodeMcpBridge
+            {:tools app.mcp-tools :data-dir (fs.join-path app.user-data-dir "agent-opencode") :space-data-dir app.user-data-dir
+             :space-cache-dir (appdirs.user-cache-dir "space") :code-dir app.code-dir :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")}))
     (app.agent-opencode-mcp-bridge:start))
   (when (and app.workspace-shell-changed (not app.agent-presets-workspace-handler))
     (set app.agent-presets-workspace-handler
@@ -1810,6 +1810,14 @@
                  :env (bridge:opencode-env)}))
             (tset app.agent-providers :opencode provider)
             provider)))
+  (when (not (. app.agent-providers :refresh-opencode))
+    (tset app.agent-providers :refresh-opencode
+          (fn []
+            (local bridge (or app.agent-opencode-mcp-bridge
+                              (error "OpenCode agent provider refresh requires app.agent-opencode-mcp-bridge")))
+            (AgentOpencodeMcpBridge.refresh-opencode-provider!
+              app.agent-providers
+              bridge))))
   (SpaceAgent.register app.agent-registry
     {:app app
      :presets app.agent-presets
@@ -1883,7 +1891,9 @@
                    :tools app.agent-tool-surface
                    :approvals app.agent-approvals
                    :agents app.agent-registry
-                   :providers app.agent-providers}})))
+                   :providers app.agent-providers
+                   :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")
+                   :opencode-mcp-bridge app.agent-opencode-mcp-bridge}})))
 
   ;; Rebuild HUD to show agent panel now that runner is available
   (when (and app.hud app.agent-runner)

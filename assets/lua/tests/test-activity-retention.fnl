@@ -317,7 +317,7 @@
   (if ok result (error result)))
 
 (table.insert tests {:name "Retained activity reactivation preserves cleanup stack"
-                     :fn retained-activity-reactivation-preserves-cleanup-stack})
+                      :fn retained-activity-reactivation-preserves-cleanup-stack})
 
 (fn pending-activity-session-state-restores-on-first-activation []
   (local app-keys [:active-world-runtime
@@ -1117,6 +1117,56 @@
 
 (table.insert tests {:name "Activity hooks include toolbar and sandbox interaction providers"
                      :fn activity-hooks-include-toolbar-and-sandbox-interaction-providers})
+
+(fn register-live-dev-test-activity [label activation-count-ref session]
+  (Activities.register-activity
+    {:id "live-dev"
+     :label label
+     :activate (fn [_ctx retained]
+                 (set activation-count-ref.count (+ activation-count-ref.count 1))
+                 (if retained retained session))}))
+
+(fn active-activity-reactivation-reports-evidence-after-reregistration []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (local activation-count {:count 0})
+  (local session {:id :live-session})
+  (local (ok result)
+    (pcall
+      (fn []
+        (register-live-dev-test-activity "Live Dev" activation-count session)
+        (Activities.activate-activity "live-dev")
+        (assert (= activation-count.count 1)
+                "Initial activation should increment activation count")
+        (Activities.unregister-activity "live-dev")
+        (register-live-dev-test-activity "Live Dev Reloaded" activation-count session)
+        (local evidence (Activities.reactivate-active-activity "live-dev"))
+        (assert (= evidence.attempted true)
+                "Reactivation evidence should report an attempt")
+        (assert (= evidence.reactivated true)
+                "Reactivation evidence should report success")
+        (assert (= evidence.active-activity-before "live-dev")
+                "Evidence should preserve the active activity id captured before reload")
+        (assert (= evidence.active-activity-after "live-dev")
+                "Evidence should report the reactivated active activity id")
+        (assert (= evidence.registered-after? true)
+                "Evidence should report the activity registered after reload")
+        (assert (= activation-count.count 2)
+                "Reactivation should call the new activity activate function")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "live-dev")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Active activity reactivation reports evidence after reregistration"
+                     :fn active-activity-reactivation-reports-evidence-after-reregistration})
 
 (local main
   (fn []

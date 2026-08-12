@@ -105,7 +105,7 @@
   (tset tool-risks "space_unit_reload" "normal")
   (registry:register
     (def-tool "space_unit_reload"
-      "Reload a unit to reflect its current source state."
+      "Reload a unit to reflect its current source state, returning active activity before/after state and reactivation evidence when applicable."
       {:unit_id {:type "string" :description "The unit identifier."}}
       "normal"
       (fn [args]
