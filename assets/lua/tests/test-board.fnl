@@ -1651,13 +1651,18 @@
   (pcall (fn [] (store:delete-entity board-prune-valid-string-entity-id)))
   (pcall (fn [] (store:delete-entity board-prune-missing-string-entity-id))))
 
-(fn board-activity-prunes-stale-string-entity-items []
+(fn setup-board-prune-string-entities []
   (local store (StringEntityStore.get-default))
-  (local valid-id board-prune-valid-string-entity-id)
-  (local missing-id board-prune-missing-string-entity-id)
-  (pcall (fn [] (store:delete-entity valid-id)))
-  (pcall (fn [] (store:delete-entity missing-id)))
-  (store:create-entity {:id valid-id :value "valid"})
+  (cleanup-board-prune-string-entities store)
+  (store:create-entity {:id board-prune-valid-string-entity-id :value "valid"})
+  store)
+
+(fn restore-active-board-prune-state []
+  (Activities.restore-active-activity {:active? true
+                                       :board-state (board-prune-stale-string-entity-state)}))
+
+(fn board-activity-prunes-stale-string-entity-items []
+  (local store (setup-board-prune-string-entities))
   (local (ok err)
     (pcall
       (fn []
@@ -1665,6 +1670,19 @@
           (fn [_env]
             (assert-board-pruned-stale-string-entity-item))
           {:board-state (board-prune-stale-string-entity-state)}))))
+  (cleanup-board-prune-string-entities store)
+  (if ok true (error err)))
+
+(fn board-activity-active-restore-prunes-stale-string-entity-items []
+  (local store (setup-board-prune-string-entities))
+  (local (ok err)
+    (pcall
+      (fn []
+        (with-board-activity-runtime
+          (fn [_env]
+            (restore-active-board-prune-state)
+            (assert-board-pruned-stale-string-entity-item))
+          {}))))
   (cleanup-board-prune-string-entities store)
   (if ok true (error err)))
 
@@ -2238,6 +2256,8 @@
                       :fn board-selection-action-enriches-context-with-selected-items})
 (table.insert tests {:name "Board activity prunes stale string entity items"
                      :fn board-activity-prunes-stale-string-entity-items})
+(table.insert tests {:name "Board active restore prunes stale string entity items"
+                     :fn board-activity-active-restore-prunes-stale-string-entity-items})
 (table.insert tests {:name "Board selection action uses selector wiring through runtime"
                        :fn board-selection-action-uses-selector-wiring-through-runtime})
 (table.insert tests {:name "BoardView remove-item deletes string entity from store"

@@ -269,7 +269,9 @@
 (fn restore-board-activity! [first session maybe-state]
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
-    (set app.active-world-runtime.board-state state.board-state))
+    (local board-state (reconcile-stale-string-entity-items! state.board-state))
+    (set state.board-state board-state)
+    (set app.active-world-runtime.board-state board-state))
   ;; Restore canvas camera position from persisted session state
   (when (and state state.canvas-camera
              app.active-world-runtime
@@ -286,10 +288,10 @@
       (scene:restore-activity-slot-state "board" state.scene)))
   (when (and state state.active?)
     (if (and state.board-state
-             (= (Activities.active-activity-id) "board")
-             app.active-world-runtime
-             app.active-world-runtime.board)
-        (app.active-world-runtime.board:restore-state state.board-state)
+              (= (Activities.active-activity-id) "board")
+              app.active-world-runtime
+              app.active-world-runtime.board)
+        (app.active-world-runtime.board:restore-state app.active-world-runtime.board-state)
         (if app.set-active-activity
             (app.set-active-activity "board")
             (Activities.activate-activity "board"))))
