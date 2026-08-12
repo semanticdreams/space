@@ -115,6 +115,24 @@
   (when server
     (pcall (fn [] (server:stop)))))
 
+(fn refresh-opencode-provider! [providers bridge]
+  "Refresh bridge config and replace the provider stored in a provider table."
+  (assert providers "refresh-opencode-provider! requires providers")
+  (assert bridge "refresh-opencode-provider! requires bridge")
+  (local old-provider providers.opencode)
+  (when old-provider
+    (tset providers :opencode nil)
+    (when old-provider.close
+      (old-provider.close)))
+  (bridge:refresh-config!)
+  (local factory (or (. providers :opencode-factory)
+                     (error "refresh-opencode-provider! requires providers.opencode-factory")))
+  (local provider (factory))
+  (when (not provider)
+    (error "refresh-opencode-provider! factory returned nil"))
+  (tset providers :opencode provider)
+  provider)
+
 (fn AgentOpencodeMcpBridge [opts]
   (local tools (or opts.tools (error "AgentOpencodeMcpBridge requires :tools")))
   (local data-dir (or opts.data-dir (error "AgentOpencodeMcpBridge requires :data-dir")))
@@ -207,4 +225,5 @@
    :config-path current-config-path
    :status status})
 
-{:AgentOpencodeMcpBridge AgentOpencodeMcpBridge}
+{:AgentOpencodeMcpBridge AgentOpencodeMcpBridge
+ :refresh-opencode-provider! refresh-opencode-provider!}

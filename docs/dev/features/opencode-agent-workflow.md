@@ -198,6 +198,14 @@ and other checks that did not exercise the running app. Disk-only reports are
 not live app validation, so supervisors must not describe the running app as
 validated until a live reload or smoke step succeeds.
 
+Internal SpaceAgent OpenCode reconnect is advisory and bounded. If a saved
+OpenCode session lookup reports a stale-session or connect-style error, Space
+refreshes the bridge config and OpenCode provider once, then creates a fresh
+session for that turn. Prompt submission is not blindly retried: prompt failures
+are reported as blockers. If a live OpenCode session cannot be established, the
+agent report must not claim live validation; use `validation-mode: disk-only`
+until a later live MCP reload or smoke check succeeds.
+
 ## Permission capability model
 
 Space uses guarded capabilities to reduce routine OpenCode permission friction without broadening normal agent authority.

@@ -1810,6 +1810,14 @@
                  :env (bridge:opencode-env)}))
             (tset app.agent-providers :opencode provider)
             provider)))
+  (when (not (. app.agent-providers :refresh-opencode))
+    (tset app.agent-providers :refresh-opencode
+          (fn []
+            (local bridge (or app.agent-opencode-mcp-bridge
+                              (error "OpenCode agent provider refresh requires app.agent-opencode-mcp-bridge")))
+            (AgentOpencodeMcpBridge.refresh-opencode-provider!
+              app.agent-providers
+              bridge))))
   (SpaceAgent.register app.agent-registry
     {:app app
      :presets app.agent-presets

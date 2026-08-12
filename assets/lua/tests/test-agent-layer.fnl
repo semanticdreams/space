@@ -1351,6 +1351,30 @@
   (bridge:refresh-config!) (local refreshed (json.loads (fs.read-file status.config-path))) (assert (= refreshed.mcp.space.url status.url) "refresh-config should preserve current MCP URL")
   (bridge:stop) (clean-dir dir))
 
+(fn test-opencode-mcp-bridge-refreshes-provider-table []
+  (local BridgeMod (require :llm/agent/opencode-mcp-bridge))
+  (var old-closed false)
+  (var refresh-called 0)
+  (var factory-called 0)
+  (local old-provider {:close (fn [] (set old-closed true))})
+  (local new-provider {:id "new-provider"})
+  (local bridge
+    {:refresh-config! (fn [self]
+                        (set refresh-called (+ refresh-called 1))
+                        {:url "http://127.0.0.1:4321/mcp"})
+     :opencode-env (fn [self] {:XDG_CONFIG_HOME "/tmp/space/test-opencode-config"})})
+  (local providers
+    {:opencode old-provider
+     :opencode-factory (fn []
+                         (set factory-called (+ factory-called 1))
+                         new-provider)})
+  (local refreshed (BridgeMod.refresh-opencode-provider! providers bridge))
+  (assert old-closed "refresh should close existing provider")
+  (assert (= refresh-called 1) "refresh should refresh bridge config exactly once")
+  (assert (= factory-called 1) "refresh should create replacement provider exactly once")
+  (assert (= refreshed new-provider) "refresh should return the replacement provider")
+  (assert (= providers.opencode new-provider) "refresh should store replacement provider"))
+
 ;; ═══════════════════════════════════════
 ;; Prompt utilities tests
 ;; ═══════════════════════════════════════
@@ -2422,6 +2446,96 @@
   (runner:drop)
   (clean-dir dir))
 
+(fn test-space-agent-refreshes-stale-opencode-session []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var first-get-calls 0)
+  (var refresh-calls 0)
+  (var fresh-create-calls 0)
+  (var prompt-calls 0)
+  (local first-provider
+    {:session
+     {:create (fn [_body on-response]
+                (on-response {:ok false :error "old provider should not create after stale get"}))
+      :prompt (fn [_id _body _on-response]
+                (error "old provider should not prompt after stale get"))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [id on-response]
+             (set first-get-calls (+ first-get-calls 1))
+             (assert (= id "stale-oc-session") "should look up stale OpenCode session id")
+             (on-response {:ok false :error "Session not found"}))
+      :messages (fn [_id on-response] (on-response {:ok true :data []}))}})
+  (local second-provider
+    {:server {:url "http://127.0.0.1:9999"}
+     :session
+     {:create (fn [_body on-response]
+                (set fresh-create-calls (+ fresh-create-calls 1))
+                (on-response {:ok true :data {:id "fresh-oc-session"}}))
+      :prompt (fn [id _body on-response]
+                (set prompt-calls (+ prompt-calls 1))
+                (assert (= id "fresh-oc-session") "prompt should use fresh session")
+                (on-response {:ok true
+                              :data {:info {:model {:modelID "mock-live"}}
+                                     :parts [{:type "text" :text "fresh response"}]
+                                     :usage {}}}))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [_id _on-response]
+             (error "refreshed provider should create, not retry stale get"))
+      :messages (fn [_id on-response]
+                  (on-response {:ok true
+                                :data [{:info {:id "fresh-msg" :role "assistant" :model {:modelID "mock-live"}}
+                                        :parts [{:type "text" :text "fresh response"}]}]}))}})
+  (var providers nil)
+  (set providers
+       {:opencode first-provider
+        :refresh-opencode (fn []
+                            (set refresh-calls (+ refresh-calls 1))
+                            (tset providers :opencode second-provider)
+                            second-provider)})
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers providers})
+  (local mock-presets
+    {:get-active-presets (fn [] [])
+     :get-prompt-fragments (fn [] [])
+     :get-tool-defs (fn [] [])})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets mock-presets
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers providers
+            :opencode-mcp-bridge {:status (fn [self]
+                                           {:url "http://127.0.0.1:4321/mcp"})}}}))
+  (local session (runner:create-session "space-agent"))
+  (tset session.data :opencode-session-id "stale-oc-session")
+  (local handle (runner:run-turn session.id "recover stale session" {}))
+  (assert (= (handle:status) :completed) "turn should complete after bounded refresh")
+  (assert (= first-get-calls 1) "stale get should be attempted exactly once")
+  (assert (= refresh-calls 1) "refresh-opencode should be called exactly once")
+  (assert (= fresh-create-calls 1) "fresh provider should create one new session")
+  (assert (= prompt-calls 1) "prompt should run exactly once")
+  (local reloaded (runner:get-session session.id))
+  (assert (= reloaded.data.opencode-session-id "fresh-oc-session")
+          "session should store fresh OpenCode session id")
+  (assert (= reloaded.data.runtime-context.validation-mode "live")
+          "runtime context should record live validation mode")
+  (assert (= reloaded.data.runtime-context.opencode-session-id "fresh-oc-session")
+          "runtime context should record fresh OpenCode session id")
+  (assert (= reloaded.data.runtime-context.mcp-endpoint "http://127.0.0.1:4321/mcp")
+          "runtime context should record MCP endpoint evidence")
+  (assert (= reloaded.data.runtime-context.opencode-server-url "http://127.0.0.1:9999")
+          "runtime context should record OpenCode server URL")
+  (assert reloaded.data.runtime-context.last-live-connection-at
+          "runtime context should record live connection timestamp")
+  (runner:drop)
+  (clean-dir dir))
+
 (fn test-space-agent-handles-opencode-error []
   (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
   (local {: AgentRegistry} (require :llm/agent/registry))
@@ -2586,6 +2700,7 @@
 (table.insert tests {:name "agent mcp sync registers surface tools" :fn test-agent-mcp-sync-registers-surface-tools})
 (table.insert tests {:name "agent mcp sync does not bypass surface gating" :fn test-agent-mcp-sync-does-not_bypass_surface_gating})
 (table.insert tests {:name "opencode mcp bridge starts and writes config" :fn test-opencode-mcp-bridge-starts-and-writes-config})
+(table.insert tests {:name "opencode mcp bridge refreshes provider table" :fn test-opencode-mcp-bridge-refreshes-provider-table})
 
 (table.insert tests {:name "prompt assemble blocks" :fn test-prompt-assemble-blocks})
 (table.insert tests {:name "prompt assemble blocks skips nameless" :fn test-prompt-assemble-blocks-skips-nameless})
@@ -2620,6 +2735,7 @@
 (table.insert tests {:name "space-agent streams live text and reasoning" :fn test-space-agent-streams-live_text_and_reasoning})
 (table.insert tests {:name "space-agent waits for async opencode callbacks" :fn test-space-agent-waits-for-async-opencode-callbacks})
 (table.insert tests {:name "space-agent reuses opencode session" :fn test-space-agent-reuses-opencode-session})
+(table.insert tests {:name "space-agent refreshes stale opencode session" :fn test-space-agent-refreshes-stale-opencode-session})
 (table.insert tests {:name "space-agent handles opencode error" :fn test-space-agent-handles-opencode-error})
 (table.insert tests {:name "space-agent handles prompt error" :fn test-space-agent-handles-prompt-error})
 
