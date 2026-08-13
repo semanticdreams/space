@@ -45,6 +45,32 @@
     (fn []
       (assert (= (Boundary.assert-slot-owner! :canvas "set-camera" "bubbles" {}) true)))))
 
+(fn runtime-active-owner-fallback-authorizes-slot []
+  (with-boundary-app
+    {:activity-registry {}
+     :active-world-runtime {:active-activity-id "bubbles"}}
+    (fn []
+      (assert (= (Boundary.active-owner-id) "bubbles"))
+      (assert (= (Boundary.assert-slot-owner! :canvas "set-camera" "bubbles" {}) true)))))
+
+(fn app-active-owner-fallback-authorizes-slot []
+  (with-boundary-app
+    {:activity-registry {}
+     :active-world-runtime {}
+     :active-activity-id "bubbles"}
+    (fn []
+      (assert (= (Boundary.active-owner-id) "bubbles"))
+      (assert (= (Boundary.assert-slot-owner! :canvas "set-camera" "bubbles" {}) true)))))
+
+(fn runtime-activating-owner-takes-priority []
+  (with-boundary-app
+    {:activity-registry {:active-activity-id "graph"}
+     :active-world-runtime {:activating-activity-id "bubbles"}}
+    (fn []
+      (assert (= (Boundary.activating-owner-id) "bubbles"))
+      (assert (= (Boundary.expected-owner-id) "bubbles"))
+      (assert (= (Boundary.assert-slot-owner! :canvas "set-camera" "bubbles" {}) true)))))
+
 (fn foreign-owner-cannot-mutate-slot []
   (with-boundary-app
     {:activity-registry {:active-activity-id "bubbles"}}
@@ -100,6 +126,17 @@
                                                      :slot {:activity-id "graph"}}))
               "Foreign scene/canvas targets should not be active-owned"))))
 
+(fn foreign-pointer-target-is-not-active-owned []
+  (with-boundary-app
+    {:activity-registry {:active-activity-id "bubbles"}}
+    (fn []
+      (assert (Boundary.target-owned-by-active? {:interaction-surface :canvas
+                                                :activity-slot {:activity-id "bubbles"}})
+              "Active canvas pointer targets should be authorized")
+      (assert (not (Boundary.target-owned-by-active? {:interaction-surface :canvas
+                                                     :activity-slot {:activity-id "graph"}}))
+              "Foreign canvas pointer targets should not be active-owned"))))
+
 (fn deactivate-foreign-slots-preserves-active-slot []
   (local calls [])
   (local bubbles-slot {:activity-id "bubbles"
@@ -135,6 +172,12 @@
 
 (table.insert tests {:name "matching owner can mutate an activity slot"
                      :fn matching-owner-can-mutate-slot})
+(table.insert tests {:name "runtime active owner fallback authorizes slots"
+                     :fn runtime-active-owner-fallback-authorizes-slot})
+(table.insert tests {:name "app active owner fallback authorizes slots"
+                     :fn app-active-owner-fallback-authorizes-slot})
+(table.insert tests {:name "runtime activating owner takes priority"
+                     :fn runtime-activating-owner-takes-priority})
 (table.insert tests {:name "foreign owner cannot mutate an activity slot"
                      :fn foreign-owner-cannot-mutate-slot})
 (table.insert tests {:name "explicit matrix direct ray options are authorized"
@@ -145,6 +188,8 @@
                      :fn active-activity-slot-authorizes-ray})
 (table.insert tests {:name "target ownership requires active scene/canvas slots"
                      :fn target-ownership-requires-active-slot-in-active-context})
+(table.insert tests {:name "foreign pointer target is not active owned"
+                     :fn foreign-pointer-target-is-not-active-owned})
 (table.insert tests {:name "deactivate foreign slots preserves the active slot"
                      :fn deactivate-foreign-slots-preserves-active-slot})
 

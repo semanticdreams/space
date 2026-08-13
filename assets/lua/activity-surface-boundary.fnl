@@ -2,13 +2,6 @@
   (and (= (type value) :string)
        (> (# value) 0)))
 
-(fn first-non-empty [...]
-  (var found nil)
-  (each [_ value (ipairs [...])]
-    (when (and (not found) (non-empty-string? value))
-      (set found value)))
-  found)
-
 (fn activity-registry []
   (and app app.activity-registry))
 
@@ -18,15 +11,27 @@
 (fn activating-owner-id []
   (local registry (activity-registry))
   (local runtime (active-world-runtime))
-  (first-non-empty (and registry registry.activating-activity-id)
-                   (and runtime runtime.activating-activity-id)))
+  (local registry-owner (and registry registry.activating-activity-id))
+  (local runtime-owner (and runtime runtime.activating-activity-id))
+  (if (non-empty-string? registry-owner)
+      registry-owner
+      (non-empty-string? runtime-owner)
+      runtime-owner
+      nil))
 
 (fn active-owner-id []
   (local registry (activity-registry))
   (local runtime (active-world-runtime))
-  (first-non-empty (and registry registry.active-activity-id)
-                   (and runtime runtime.active-activity-id)
-                   (and app app.active-activity-id)))
+  (local registry-owner (and registry registry.active-activity-id))
+  (local runtime-owner (and runtime runtime.active-activity-id))
+  (local app-owner (and app app.active-activity-id))
+  (if (non-empty-string? registry-owner)
+      registry-owner
+      (non-empty-string? runtime-owner)
+      runtime-owner
+      (non-empty-string? app-owner)
+      app-owner
+      nil))
 
 (fn expected-owner-id []
   (local activating (activating-owner-id))
@@ -98,20 +103,31 @@
 (fn scene-or-canvas-target? [target]
   (local kind (and target target.kind))
   (local surface (and target target.surface))
+  (local interaction-surface (and target target.interaction-surface))
   (if (surface-kind? kind :scene)
       true
       (surface-kind? kind :canvas)
       true
       (surface-kind? surface :scene)
       true
-      (surface-kind? surface :canvas)))
+      (surface-kind? surface :canvas)
+      true
+      (surface-kind? interaction-surface :scene)
+      true
+      (surface-kind? interaction-surface :canvas)))
+
+(fn target-activity-id [target]
+  (local slot-id (slot-activity-id (and target target.slot)))
+  (if slot-id
+      slot-id
+      (slot-activity-id (and target target.activity-slot))))
 
 (fn target-owned-by-active? [target]
   (local expected (expected-owner-id))
   (if (not expected)
       true
       (scene-or-canvas-target? target)
-      (= (slot-activity-id target.slot) expected)
+      (= (target-activity-id target) expected)
       (not (and target target.slot))))
 
 (fn foreign-slot-active? [slot]
