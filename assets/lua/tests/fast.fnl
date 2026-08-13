@@ -67,6 +67,7 @@
     :tests.test-pointer-routing
     :tests.test-states
       :tests.test-activity-presentation
+      :tests.test-activity-surface-boundary
       :tests.test-activity-camera-state
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
