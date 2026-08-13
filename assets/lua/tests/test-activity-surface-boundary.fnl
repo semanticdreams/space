@@ -3,6 +3,7 @@
 (local Camera (require :camera))
 (local Canvas (require :canvas))
 (local Scene (require :scene))
+(local Activities (require :activities))
 (local {: FocusManager} (require :focus))
 
 (local tests [])
@@ -21,8 +22,9 @@
 
 (fn with-boundary-app [fields f]
   (local snapshot (snapshot-app-fields [:active-activity-id
-                                        :activity-registry
-                                        :active-world-runtime]))
+                                         :activity-registry
+                                         :active-world-runtime
+                                         :activities-changed]))
   (set app.active-activity-id fields.active-activity-id)
   (set app.activity-registry fields.activity-registry)
   (set app.active-world-runtime fields.active-world-runtime)
@@ -81,6 +83,68 @@
 (fn assert-denied-boundary-error [ok err fragments assertion]
   (assert (not ok) assertion)
   (assert-error-contains err fragments))
+
+(fn capture-activation-boundary-results! [ctx results]
+  (local camera (camera-at-z 30))
+  (local (slot-ok slot-err)
+    (pcall (fn []
+             (ctx.canvas:ensure-activity-slot "graph" {:camera camera}))))
+  (local (ray-ok ray-err)
+    (pcall (fn []
+             (ctx.canvas:screen-pos-ray {:x 1 :y 1}))))
+  (pcall (fn [] (camera:drop)))
+  (set results.slot-ok slot-ok)
+  (set results.slot-err slot-err)
+  (set results.ray-ok ray-ok)
+  (set results.ray-err ray-err)
+  {})
+
+(fn activation-probe-activate [ctx results]
+  (fn [_activity-ctx]
+    (capture-activation-boundary-results! ctx results)))
+
+(fn register-activation-probe-activity! [ctx results]
+  (Activities.register-activity
+    {:id "bubbles"
+     :activate (activation-probe-activate ctx results)}))
+
+(fn assert-activation-boundary-results [results]
+  (assert-denied-boundary-error results.slot-ok
+                                results.slot-err
+                                ["activity surface boundary denied"
+                                 "graph"
+                                 "bubbles"]
+                                "Activating activity must not mutate foreign slots")
+  (assert-denied-boundary-error results.ray-ok
+                                results.ray-err
+                                ["ambiguous direct screen ray" "canvas"]
+                                "Activating activity must not use bare direct rays"))
+
+(fn exercise-activating-activity-boundary [ctx]
+  (local results {})
+  (register-activation-probe-activity! ctx results)
+  (Activities.activate-activity "bubbles")
+  (assert-activation-boundary-results results))
+
+(fn cleanup-surface-activity-slot [self activity-id]
+  (. self.activity-slots activity-id))
+
+(fn cleanup-surface-deactivate-activity-slot [self activity-id opts]
+  (Boundary.assert-slot-owner! :canvas "deactivate-activity-slot" activity-id opts)
+  (local target (. self.activity-slots activity-id))
+  (when target
+    (set target.visible? false)
+    (set target.interactive? false))
+  target)
+
+(fn make-cleanup-slot-surface []
+  (local slot {:activity-id "graph"
+               :visible? true
+               :interactive? true})
+  {:surface {:activity-slots {:graph slot}
+             :activity-slot cleanup-surface-activity-slot
+             :deactivate-activity-slot cleanup-surface-deactivate-activity-slot}
+   :slot slot})
 
 (fn matching-owner-can-mutate-slot []
   (with-boundary-app
@@ -294,6 +358,40 @@
 (fn canvas-presentation-target-ray-still-works []
   (with-active-bubbles-surfaces exercise-canvas-presentation-target-ray))
 
+(fn activating-activity-owns-boundary-during-activate []
+  (with-boundary-app
+    {:activity-registry nil
+     :active-world-runtime {}}
+    (fn []
+      (with-surfaces exercise-activating-activity-boundary))))
+
+(fn inactive-retained-cleanup-can-use-internal-slot-teardown []
+  (with-boundary-app
+    {:activity-registry {:active-activity-id "sandbox"
+                         :sessions {}}}
+    (fn []
+      (local fixture (make-cleanup-slot-surface))
+      (local slot fixture.slot)
+      (local surface fixture.surface)
+      (local (public-ok public-err)
+        (pcall (fn []
+                 (surface:deactivate-activity-slot "graph"))))
+      (assert-denied-boundary-error public-ok
+                                    public-err
+                                    ["activity surface boundary denied"
+                                     "graph"
+                                     "sandbox"]
+                                    "Public foreign retained cleanup should remain denied")
+      (local sessions app.activity-registry.sessions)
+      (set (. sessions "graph") {:user-session {}
+                                  :cleanup [(fn []
+                                              (surface:deactivate-activity-slot "graph" {:boundary-internal? true}))]})
+      (Activities.drop-activity-session! "graph")
+      (assert (= (. sessions "graph") nil)
+              "Retained inactive activity session should be removed after cleanup")
+      (assert (not slot.visible?) "Internal cleanup should deactivate retained slot visibility")
+      (assert (not slot.interactive?) "Internal cleanup should deactivate retained slot interaction"))))
+
 (table.insert tests {:name "matching owner can mutate an activity slot"
                      :fn matching-owner-can-mutate-slot})
 (table.insert tests {:name "runtime active owner fallback authorizes slots"
@@ -326,6 +424,10 @@
                      :fn direct-surface-rays-fail-when-active-slot-exists})
 (table.insert tests {:name "Canvas presentation target ray still works"
                      :fn canvas-presentation-target-ray-still-works})
+(table.insert tests {:name "activating activity owns boundary during activate"
+                     :fn activating-activity-owns-boundary-during-activate})
+(table.insert tests {:name "inactive retained cleanup can use internal slot teardown"
+                     :fn inactive-retained-cleanup-can-use-internal-slot-teardown})
 
 (local main
   (fn []
