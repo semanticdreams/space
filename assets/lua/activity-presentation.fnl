@@ -5,6 +5,9 @@
   (when (Boundary.target-owned-by-active? target)
     target))
 
+(fn active-activity-context? []
+  (Boundary.expected-owner-id))
+
 (fn maybe-insert-target! [targets target]
   (when target
     (table.insert targets target))
@@ -29,7 +32,7 @@
   (fn provider.default-screen-ray-target [self opts]
     (local options (or opts {}))
     (or (when options.target
-          options.target)
+          (active-owned-target options.target))
         (when options.surface
           (if (= options.surface :scene)
               (when (and runtime runtime.scene runtime.scene.presentation-target)
@@ -48,8 +51,7 @@
                   (active-owned-target (runtime.canvas:presentation-target))))))))
 
   (fn provider.screen-pos-ray [self pos opts]
-    (local target (or (and opts opts.target)
-                      (self:default-screen-ray-target opts)))
+    (local target (self:default-screen-ray-target opts))
     (assert target "screen ray target is required: no render target with a camera is available")
     (assert target.screen-pos-ray
             "screen ray target does not support screen-pos-ray")
@@ -66,17 +68,19 @@
         (. surface slot-id))))
 
   (fn provider.input-controls [self]
-    (if (and app app.canvas-interactive?)
-        (do
-          (local slot-controls (resolve-active-slot-controls :canvas))
-          (if slot-controls
-              slot-controls
-              ;; Only fall back to surface controls when no canvas slot is active.
-              ;; If a canvas slot IS active, slot-owned controls are authoritative.
-              (if (and runtime runtime.canvas runtime.canvas.active-activity-slot-id)
-                  nil
-                  runtime.canvas-controls)))
-        (or (resolve-active-slot-controls :scene)
+    (local surface-key (if (and app app.canvas-interactive?)
+                           :canvas
+                           :scene))
+    (local slot-controls (resolve-active-slot-controls surface-key))
+    (if (active-activity-context?)
+        slot-controls
+        (= surface-key :canvas)
+        (if slot-controls
+            slot-controls
+            (if (and runtime runtime.canvas runtime.canvas.active-activity-slot-id)
+                nil
+                runtime.canvas-controls))
+        (or slot-controls
             runtime.first-person-controls)))
 
   (fn provider.camera [self opts]

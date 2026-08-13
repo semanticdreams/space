@@ -252,6 +252,65 @@
   (set app.activity-registry saved-registry)
   (set app.canvas-interactive? saved-canvas-interactive))
 
+(fn provider-input-controls-rejects-retained-controls-without-active-slot []
+  (local saved-registry app.activity-registry)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (set app.canvas-interactive? true)
+  (local runtime {:canvas {}
+                  :activity-controls {:canvas {}
+                                      :scene {}}
+                  :canvas-controls {:id :retained-canvas-controls}})
+  (local provider (Presentation.for-runtime runtime))
+  (assert (= (provider:input-controls) nil)
+          "Active activity without canvas slot controls must not use retained canvas controls")
+  (set app.activity-registry saved-registry)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+(fn provider-input-controls-rejects-retained-scene-controls-without-slot-controls []
+  (local saved-registry app.activity-registry)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (set app.canvas-interactive? false)
+  (local runtime {:scene {:active-activity-slot-id "bubbles"}
+                  :activity-controls {:canvas {}
+                                      :scene {}}
+                  :first-person-controls {:id :retained-scene-controls}})
+  (local provider (Presentation.for-runtime runtime))
+  (assert (= (provider:input-controls) nil)
+          "Active activity scene slot without controls must not use retained first-person controls")
+  (set app.activity-registry saved-registry)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+(fn provider-rejects-foreign-explicit-scene-canvas-target []
+  (local saved-registry app.activity-registry)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (var foreign-called? false)
+  (local foreign-target {:kind :scene
+                         :slot {:activity-id "sandbox"}
+                         :camera {:id :foreign-camera}
+                         :screen-pos-ray (fn [_self _pos _opts]
+                                           (set foreign-called? true)
+                                           :foreign-ray)})
+  (local hud-target {:kind :hud
+                     :screen-pos-ray (fn [_self _pos _opts]
+                                       :hud-ray)})
+  (local provider (Presentation.for-runtime {}))
+  (assert (= (provider:default-screen-ray-target {:target foreign-target}) nil)
+          "Foreign explicit scene/canvas targets must be rejected in active activity context")
+  (assert (= (provider:camera {:target foreign-target}) nil)
+          "Foreign explicit scene/canvas target camera must be filtered out")
+  (local (ok err) (pcall (fn [] (provider:screen-pos-ray {:x 1 :y 2} {:target foreign-target}))))
+  (assert (not ok)
+          "screen-pos-ray with foreign explicit target must fail instead of using it")
+  (assert (not foreign-called?)
+          "Foreign target screen-pos-ray must not be called")
+  (assert (= (provider:default-screen-ray-target {:target hud-target}) hud-target)
+          "Non-scene/canvas explicit targets should remain supported")
+  (assert (= (provider:screen-pos-ray {:x 3 :y 4} {:target hud-target}) :hud-ray)
+          "Non-scene/canvas explicit target rays should remain supported")
+  (set app.activity-registry saved-registry))
+
 (fn sync-interaction-state-ignores-retained-canvas-controls []
   (local Main (require :main))
   (local saved-canvas app.canvas)
@@ -328,6 +387,12 @@
                      :fn provider-render-targets-excludes-foreign-active-targets})
 (table.insert tests {:name "provider input-controls uses active slot only"
                      :fn provider-input-controls-uses-active-slot-only})
+(table.insert tests {:name "provider input-controls rejects retained controls without active slot"
+                     :fn provider-input-controls-rejects-retained-controls-without-active-slot})
+(table.insert tests {:name "provider input-controls rejects retained scene controls without slot controls"
+                     :fn provider-input-controls-rejects-retained-scene-controls-without-slot-controls})
+(table.insert tests {:name "provider rejects foreign explicit scene/canvas target"
+                     :fn provider-rejects-foreign-explicit-scene-canvas-target})
 (table.insert tests {:name "sync interaction state ignores retained canvas controls"
                      :fn sync-interaction-state-ignores-retained-canvas-controls})
 
