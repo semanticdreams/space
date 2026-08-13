@@ -78,6 +78,28 @@
   (set app.states states)
   states)
 
+(fn snapshot-app-fields [keys]
+  (local snapshot {:keys keys
+                   :values {}})
+  (each [_ key (ipairs keys)]
+    (set (. snapshot.values key) (. app key)))
+  snapshot)
+
+(fn restore-app-fields! [snapshot]
+  (each [_ key (ipairs snapshot.keys)]
+    (if (= key :states)
+        (set-app-states! (. snapshot.values key))
+        (set (. app key) (. snapshot.values key))))
+  true)
+
+(fn with-restored-app-fields [keys f]
+  (local snapshot (snapshot-app-fields keys))
+  (local (ok result) (pcall f))
+  (restore-app-fields! snapshot)
+  (if ok
+      result
+      (error result)))
+
 (fn own-test-state! [name state]
   (local states
     (States {:hud_provider command-hints-hud-provider
@@ -1764,11 +1786,9 @@
                (string.find err-hole "route%-wrappers must not contain holes"))
           "route-wrappers should report holes clearly"))
 
-(fn normal-state-delete-removes-graph-selection []
+(fn exercise-normal-state-delete-removes-graph-selection []
   (reset-engine-events)
   (local controls (create-controls-stub))
-  (local original-delete-selection app.activity-delete-selection)
-  (local original-canvas-interactive? app.canvas-interactive?)
   (set app.first-person-controls controls)
   (set app.active-activity-id "graph")
   (set app.canvas-interactive? true)
@@ -1782,22 +1802,19 @@
          (> (app.graph-view:remove-selected-nodes) 0)))
   (local state (NormalState))
   (own-test-state! :normal state)
-  (state.on-enter)
-  (app.engine.events.key-down.emit {:key KEY_DELETE})
-  (assert (= removed 1) "Delete should trigger graph selection removal")
-  (assert (= controls.record.key_down nil) "Handled delete should not reach controls")
-  (state.on-leave)
-  (set app.activity-delete-selection original-delete-selection)
-  (set app.canvas-interactive? original-canvas-interactive?)
-  (set app.graph-view nil)
-  (set app.first-person-controls nil))
+  (local (ok result)
+    (pcall
+      (fn []
+        (state.on-enter)
+        (app.engine.events.key-down.emit {:key KEY_DELETE})
+        (assert (= removed 1) "Delete should trigger graph selection removal")
+        (assert (= controls.record.key_down nil) "Handled delete should not reach controls"))))
+  (pcall state.on-leave)
+  (if ok result (error result)))
 
-(fn normal-state-enter-opens-focused-graph-node []
+(fn exercise-normal-state-enter-opens-focused-graph-node []
   (reset-engine-events)
-  (local original-states app.states)
   (local controls (create-controls-stub))
-  (local original-activate-focused app.activity-activate-focused)
-  (local original-canvas-interactive? app.canvas-interactive?)
   (set app.first-person-controls controls)
   (set app.active-activity-id "graph")
   (set app.canvas-interactive? true)
@@ -1815,16 +1832,68 @@
   (set-app-states! states)
   (local state (NormalState))
   (states:add-state :normal state)
-  (state.on-enter)
-  (app.engine.events.key-down.emit {:key KEY_RETURN})
-  (assert (= opened 1) "Enter should open focused graph node")
-  (assert (= controls.record.key_down nil) "Handled enter should not reach controls")
-  (state.on-leave)
-  (set app.activity-activate-focused original-activate-focused)
-  (set app.canvas-interactive? original-canvas-interactive?)
-  (set-app-states! original-states)
+  (local (ok result)
+    (pcall
+      (fn []
+        (state.on-enter)
+        (app.engine.events.key-down.emit {:key KEY_RETURN})
+        (assert (= opened 1) "Enter should open focused graph node")
+        (assert (= controls.record.key_down nil) "Handled enter should not reach controls"))))
+  (pcall state.on-leave)
+  (if ok result (error result)))
+
+(fn exercise-normal-state-f4-without-workspace-shell []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (set app.first-person-controls controls)
+  (set app.active-activity-id "graph")
+  (set app.drawing-controller nil)
+  (set app.canvas nil)
+  (set app.toggle-active-interaction-surface nil)
   (set app.graph-view nil)
-  (set app.first-person-controls nil))
+  (var created 0)
+  (var dropped 0)
+  (set app.graph-view-factory
+       (fn []
+         (set created (+ created 1))
+         (local view {})
+         (set view.drop
+              (fn [_self]
+                (set dropped (+ dropped 1))))
+         view))
+  (local state (NormalState))
+  (own-test-state! :normal state)
+  (local (ok result)
+    (pcall
+      (fn []
+        (state.on-enter)
+        (app.engine.events.key-down.emit {:key KEY_F4})
+        (assert (= created 0) "F4 should not recreate removed graph-view fallback behavior")
+        (assert (not app.graph-view) "F4 should leave app.graph-view unchanged without workspace shell support")
+        (assert (= controls.record.key_down nil) "F4 should remain a no-op when no workspace shell is available"))))
+  (pcall state.on-leave)
+  (if ok result (error result)))
+
+(fn normal-state-delete-removes-graph-selection []
+  (with-restored-app-fields
+    [:activity-delete-selection
+     :active-activity-id
+     :canvas-interactive?
+     :drawing-controller
+     :first-person-controls
+     :graph-view]
+    exercise-normal-state-delete-removes-graph-selection))
+
+(fn normal-state-enter-opens-focused-graph-node []
+  (with-restored-app-fields
+    [:activity-activate-focused
+     :active-activity-id
+     :canvas-interactive?
+     :drawing-controller
+     :first-person-controls
+     :graph-view
+     :states]
+    exercise-normal-state-enter-opens-focused-graph-node))
 
 (fn normal-state-activity-keyboard-commands-require-interactive-canvas []
   (reset-engine-events)
@@ -1920,41 +1989,15 @@
   (set app.first-person-controls nil))
 
 (fn normal-state-f4-ignores-graph-view-factory-without-workspace-shell []
-  (reset-engine-events)
-  (local original-canvas app.canvas)
-  (local original-toggle-active-interaction-surface app.toggle-active-interaction-surface)
-  (local original-graph-view app.graph-view)
-  (local original-graph-view-factory app.graph-view-factory)
-  (local controls (create-controls-stub))
-  (set app.first-person-controls controls)
-  (set app.active-activity-id "graph")
-  (set app.drawing-controller nil)
-  (set app.canvas nil)
-  (set app.toggle-active-interaction-surface nil)
-  (set app.graph-view nil)
-  (var created 0)
-  (var dropped 0)
-  (set app.graph-view-factory
-       (fn []
-         (set created (+ created 1))
-         (local view {})
-         (set view.drop
-              (fn [_self]
-                (set dropped (+ dropped 1))))
-         view))
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state.on-enter)
-  (app.engine.events.key-down.emit {:key KEY_F4})
-  (assert (= created 0) "F4 should not recreate removed graph-view fallback behavior")
-  (assert (not app.graph-view) "F4 should leave app.graph-view unchanged without workspace shell support")
-  (assert (= controls.record.key_down nil) "F4 should remain a no-op when no workspace shell is available")
-  (state.on-leave)
-  (set app.canvas original-canvas)
-  (set app.toggle-active-interaction-surface original-toggle-active-interaction-surface)
-  (set app.graph-view original-graph-view)
-  (set app.graph-view-factory original-graph-view-factory)
-  (set app.first-person-controls nil))
+  (with-restored-app-fields
+    [:active-activity-id
+     :canvas
+     :drawing-controller
+     :first-person-controls
+     :graph-view
+     :graph-view-factory
+     :toggle-active-interaction-surface]
+    exercise-normal-state-f4-without-workspace-shell))
 
 (fn normal-state-f4-toggles-canvas-surface []
   (reset-engine-events)
