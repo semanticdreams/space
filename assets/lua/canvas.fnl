@@ -5,7 +5,7 @@
 (local FloatLayer (require :float-layer))
 (local viewport-utils (require :viewport-utils))
 (local MathUtils (require :math-utils))
-(local LightingViewState (require :lighting-view-state))
+(local LightingViewState (require :lighting-view-state)) (local B (require :activity-surface-boundary))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -117,7 +117,7 @@
      :activity-slot slot
      :canvas-target-kind nil
      :screen-pos-ray (fn [_target pos opts]
-                       (self:screen-pos-ray pos opts))})
+                        (self:screen-pos-ray pos (B.authorized-ray-opts opts slot)))})
 
   (fn make-slot-build-context [slot slot-layout-root]
     (local slot-focus-scope slot.focus-scope)
@@ -438,7 +438,7 @@
             "Canvas.ensure-activity-slot requires string activity id")
     (assert (> (# activity-id) 0)
             "Canvas.ensure-activity-slot requires non-empty activity id")
-    (local existing (. self.activity-slots activity-id))
+    (B.assert-slot-owner! :canvas "ensure-activity-slot" activity-id opts) (local existing (. self.activity-slots activity-id))
     (if existing
         (do
           (local options (or opts {}))
@@ -476,9 +476,9 @@
                (fn [slot-self target-kind]
                  (set slot-self.pointer-target.canvas-target-kind target-kind)
                  slot-self))
-          (set slot.screen-pos-ray
-               (fn [_slot pos opts]
-                 (self:screen-pos-ray pos opts)))
+           (set slot.screen-pos-ray
+                (fn [_slot pos opts]
+                  (self:screen-pos-ray pos (B.authorized-ray-opts opts slot))))
           (set slot.add-panel-child
                (fn [slot-self opts]
                  (add-panel-child-to-target slot-self opts)))
@@ -545,21 +545,21 @@
                    (slot-self.float:drop)
                    (set slot-self.float nil))
                  true))
-          (set slot.set-camera
-               (fn [slot-self camera]
-                 (set slot-self.camera camera)
-                 slot-self))
-          (set slot.expose-render-target!
-               (fn [slot-self opts]
-                 (assert slot-self.camera
-                         "Canvas slot expose-render-target! requires a camera on the slot")
+           (set slot.set-camera
+                (fn [slot-self camera]
+                  (B.assert-slot-owner! :canvas "set-camera" slot-self.activity-id {}) (set slot-self.camera camera)
+                  slot-self))
+           (set slot.expose-render-target!
+                (fn [slot-self opts]
+                  (B.assert-slot-owner! :canvas "expose-render-target!" slot-self.activity-id opts) (assert slot-self.camera
+                          "Canvas slot expose-render-target! requires a camera on the slot")
                  (local options (or opts {}))
                  (set slot-self.render-target-spec options)
                  slot-self))
-          (set slot.clear-render-target!
-               (fn [slot-self]
-                 (set slot-self.render-target-spec nil)
-                 slot-self))
+           (set slot.clear-render-target!
+                (fn [slot-self]
+                  (B.assert-slot-owner! :canvas "clear-render-target!" slot-self.activity-id {}) (set slot-self.render-target-spec nil)
+                  slot-self))
           (when options.camera
             (slot:set-camera options.camera))
           (slot:deactivate)
@@ -571,8 +571,8 @@
             "Canvas.activity-slot requires string activity id")
     (. self.activity-slots activity-id))
 
-  (fn activate-activity-slot [canvas activity-id]
-    (local slot (canvas:ensure-activity-slot activity-id))
+  (fn activate-activity-slot [canvas activity-id opts]
+    (B.assert-slot-owner! :canvas "activate-activity-slot" activity-id opts) (local slot (canvas:ensure-activity-slot activity-id opts))
     (when (and self.active-activity-slot
                (not (= self.active-activity-slot slot)))
       (self.active-activity-slot:deactivate))
@@ -581,8 +581,8 @@
     (set self.active-activity-slot slot)
     slot)
 
-  (fn deactivate-activity-slot [_canvas activity-id]
-    (local slot (activity-slot self activity-id))
+  (fn deactivate-activity-slot [_canvas activity-id opts]
+    (B.assert-slot-owner! :canvas "deactivate-activity-slot" activity-id opts) (local slot (activity-slot self activity-id))
     (when slot
       (slot:deactivate)
       (when (= self.active-activity-slot slot)
@@ -590,8 +590,8 @@
         (set self.active-activity-slot-id nil)))
     slot)
 
-  (fn drop-activity-slot [_canvas activity-id]
-    (local slot (activity-slot self activity-id))
+  (fn drop-activity-slot [_canvas activity-id opts]
+    (B.assert-slot-owner! :canvas "drop-activity-slot" activity-id opts) (local slot (activity-slot self activity-id))
     (when slot
       (slot:drop)
       (when (= self.active-activity-slot slot)
@@ -602,7 +602,7 @@
 
   (fn screen-pos-ray [_canvas pos opts]
     (local ray-opts (or opts {}))
-    (local viewport (viewport-utils.to-table (or ray-opts.viewport self.viewport app.viewport)))
+    (B.assert-screen-ray-authorized! :canvas "screen-pos-ray" ray-opts nil) (local viewport (viewport-utils.to-table (or ray-opts.viewport self.viewport app.viewport)))
     (local view (or ray-opts.view (self:get-view-matrix)))
     (local projection (or ray-opts.projection self.projection))
     (fn assert-finite-vec3 [vec label]
@@ -668,7 +668,7 @@
     (each [activity-id _slot (pairs self.activity-slots)]
       (table.insert activity-slot-ids activity-id))
     (each [_ activity-id (ipairs activity-slot-ids)]
-      (drop-activity-slot self activity-id))
+      (drop-activity-slot self activity-id {:boundary-internal? true}))
     (each [_ metadata (ipairs (or self.float.children []))]
       (local element (and metadata metadata.element))
       (when element
@@ -682,7 +682,15 @@
 
   (fn presentation-target [self]
     (local slot self.active-activity-slot)
-    (when (and slot slot.visible? slot.render-target-spec slot.camera)
+    (when (and slot slot.visible? slot.render-target-spec slot.camera
+               (B.target-owned-by-active? {:kind :canvas :surface self :slot slot}))
+      (fn target-screen-pos-ray [_target pos opts]
+        (local ray-options (B.authorized-ray-opts opts slot))
+        (when (not ray-options.view)
+          (set ray-options.view (slot.camera:get-view-matrix)))
+        (when (not ray-options.projection)
+          (set ray-options.projection self.projection))
+        (self:screen-pos-ray pos ray-options))
       {:kind :canvas
        :surface self
        :slot slot
@@ -693,13 +701,7 @@
                                   (LightingViewState.orthographic
                                     (glm.vec3 0.0 0.0 1.0)))
        :get-render-contexts (fn [] [slot.ctx])
-       :screen-pos-ray (fn [_target pos opts]
-                         (local options (or opts {}))
-                         (when (not options.view)
-                           (set options.view (slot.camera:get-view-matrix)))
-                         (when (not options.projection)
-                           (set options.projection self.projection))
-                         (self:screen-pos-ray pos options))}))
+       :screen-pos-ray target-screen-pos-ray}))
 
   (fn capture-activity-slot-state [_canvas activity-id]
     (assert (= (type activity-id) :string)

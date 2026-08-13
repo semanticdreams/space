@@ -1,4 +1,9 @@
 (local Boundary (require :activity-surface-boundary))
+(local glm (require :glm))
+(local Camera (require :camera))
+(local Canvas (require :canvas))
+(local Scene (require :scene))
+(local {: FocusManager} (require :focus))
 
 (local tests [])
 
@@ -38,6 +43,44 @@
   (each [_ fragment (ipairs fragments)]
     (assert (string.find message fragment 1 true)
             (.. "Expected error to contain `" fragment "`, got: " message))))
+
+(fn with-surfaces [f]
+  (local snapshot (snapshot-app-fields [:viewport]))
+  (local focus-manager (FocusManager {:root-name "activity-boundary-test-focus"}))
+  (local canvas-camera (Camera {:position (glm.vec3 0 0 10)}))
+  (local scene-camera (Camera {:position (glm.vec3 0 0 10)}))
+  (local canvas (Canvas {:camera canvas-camera :focus-manager focus-manager}))
+  (local scene (Scene {:camera scene-camera :focus-manager focus-manager}))
+  (set app.viewport {:x 0 :y 0 :width 100 :height 100})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local (ok result) (pcall f {:canvas canvas
+                               :scene scene
+                               :canvas-camera canvas-camera
+                               :scene-camera scene-camera
+                               :focus-manager focus-manager}))
+  (pcall (fn [] (canvas:drop)))
+  (pcall (fn [] (scene:drop)))
+  (pcall (fn [] (canvas-camera:drop)))
+  (pcall (fn [] (scene-camera:drop)))
+  (pcall (fn [] (focus-manager:drop)))
+  (restore-app-fields! snapshot)
+  (if ok
+      result
+      (error result)))
+
+(fn with-active-bubbles-surfaces [f]
+  (with-boundary-app
+    {:activity-registry {:active-activity-id "bubbles"}}
+    (fn []
+      (with-surfaces f))))
+
+(fn camera-at-z [z]
+  (Camera {:position (glm.vec3 0 0 z)}))
+
+(fn assert-denied-boundary-error [ok err fragments assertion]
+  (assert (not ok) assertion)
+  (assert-error-contains err fragments))
 
 (fn matching-owner-can-mutate-slot []
   (with-boundary-app
@@ -170,6 +213,87 @@
   (assert (= surface.active-activity-slot nil))
   (assert (= surface.active-activity-slot-id nil)))
 
+(fn exercise-canvas-foreign-slot-denial [ctx]
+  (local camera (camera-at-z 20))
+  (local (ok err) (pcall (fn []
+                           (ctx.canvas:ensure-activity-slot "graph" {:camera camera}))))
+  (pcall (fn [] (camera:drop)))
+  (assert-denied-boundary-error ok err ["activity surface boundary denied"
+                                        "canvas"
+                                        "ensure-activity-slot"
+                                        "graph"
+                                        "bubbles"]
+                                "Canvas must reject foreign activity slots"))
+
+(fn canvas-rejects-foreign-activity-slot []
+  (with-active-bubbles-surfaces exercise-canvas-foreign-slot-denial))
+
+(fn exercise-canvas-active-slot-allowed [ctx]
+  (local camera (camera-at-z 20))
+  (local slot (ctx.canvas:ensure-activity-slot "bubbles" {:camera camera}))
+  (assert slot "Canvas should return the active activity slot")
+  (assert (= slot.activity-id "bubbles"))
+  (pcall (fn [] (camera:drop))))
+
+(fn canvas-allows-active-activity-slot []
+  (with-active-bubbles-surfaces exercise-canvas-active-slot-allowed))
+
+(fn exercise-scene-foreign-slot-denial [ctx]
+  (local camera (camera-at-z 20))
+  (local (ok err) (pcall (fn []
+                           (ctx.scene:ensure-activity-slot "sandbox" {:camera camera}))))
+  (pcall (fn [] (camera:drop)))
+  (assert-denied-boundary-error ok err ["activity surface boundary denied"
+                                        "scene"
+                                        "ensure-activity-slot"
+                                        "sandbox"
+                                        "bubbles"]
+                                "Scene must reject foreign activity slots"))
+
+(fn scene-rejects-foreign-activity-slot []
+  (with-active-bubbles-surfaces exercise-scene-foreign-slot-denial))
+
+(fn expose-active-bubbles-slots! [ctx canvas-camera scene-camera]
+  (local canvas-slot (ctx.canvas:ensure-activity-slot "bubbles" {:camera canvas-camera}))
+  (local scene-slot (ctx.scene:ensure-activity-slot "bubbles" {:camera scene-camera}))
+  (ctx.canvas:activate-activity-slot "bubbles")
+  (ctx.scene:activate-activity-slot "bubbles")
+  (canvas-slot:expose-render-target! {})
+  (scene-slot:expose-render-target! {}))
+
+(fn exercise-direct-surface-ray-denial [ctx]
+  (local canvas-camera (camera-at-z 20))
+  (local scene-camera (camera-at-z 20))
+  (expose-active-bubbles-slots! ctx canvas-camera scene-camera)
+  (local (canvas-ok canvas-err) (pcall (fn []
+                                         (ctx.canvas:screen-pos-ray {:x 1 :y 1}))))
+  (local (scene-ok scene-err) (pcall (fn []
+                                       (ctx.scene:screen-pos-ray {:x 1 :y 1}))))
+  (pcall (fn [] (canvas-camera:drop)))
+  (pcall (fn [] (scene-camera:drop)))
+  (assert-denied-boundary-error canvas-ok canvas-err ["ambiguous direct screen ray" "canvas"]
+                                "Bare Canvas screen-pos-ray must fail in active contexts")
+  (assert-denied-boundary-error scene-ok scene-err ["ambiguous direct screen ray" "scene"]
+                                "Bare Scene screen-pos-ray must fail in active contexts"))
+
+(fn direct-surface-rays-fail-when-active-slot-exists []
+  (with-active-bubbles-surfaces exercise-direct-surface-ray-denial))
+
+(fn exercise-canvas-presentation-target-ray [ctx]
+  (local camera (camera-at-z 20))
+  (local slot (ctx.canvas:ensure-activity-slot "bubbles" {:camera camera}))
+  (ctx.canvas:activate-activity-slot "bubbles")
+  (slot:expose-render-target! {})
+  (local target (ctx.canvas:presentation-target))
+  (assert target "Canvas active slot should expose a presentation target")
+  (local ray (target:screen-pos-ray {:x 1 :y 1} {}))
+  (assert ray.origin "Presentation target ray should include an origin")
+  (assert ray.direction "Presentation target ray should include a direction")
+  (pcall (fn [] (camera:drop))))
+
+(fn canvas-presentation-target-ray-still-works []
+  (with-active-bubbles-surfaces exercise-canvas-presentation-target-ray))
+
 (table.insert tests {:name "matching owner can mutate an activity slot"
                      :fn matching-owner-can-mutate-slot})
 (table.insert tests {:name "runtime active owner fallback authorizes slots"
@@ -191,7 +315,17 @@
 (table.insert tests {:name "foreign pointer target is not active owned"
                      :fn foreign-pointer-target-is-not-active-owned})
 (table.insert tests {:name "deactivate foreign slots preserves the active slot"
-                     :fn deactivate-foreign-slots-preserves-active-slot})
+                      :fn deactivate-foreign-slots-preserves-active-slot})
+(table.insert tests {:name "Canvas rejects foreign activity slot creation"
+                     :fn canvas-rejects-foreign-activity-slot})
+(table.insert tests {:name "Canvas allows active activity slot creation"
+                     :fn canvas-allows-active-activity-slot})
+(table.insert tests {:name "Scene rejects foreign activity slot creation"
+                     :fn scene-rejects-foreign-activity-slot})
+(table.insert tests {:name "direct surface rays fail when an active slot exists"
+                     :fn direct-surface-rays-fail-when-active-slot-exists})
+(table.insert tests {:name "Canvas presentation target ray still works"
+                     :fn canvas-presentation-target-ray-still-works})
 
 (local main
   (fn []
