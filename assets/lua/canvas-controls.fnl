@@ -25,7 +25,7 @@
   (local options (or opts {}))
   (local canvas (assert (or options.canvas app.canvas)
                         "CanvasControls requires canvas"))
-  (local camera (assert (or options.camera (and canvas canvas.camera))
+  (local camera (assert options.camera
                         "CanvasControls requires camera"))
   (local zoom-step (or options.zoom-step 1.15))
   (local min-scale (or options.min-scale 0.05))
@@ -71,7 +71,7 @@
 
   (fn plane-hit-at [pointer projection]
     (when (and canvas canvas.screen-pos-ray pointer)
-      (local ray (canvas:screen-pos-ray pointer {:projection projection}))
+      (local ray (canvas:screen-pos-ray pointer {:view (camera:get-view-matrix) :projection projection}))
       (when (and ray ray.origin ray.direction)
         (local dz (or ray.direction.z 0))
         (when (not (= dz 0))

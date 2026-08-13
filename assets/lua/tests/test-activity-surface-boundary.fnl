@@ -2,6 +2,7 @@
 (local glm (require :glm))
 (local Camera (require :camera))
 (local Canvas (require :canvas))
+(local CanvasControls (require :canvas-controls))
 (local Scene (require :scene))
 (local Activities (require :activities))
 (local {: FocusManager} (require :focus))
@@ -435,6 +436,32 @@
 (fn canvas-presentation-target-ray-still-works []
   (with-active-bubbles-surfaces exercise-canvas-presentation-target-ray))
 
+(fn exercise-canvas-controls-use-slot-camera [ctx]
+  (local retained-camera ctx.canvas-camera)
+  (local retained-before-x retained-camera.position.x)
+  (local retained-before-y retained-camera.position.y)
+  (local retained-before-z retained-camera.position.z)
+  (local bubbles-camera (camera-at-z 40))
+  (local slot (ctx.canvas:ensure-activity-slot "bubbles" {:camera bubbles-camera}))
+  (ctx.canvas:activate-activity-slot "bubbles")
+  (slot:expose-render-target! {})
+  (local controls (CanvasControls {:canvas ctx.canvas
+                                   :camera bubbles-camera}))
+  (controls:on-mouse-wheel {:x 1 :y 0})
+  (assert (> bubbles-camera.position.x 0)
+          "Canvas controls should pan the explicit activity slot camera")
+  (assert (= retained-camera.position.x retained-before-x)
+          "Canvas controls must not pan the retained canvas camera")
+  (assert (= retained-camera.position.y retained-before-y)
+          "Canvas controls must not move the retained canvas camera vertically")
+  (assert (= retained-camera.position.z retained-before-z)
+          "Canvas controls must not move the retained canvas camera depth")
+  (controls:drop)
+  (pcall (fn [] (bubbles-camera:drop))))
+
+(fn canvas-controls-mutate-dynamic-slot-camera-only []
+  (with-active-bubbles-surfaces exercise-canvas-controls-use-slot-camera))
+
 (fn activating-activity-owns-boundary-during-activate []
   (with-boundary-app
     {:activity-registry nil
@@ -500,9 +527,11 @@
 (table.insert tests {:name "direct surface rays fail when an active slot exists"
                      :fn direct-surface-rays-fail-when-active-slot-exists})
 (table.insert tests {:name "Canvas presentation target ray still works"
-                     :fn canvas-presentation-target-ray-still-works})
+                      :fn canvas-presentation-target-ray-still-works})
+(table.insert tests {:name "Canvas controls mutate dynamic slot camera only"
+                     :fn canvas-controls-mutate-dynamic-slot-camera-only})
 (table.insert tests {:name "activating activity owns boundary during activate"
-                     :fn activating-activity-owns-boundary-during-activate})
+                      :fn activating-activity-owns-boundary-during-activate})
 (table.insert tests {:name "inactive retained cleanup can use internal slot teardown"
                       :fn inactive-retained-cleanup-can-use-internal-slot-teardown})
 (table.insert tests {:name "activity switch deactivates foreign surface slots"
