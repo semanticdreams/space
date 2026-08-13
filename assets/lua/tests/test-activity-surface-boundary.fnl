@@ -1,4 +1,5 @@
 (local Boundary (require :activity-surface-boundary))
+(local fs (require :fs))
 (local glm (require :glm))
 (local Camera (require :camera))
 (local Canvas (require :canvas))
@@ -493,8 +494,26 @@
       (Activities.drop-activity-session! "graph")
       (assert (= (. sessions "graph") nil)
               "Retained inactive activity session should be removed after cleanup")
-      (assert (not slot.visible?) "Internal cleanup should deactivate retained slot visibility")
-      (assert (not slot.interactive?) "Internal cleanup should deactivate retained slot interaction"))))
+       (assert (not slot.visible?) "Internal cleanup should deactivate retained slot visibility")
+       (assert (not slot.interactive?) "Internal cleanup should deactivate retained slot interaction"))))
+
+(fn unsafe-recommendation-line? [line]
+  (and (string.find line "app.canvas:screen-pos-ray" 1 true)
+       (not (string.find line "unsafe" 1 true))
+       (not (string.find line "fail" 1 true))))
+
+(fn generated-unit-guidance-documents-activity-camera-boundary []
+  (local source (fs.read-file "assets/lua/llm/presets/builtins/units.fnl"))
+  (assert (string.find source "bubbles" 1 true)
+          "Generated unit guidance should mention bubbles")
+  (assert (string.find source "app.presentation-screen-pos-ray" 1 true)
+          "Generated unit guidance should recommend presentation-owned rays")
+  (assert (or (string.find source "own activity canvas slot" 1 true)
+              (string.find source "own canvas activity slot" 1 true))
+          "Generated unit guidance should require the unit's own canvas activity slot")
+  (each [line (string.gmatch source "([^\n]*)\n?")]
+    (assert (not (unsafe-recommendation-line? line))
+            (.. "Generated unit guidance must not recommend app.canvas:screen-pos-ray: " line))))
 
 (table.insert tests {:name "matching owner can mutate an activity slot"
                      :fn matching-owner-can-mutate-slot})
@@ -537,7 +556,9 @@
 (table.insert tests {:name "activity switch deactivates foreign surface slots"
                      :fn activity-switch-deactivates-foreign-surface-slots})
 (table.insert tests {:name "activity activation fails when creating a foreign slot"
-                     :fn activity-activation-fails-when-creating-foreign-slot})
+                      :fn activity-activation-fails-when-creating-foreign-slot})
+(table.insert tests {:name "generated unit guidance documents activity camera boundary"
+                     :fn generated-unit-guidance-documents-activity-camera-boundary})
 
 (local main
   (fn []
