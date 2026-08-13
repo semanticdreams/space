@@ -502,8 +502,14 @@
        (not (string.find line "unsafe" 1 true))
        (not (string.find line "fail" 1 true))))
 
+(fn generated-units-guidance-path []
+  (local assets-path (os.getenv "SPACE_ASSETS_PATH"))
+  (assert assets-path
+          "SPACE_ASSETS_PATH must be set to read authoritative generated unit guidance")
+  (fs.join-path assets-path "lua" "llm" "presets" "builtins" "units.fnl"))
+
 (fn generated-unit-guidance-documents-activity-camera-boundary []
-  (local source (fs.read-file "assets/lua/llm/presets/builtins/units.fnl"))
+  (local source (fs.read-file (generated-units-guidance-path)))
   (assert (string.find source "bubbles" 1 true)
           "Generated unit guidance should mention bubbles")
   (assert (string.find source "app.presentation-screen-pos-ray" 1 true)
