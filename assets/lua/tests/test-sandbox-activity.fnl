@@ -38,15 +38,55 @@
        :show-in-switcher? true
        :activate (fn [_ctx] {:activity-id "board"})
        :deactivate (fn [_ctx _session] true)}))
-  true)
+   true)
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (set (. out k) (clone-table v)))
+        out)
+      value))
+
+(fn restore-table! [target snapshot]
+  (each [k _v (pairs target)]
+    (set (. target k) nil))
+  (each [k v (pairs snapshot)]
+    (set (. target k) (clone-table v)))
+  target)
 
 (fn with-restored-app [fields f]
   (local snapshot {})
+  (local registry-key :activity-registry)
+  (local registry-ref app.activity-registry)
+  (local registry-snapshot (clone-table registry-ref))
   (each [_ key (ipairs fields)]
     (set (. snapshot key) (. app key)))
   (local (ok result) (pcall f))
+  (if registry-ref
+      (do
+        (restore-table! registry-ref registry-snapshot)
+        (tset app registry-key registry-ref))
+      (tset app registry-key nil))
   (each [_ key (ipairs fields)]
     (set (. app key) (. snapshot key)))
+  (if ok result (error result)))
+
+(fn with-restored-app-restores-registry-owner []
+  (local original-registry app.activity-registry)
+  (set app.activity-registry {:active-activity-id nil})
+  (local (ok result)
+    (pcall
+      (fn []
+        (with-restored-app []
+          (fn []
+            (local registry app.activity-registry)
+            (set registry.active-activity-id "sandbox")
+            true))
+        (assert (= app.activity-registry.active-activity-id nil)
+                "with-restored-app must restore nested registry owner state"))))
+  (set app.activity-registry original-registry)
   (if ok result (error result)))
 
 (fn make-mock-scene []
@@ -1036,6 +1076,8 @@
 
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})
+(table.insert tests {:name "with-restored-app restores registry owner"
+                     :fn with-restored-app-restores-registry-owner})
 (table.insert tests {:name "sandbox activation sets scene interaction surface"
                      :fn sandbox-activation-sets-scene-interaction-surface})
 (table.insert tests {:name "sandbox activation installs root actions"
