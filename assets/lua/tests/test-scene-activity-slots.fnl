@@ -1056,9 +1056,9 @@
 (table.insert tests {:name "Scene containment enabled flag controls install"
                        :fn containment-enabled-flag-controls-install})
 (table.insert tests {:name "Scene content mutation asserts without active slot"
-                       :fn no-active-slot-mutation-asserts})
+                        :fn no-active-slot-mutation-asserts})
 (table.insert tests {:name "Scene restore terrain no duplicates on active slot"
-                        :fn restore-terrain-no-duplicates-on-active-slot})
+                         :fn restore-terrain-no-duplicates-on-active-slot})
 (table.insert tests {:name "Scene restore terrain idempotent on repeat"
                         :fn restore-terrain-idempotent-on-repeat})
 (table.insert tests {:name "Scene restore terrain adds missing while active"
@@ -1313,10 +1313,55 @@
                   (tostring (length slot.scene-state.terrains))))
       (drop-fixture fixture))))
 
+(fn inactive-retained-scene-slot-captures-while-foreign-active []
+  (with-restored-app-fields
+    [:active-activity-id :activity-registry]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local graph-slot (scene:ensure-activity-slot "graph"))
+      (local board-slot (scene:ensure-activity-slot "board"))
+      (set graph-slot.scene-state (ActivitySceneState.empty-state))
+      (set graph-slot.scene-state.terrains
+           [(make-heightfield-terrain-record {:id "graph-terrain"})])
+      (scene:activate-activity-slot "board")
+      (set app.activity-registry {:active-activity-id "board"})
+      (set app.active-activity-id "board")
+      (local captured (scene:capture-activity-slot-state "graph"))
+      (assert (= (length captured.terrains) 1)
+              "Inactive retained graph scene slot should be captured while board is active")
+      (assert (= (. (. captured.terrains 1) :id) "graph-terrain")
+              "Inactive capture should read the retained graph slot state")
+      (assert (= (. scene.activity-slots "graph") graph-slot)
+              "Capture should not replace the retained graph slot")
+      (assert (= scene.active-activity-slot board-slot)
+              "Capture should not change the active board slot")
+      (drop-fixture fixture))))
+
+(fn capture-missing-scene-slot-fails-without-creating []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local (ok err) (pcall (fn [] (scene:capture-activity-slot-state "missing"))))
+  (assert (not ok)
+          "Capturing a missing scene activity slot should fail")
+  (assert (string.find (tostring err)
+                       "Scene.capture-activity-slot-state no slot for activity missing"
+                       1
+                       true)
+          "Missing scene slot capture should report an explicit error")
+  (assert (= (scene:activity-slot "missing") nil)
+          "Capture must not create missing scene activity slots")
+  (drop-fixture fixture))
+
 (table.insert tests {:name "inactive capture uses authoritative terrains"
-                     :fn inactive-capture-uses-authoritative-terrains})
+                      :fn inactive-capture-uses-authoritative-terrains})
 (table.insert tests {:name "sandbox activation reconciles terrains"
-                     :fn sandbox-activation-reconciles-terrains})
+                      :fn sandbox-activation-reconciles-terrains})
+(table.insert tests {:name "Scene inactive retained slot capture works under foreign active owner"
+                       :fn inactive-retained-scene-slot-captures-while-foreign-active})
+(table.insert tests {:name "Scene capture missing activity slot fails without creating"
+                       :fn capture-missing-scene-slot-fails-without-creating})
 
 ;; ── R2-1 empty canonical terrain list ──────────────────────────────────
 

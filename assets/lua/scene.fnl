@@ -1078,7 +1078,11 @@
     slot)
 
   (fn capture-activity-slot-state [scene activity-id]
-    (local slot (ensure-activity-slot scene activity-id))
+    (assert (= (type activity-id) :string)
+            "Scene.capture-activity-slot-state requires string activity id")
+    (local slot (. self.activity-slots activity-id))
+    (assert slot
+            (.. "Scene.capture-activity-slot-state no slot for activity " activity-id))
     (local is-active (= self.active-activity-slot slot))
     ;; Capture panels and terrains from the slot's own content,
     ;; not from the current active slot's aliases.
