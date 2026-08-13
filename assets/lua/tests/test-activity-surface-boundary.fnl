@@ -126,6 +126,83 @@
   (Activities.activate-activity "bubbles")
   (assert-activation-boundary-results results))
 
+(fn make-activity-runtime [ctx]
+  {:canvas ctx.canvas
+   :scene ctx.scene
+   :camera ctx.scene-camera
+   :activity-cameras {:canvas {} :scene {}}
+   :activity-controls {:canvas {} :scene {}}
+   :presentation {:input-controls (fn [_self] nil)}})
+
+(fn activate-slot-for-test! [surface activity-id camera]
+  (local slot (surface:ensure-activity-slot activity-id {:camera camera
+                                                         :boundary-internal? true}))
+  (surface:activate-activity-slot activity-id {:boundary-internal? true})
+  (slot:expose-render-target! {:boundary-internal? true})
+  slot)
+
+(fn register-bubbles-owns-canvas-activity! [ctx cameras]
+  (Activities.register-activity
+    {:id "bubbles"
+     :activate (fn [_activity-ctx _session]
+                 (local camera (camera-at-z 40))
+                 (table.insert cameras camera)
+                 (local slot (ctx.canvas:ensure-activity-slot "bubbles" {:camera camera}))
+                 (ctx.canvas:activate-activity-slot "bubbles")
+                 (slot:expose-render-target! {})
+                 {})}))
+
+(fn exercise-activity-switch-cleanup [ctx]
+  (local runtime (make-activity-runtime ctx))
+  (local extra-cameras [])
+  (set app.active-world-runtime runtime)
+  (local graph-camera (camera-at-z 21))
+  (local sandbox-camera (camera-at-z 22))
+  (table.insert extra-cameras graph-camera)
+  (table.insert extra-cameras sandbox-camera)
+  (local graph-slot (activate-slot-for-test! ctx.canvas "graph" graph-camera))
+  (local sandbox-slot (activate-slot-for-test! ctx.scene "sandbox" sandbox-camera))
+  (register-bubbles-owns-canvas-activity! ctx extra-cameras)
+  (Activities.activate-activity "bubbles")
+  (local bubbles-slot (ctx.canvas:activity-slot "bubbles"))
+  (assert bubbles-slot "Bubbles activation should create its own canvas slot")
+  (assert (not graph-slot.visible?) "Graph canvas slot should be hidden after bubbles activates")
+  (assert (not graph-slot.interactive?) "Graph canvas slot should be noninteractive after bubbles activates")
+  (assert (not sandbox-slot.visible?) "Sandbox scene slot should be hidden after bubbles activates")
+  (assert (not sandbox-slot.interactive?) "Sandbox scene slot should be noninteractive after bubbles activates")
+  (assert bubbles-slot.visible? "Bubbles slot should remain visible")
+  (assert bubbles-slot.interactive? "Bubbles slot should remain interactive")
+  (each [_ camera (ipairs extra-cameras)]
+    (pcall (fn [] (camera:drop)))))
+
+(fn foreign-slot-activation [ctx]
+  (set app.active-world-runtime (make-activity-runtime ctx))
+  (Activities.register-activity
+    {:id "bubbles"
+     :activate (fn [_activity-ctx _session]
+                 (app.active-world-runtime.canvas:ensure-activity-slot "graph")
+                 {})})
+  (local (ok err) (pcall (fn [] (Activities.activate-activity "bubbles"))))
+  (assert-denied-boundary-error ok err ["Activity activation failed for bubbles"
+                                        "activity surface boundary denied"
+                                        "graph"
+                                        "bubbles"]
+                                "Activation must fail loudly when an activity creates a foreign slot"))
+
+(fn activity-switch-deactivates-foreign-surface-slots []
+  (with-boundary-app
+    {:activity-registry nil
+     :active-world-runtime nil}
+    (fn []
+      (with-surfaces exercise-activity-switch-cleanup))))
+
+(fn activity-activation-fails-when-creating-foreign-slot []
+  (with-boundary-app
+    {:activity-registry nil
+     :active-world-runtime nil}
+    (fn []
+      (with-surfaces foreign-slot-activation))))
+
 (fn cleanup-surface-activity-slot [self activity-id]
   (. self.activity-slots activity-id))
 
@@ -427,7 +504,11 @@
 (table.insert tests {:name "activating activity owns boundary during activate"
                      :fn activating-activity-owns-boundary-during-activate})
 (table.insert tests {:name "inactive retained cleanup can use internal slot teardown"
-                     :fn inactive-retained-cleanup-can-use-internal-slot-teardown})
+                      :fn inactive-retained-cleanup-can-use-internal-slot-teardown})
+(table.insert tests {:name "activity switch deactivates foreign surface slots"
+                     :fn activity-switch-deactivates-foreign-surface-slots})
+(table.insert tests {:name "activity activation fails when creating a foreign slot"
+                     :fn activity-activation-fails-when-creating-foreign-slot})
 
 (local main
   (fn []

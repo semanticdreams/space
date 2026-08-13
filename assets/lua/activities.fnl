@@ -29,15 +29,15 @@
 (fn ensure-registry []
   (when (not app.activity-registry)
     (set app.activity-registry
-          {:activities {}
-           :ordered-ids []
-            :global-sessions {}
-             :sessions {}
-             :active-activity-id nil
-             :activating-activity-id nil
-             :active-activity-spec nil
-            :active-activity-session nil
-            :suppress-workspace-shell-change? false}))
+         {:activities {}
+          :ordered-ids []
+          :global-sessions {}
+          :sessions {}
+          :active-activity-id nil
+          :activating-activity-id nil
+          :active-activity-spec nil
+          :active-activity-session nil
+          :suppress-workspace-shell-change? false}))
   (set app.activity-registry.global-sessions
        (or app.activity-registry.global-sessions app.activity-registry.sessions {}))
   (if app.active-world-runtime
@@ -557,6 +557,10 @@
                     (set (. registry.sessions resolved-id) retained-session)
                     (set registry.active-activity-session retained-session)
                     (sync-app-active-activity! resolved-id)
+                    (do
+                      (local Boundary (require :activity-surface-boundary))
+                      (Boundary.deactivate-foreign-slots! (and app.active-world-runtime app.active-world-runtime.canvas) resolved-id)
+                      (Boundary.deactivate-foreign-slots! (and app.active-world-runtime app.active-world-runtime.scene) resolved-id))
                     (local restored-state (pending-session-state resolved-id))
                     (when restored-state
                       (local (restore-ok restore-err)
