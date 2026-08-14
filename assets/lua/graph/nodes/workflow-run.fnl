@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local WorkflowRunNodePreview (require :graph/view/previews/workflow-run))
 
 (local STATUS_COLORS
   {:pending (glm.vec4 0.55 0.55 0.55 1)
@@ -33,6 +34,23 @@
 (fn status-color [status]
   (local color (. STATUS_COLORS (status-key status)))
   (if color color (. STATUS_COLORS :pending)))
+
+(fn status-tone [status]
+  (case (status-key status)
+    :ready :info
+    :running :info
+    :waiting :warning
+    :failed :danger
+    :succeeded :success
+    :skipped :neutral
+    :cancelled :neutral
+    :pending :neutral
+    :queued :neutral
+    _ :neutral))
+
+(fn run-label [run run-id]
+  (local status (if (and run run.status) run.status :pending))
+  (.. "Workflow run " run-id " (" (tostring status) ")"))
 
 (fn resolve-node [graph key]
   (var node nil)
@@ -74,10 +92,11 @@
   (local run-id (assert options.run-id "WorkflowRunNode requires run-id"))
   (local run (store:get-run run-id))
   (local node (GraphNode {:key (.. "workflow-run:" run-id)
-                         :label (.. "Workflow run " run-id)
-                         :color (status-color (and run run.status))
-                         :sub-color (status-color (and run run.status))
-                         :size 8.0}))
+                          :label (run-label run run-id)
+                          :color (status-color (and run run.status))
+                          :sub-color (status-color (and run run.status))
+                          :preview WorkflowRunNodePreview
+                          :size 8.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)
@@ -101,9 +120,10 @@
        (fn [self]
          (local current (self.workflow-store:get-run self.workflow-run-id))
          (local edges [])
-         (when current
-           (set self.color (status-color current.status))
-           (add-edge edges self (resolve-node self.graph (.. "workflow-definition:" current.definition-id)) "definition")
+          (when current
+            (set self.color (status-color current.status))
+            (set self.label (run-label current self.workflow-run-id))
+            (add-edge edges self (resolve-node self.graph (.. "workflow-definition:" current.definition-id)) "definition")
            (when self.details-expanded?
              (each [_ run-step (ipairs (self.workflow-store:list-run-steps current.id))]
                (add-edge edges self (resolve-node self.graph (run-step-key current.id run-step.step-id)) "run step"))
@@ -125,6 +145,7 @@
           (WorkflowRunNode {:run-id run-id :store store :runner runner}))))))
 
 {:WorkflowRunNode WorkflowRunNode
- :STATUS_COLORS STATUS_COLORS
- :status-color status-color
- :register-loader register-loader}
+  :STATUS_COLORS STATUS_COLORS
+  :status-color status-color
+  :status-tone status-tone
+  :register-loader register-loader}

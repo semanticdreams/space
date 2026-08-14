@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local WorkflowDefinitionNodePreview (require :graph/view/previews/workflow-definition))
 
 (local DEFINITION_BLUE (glm.vec4 0.22 0.4 0.82 1))
 (local DEFINITION_BLUE_ACCENT (glm.vec4 0.32 0.52 0.95 1))
@@ -73,10 +74,11 @@
   (local definition (store:get-definition definition-id))
   (local label (definition-label definition definition-id))
   (local node (GraphNode {:key (.. "workflow-definition:" definition-id)
-                         :label label
-                         :color DEFINITION_BLUE
-                         :sub-color DEFINITION_BLUE_ACCENT
-                         :size 8.5}))
+                          :label label
+                          :color DEFINITION_BLUE
+                          :sub-color DEFINITION_BLUE_ACCENT
+                          :preview WorkflowDefinitionNodePreview
+                          :size 8.5}))
   (set node.workflow-definition-id definition-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)

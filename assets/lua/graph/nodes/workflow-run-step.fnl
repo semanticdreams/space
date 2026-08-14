@@ -26,6 +26,16 @@
 (fn run-step-key [run-id step-id]
   (.. "workflow-run-step:" run-id ":" step-id))
 
+(fn run-step-label [run-step step-id]
+  (local status (if (and run-step run-step.status) run-step.status :pending))
+  (.. "Run step " step-id " (" (tostring status) ")"))
+
+(fn status-color [status]
+  (WorkflowRunNode.status-color status))
+
+(fn status-tone [status]
+  (WorkflowRunNode.status-tone status))
+
 (fn WorkflowRunStepNode [opts]
   (local options (or opts {}))
   (local store (assert options.store "WorkflowRunStepNode requires store"))
@@ -33,8 +43,8 @@
   (local step-id (assert options.step-id "WorkflowRunStepNode requires step-id"))
   (local run-step (store:get-run-step run-id step-id))
   (local node (GraphNode {:key (run-step-key run-id step-id)
-                         :label (.. "Run step " step-id)
-                         :color (WorkflowRunNode.status-color (and run-step run-step.status))
+                          :label (run-step-label run-step step-id)
+                          :color (WorkflowRunNode.status-color (and run-step run-step.status))
                          :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
                          :size 7.0}))
   (set node.workflow-run-id run-id)
@@ -45,9 +55,10 @@
          (local current-run (self.workflow-store:get-run self.workflow-run-id))
          (local current-step (self.workflow-store:get-run-step self.workflow-run-id self.workflow-step-id))
          (local edges [])
-         (when current-step
-           (set self.color (WorkflowRunNode.status-color current-step.status))
-           (add-edge edges self
+          (when current-step
+            (set self.color (WorkflowRunNode.status-color current-step.status))
+            (set self.label (run-step-label current-step self.workflow-step-id))
+            (add-edge edges self
                      (resolve-node self.graph (.. "workflow-step:" current-run.definition-id ":" self.workflow-step-id))
                      "definition step"))
          edges))
@@ -70,5 +81,7 @@
         (WorkflowRunStepNode {:run-id run-id :step-id step-id :store store})))))
 
 {:WorkflowRunStepNode WorkflowRunStepNode
- :parse-key parse-key
- :register-loader register-loader}
+  :parse-key parse-key
+  :status-color status-color
+  :status-tone status-tone
+  :register-loader register-loader}

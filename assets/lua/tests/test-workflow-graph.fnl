@@ -2,6 +2,13 @@
 (local GraphMap (require :graph/map))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 
+(local _main (require :main))
+
+(local BuildContext (require :build-context))
+(local Intersectables (require :intersectables))
+(local Clickables (require :clickables))
+(local Hoverables (require :hoverables))
+
 (local tests [])
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "workflow-graph"))
@@ -75,6 +82,21 @@
 (fn assert-edge-target [edges key message]
   (local keys (edge-target-key-set edges))
   (assert (. keys key) message))
+
+(fn make-preview-ctx []
+  (local AppBootstrap (require :app-bootstrap))
+  (AppBootstrap.init-themes)
+  (local intersectables (Intersectables))
+  (local clickables (assert (Clickables {:intersectables intersectables})
+                            "workflow graph preview test requires clickables"))
+  (local hoverables (assert (Hoverables {:intersectables intersectables})
+                            "workflow graph preview test requires hoverables"))
+  (BuildContext {:clickables clickables
+                 :hoverables hoverables}))
+
+(fn assert-missing-build-context [builder message]
+  (local (ok _result) (pcall builder))
+  (assert (not ok) message))
 
 (fn seed-definition-with-run [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
@@ -173,6 +195,76 @@
     (local color (WorkflowRunNode.status-color status))
     (assert color (.. "status color should exist for " (tostring status)))
     (assert (= (type color) :userdata) (.. "status color should be vec4 for " (tostring status)))))
+
+(fn workflow-definition-preview-builds-with-start-action-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local graph runtime.graph)
+  (local node (graph:load-by-key (.. "workflow-definition:" seeded.definition.id)))
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflow-definition))
+  (assert loaded? "workflow definition preview module should load")
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "definition preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget "definition preview should build a widget")
+  (assert widget.start-button "definition preview should expose a Start button")
+  (local before (length runtime.runner.started))
+  (widget.start-button:on-click {:source :test})
+  (assert (= (length runtime.runner.started) (+ before 1))
+          "Start button should call start-workflow-from-graph")
+  (widget:drop))
+
+(fn workflow-definition-preview-builds-with-start-action []
+  (with-runtime workflow-definition-preview-builds-with-start-action-case))
+
+(fn workflow-run-preview-builds-with-toggle-action-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local graph runtime.graph)
+  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run))
+  (assert loaded? "workflow run preview module should load")
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "run preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget.toggle-button "run preview should expose a details toggle button")
+  (assert (= widget.toggle-button-label "Show Details") "collapsed run preview should show Show Details")
+  (widget.toggle-button:on-click {:source :test})
+  (assert node.details-expanded? "toggle button should expand run details")
+  (widget:drop)
+  (local expanded-widget (builder (make-preview-ctx)))
+  (assert (= expanded-widget.toggle-button-label "Hide Details") "expanded run preview should show Hide Details")
+  (expanded-widget:drop))
+
+(fn workflow-run-preview-builds-with-toggle-action []
+  (with-runtime workflow-run-preview-builds-with-toggle-action-case))
+
+(fn workflow-run-details-toggle-changes-expanded-edge-projection-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local graph runtime.graph)
+  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local collapsed-keys (edge-target-key-set (node:get-edges)))
+  (assert (= (. collapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "run details should default collapsed")
+  (node:toggle-details)
+  (local expanded-keys (edge-target-key-set (node:get-edges)))
+  (assert (. expanded-keys (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "expanded run should include run-step edges")
+  (assert (. expanded-keys (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+          "expanded run should include run event edges")
+  (node:toggle-details)
+  (local recollapsed-keys (edge-target-key-set (node:get-edges)))
+  (assert (= (. recollapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "collapsed run should hide run-step edges again"))
+
+(fn workflow-run-details-toggle-changes-expanded-edge-projection []
+  (with-runtime workflow-run-details-toggle-changes-expanded-edge-projection-case))
+
+(fn workflow-run-step-status-colors-cover-all-run-step-statuses []
+  (local WorkflowRunStepNode (require :graph/nodes/workflow-run-step))
+  (local statuses [:pending :queued :ready :running :waiting :failed :succeeded :skipped :cancelled])
+  (each [_ status (ipairs statuses)]
+    (local color (WorkflowRunStepNode.status-color status))
+    (assert color (.. "run step status color should exist for " (tostring status)))
+    (assert (= (type color) :userdata) (.. "run step status color should be vec4 for " (tostring status)))))
 
 (fn seed-definition-for-authoring [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
@@ -296,7 +388,15 @@
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"
                      :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"
-                      :fn workflow-status-color-mapping-covers-all-statuses})
+                       :fn workflow-status-color-mapping-covers-all-statuses})
+(table.insert tests {:name "workflow definition preview builds with start action"
+                     :fn workflow-definition-preview-builds-with-start-action})
+(table.insert tests {:name "workflow run preview builds with toggle action"
+                     :fn workflow-run-preview-builds-with-toggle-action})
+(table.insert tests {:name "workflow run details toggle changes expanded edge projection"
+                     :fn workflow-run-details-toggle-changes-expanded-edge-projection})
+(table.insert tests {:name "workflow run step status colors cover all run step statuses"
+                     :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
 (table.insert tests {:name "graph step connection creates canonical workflow control edge"
                      :fn graph-step-connection-creates-canonical-workflow-control-edge})
 (table.insert tests {:name "graph map capture skips workflow derived edges"
