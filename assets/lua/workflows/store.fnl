@@ -1,5 +1,6 @@
 (local fs (require :fs))
 (local json (require :json))
+(local appdirs (require :appdirs))
 (local Uuid (require :uuid))
 (local Signal (require :signal))
 (local JsonUtils (require :json-utils))
@@ -80,6 +81,21 @@
   (each [k v (pairs changes)]
     (set (. record k) v))
   record)
+
+(fn reject-update-key [updates key message]
+  (when (not (= (. (table-or-empty updates) key) nil))
+    (error message)))
+
+(fn validate-definition-updates [updates]
+  (reject-update-key updates :id "update-definition cannot change :id")
+  (reject-update-key updates :steps "update-definition cannot change :steps")
+  (reject-update-key updates :edges "update-definition cannot change :edges"))
+
+(fn validate-step-updates [updates]
+  (local changes (table-or-empty updates))
+  (reject-update-key changes :id "update-step cannot change :id")
+  (when (= changes.code-entity-id false)
+    (error "workflow step requires :code-entity-id")))
 
 (fn normalize-definition [definition]
   (local data (table-or-empty definition))
@@ -278,6 +294,7 @@
 
 (fn update-definition [self definition-id updates]
   (local definition (require-definition self definition-id))
+  (validate-definition-updates updates)
   (apply-updates! definition updates)
   (touch-definition! self definition)
   (self.definition-updated:emit definition)
@@ -303,6 +320,7 @@
 (fn update-step [self definition-id step-id updates]
   (local definition (require-definition self definition-id))
   (local step (require-step definition step-id))
+  (validate-step-updates updates)
   (apply-updates! step updates)
   (assert step.code-entity-id "workflow step requires :code-entity-id")
   (touch-definition! self definition)
@@ -497,7 +515,11 @@
   (if default-store
       default-store
       (do
-        (set default-store (WorkflowStore (table-or-empty opts)))
+        (local options (table-or-empty opts))
+        (local base-dir (or options.base-dir
+                            (and appdirs (appdirs.user-data-dir "space"))))
+        (assert base-dir "WorkflowStore.get-default requires app user data dir")
+        (set default-store (WorkflowStore {:base-dir base-dir}))
         default-store)))
 
 {:WorkflowStore WorkflowStore

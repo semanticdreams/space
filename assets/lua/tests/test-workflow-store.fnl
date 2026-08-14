@@ -1,9 +1,14 @@
 (local fs (require :fs))
 (local json (require :json))
+(local appdirs (require :appdirs))
 
 (local tests [])
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "workflow-store"))
+(var current-temp-user-data-dir nil)
+
+(fn temp-user-data-dir [_appname]
+  current-temp-user-data-dir)
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -27,6 +32,20 @@
       (local {: WorkflowStore} (require :workflows/store))
       (local store (WorkflowStore {:base-dir root}))
       (f store root))))
+
+(fn with-temp-user-data-dir [f]
+  (with-temp-dir
+    (fn [root]
+      (assert appdirs "appdirs module must be available")
+      (local original appdirs.user-data-dir)
+      (set current-temp-user-data-dir root)
+      (set appdirs.user-data-dir temp-user-data-dir)
+      (local (ok result) (pcall f root))
+      (set current-temp-user-data-dir nil)
+      (set appdirs.user-data-dir original)
+      (if ok
+          result
+          (error result)))))
 
 (fn assert-file-json [path message]
   (assert (fs.exists path) message)
@@ -184,6 +203,42 @@
       (disconnect-signal-handlers records)
       (assert-signal-counts counts))))
 
+(fn workflow-store-update-definition-rejects-invalid-steps []
+  (with-temp-store
+    (fn [store root]
+      (local definition (store:create-definition {:name "metadata only"}))
+      (local (ok _) (pcall store.update-definition store definition.id {:steps [{:id "bad-step" :name "bad"}]}))
+      (assert (not ok) "update-definition should reject steps missing :code-entity-id")
+      (local persisted (assert-file-json (fs.join-path root "workflows" "definitions" (.. definition.id ".json"))
+                                         "definition should still persist"))
+      (assert (= (length persisted.steps) 0) "invalid definition step update must not persist"))))
+
+(fn workflow-store-update-step-rejects-id-changes []
+  (with-temp-store
+    (fn [store _root]
+      (local definition (store:create-definition {:name "immutable step ids"}))
+      (local first-step (store:add-step definition.id {:id "step-a" :name "first" :code-entity-id "code-first"}))
+      (local second-step (store:add-step definition.id {:id "step-b" :name "second" :code-entity-id "code-second"}))
+      (store:add-edge definition.id {:id "edge-a-b" :source-step-id first-step.id :target-step-id second-step.id})
+      (local (ok _) (pcall store.update-step store definition.id first-step.id {:id "renamed"}))
+      (assert (not ok) "update-step should reject :id changes")
+      (local updated-definition (store:get-definition definition.id))
+      (local updated-first-step (. updated-definition.steps 1))
+      (local updated-edge (. updated-definition.edges 1))
+      (assert (= updated-first-step.id first-step.id) "step id should remain unchanged")
+      (assert (= updated-edge.source-step-id first-step.id) "dependent edge source should remain valid"))))
+
+(fn assert-get-default-uses-user-data-dir [root]
+  (local {: get-default} (require :workflows/store))
+  (local store (get-default))
+  (assert (= store.base-dir root) "get-default should use appdirs user data dir when opts omit :base-dir")
+  (local definition (store:create-definition {:name "default"}))
+  (local definition-path (fs.join-path root "workflows" "definitions" (.. definition.id ".json")))
+  (assert-file-json definition-path "default store should persist below app user data dir"))
+
+(fn workflow-store-get-default-uses-app-user-data-dir []
+  (with-temp-user-data-dir assert-get-default-uses-user-data-dir))
+
 (table.insert tests {:name "workflow-store-persists-definitions-app-scoped"
                      :fn workflow-store-persists-definitions-app-scoped})
 (table.insert tests {:name "workflow-store-creates-updates-steps-and-edges"
@@ -193,7 +248,13 @@
 (table.insert tests {:name "workflow-store-persists-runs-steps-events-and-waits"
                      :fn workflow-store-persists-runs-steps-events-and-waits})
 (table.insert tests {:name "workflow-store-signals-fire"
-                     :fn workflow-store-signals-fire})
+                      :fn workflow-store-signals-fire})
+(table.insert tests {:name "workflow-store-update-definition-rejects-invalid-steps"
+                     :fn workflow-store-update-definition-rejects-invalid-steps})
+(table.insert tests {:name "workflow-store-update-step-rejects-id-changes"
+                     :fn workflow-store-update-step-rejects-id-changes})
+(table.insert tests {:name "workflow-store-get-default-uses-app-user-data-dir"
+                     :fn workflow-store-get-default-uses-app-user-data-dir})
 
 (local main
   (fn []
