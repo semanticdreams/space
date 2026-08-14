@@ -210,7 +210,7 @@
   (local state (make-canonical-sandbox-state {:panels [{:kind "alpha"} {:kind "beta"}]}))
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (ScenePanelsNode {:world-id "test-world" :world-manager manager}))
+  (local node (ScenePanelsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
   (local items (node:emit-items))
   (assert (= (length items) 2) "ScenePanelsNode should enumerate sandbox session panels")
   (assert (= (. (. items 1) 2) "alpha [1]") "first panel should come from sandbox session")
@@ -224,7 +224,7 @@
                              (make-flat-terrain-record {:id "t2"})]}))
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (TerrainsNode {:world-id "test-world" :world-manager manager}))
+  (local node (TerrainsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
   (local items (node:emit-items))
   (assert (= (length items) 2) "TerrainsNode should enumerate sandbox session terrains")
   (assert (= (. (. items 1) 2) "lava") "first terrain should come from sandbox session")
@@ -255,7 +255,7 @@
   (local state (make-canonical-sandbox-state {:lights lights-state}))
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (LightsNode {:world-id "test-world" :world-manager manager}))
+  (local node (LightsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
   (local items (node:emit-items))
   (assert (= (length items) 4) "lights node should expose four light types from sandbox session")
   (assert (= (. (. items 1) 1 :type-key) "ambient") "ambient type should enumerate")
@@ -474,6 +474,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (SkyboxNode {:world-id "test-world"
+                           :activity-id "sandbox"
                            :world-manager manager
                            :asset-path-resolver (fn [path] (.. (assert (os.getenv "SPACE_ASSETS_PATH") "SPACE_ASSETS_PATH required") "/" path))}))
   (node:apply-values {:enabled? false
@@ -527,6 +528,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (BackgroundNode {:world-id "test-world"
+                               :activity-id "sandbox"
                                :world-manager manager}))
   (node:apply-values {:color [0.4 0.5 0.6]})
   (local sandbox-scene state.activity.sessions.sandbox.scene)
