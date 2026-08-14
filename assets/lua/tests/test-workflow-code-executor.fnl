@@ -10,6 +10,13 @@
   (assert (string.find outcome.error.message needle 1 true)
           (.. "expected error message to include " needle ", got " outcome.error.message)))
 
+(fn assert-failed-kind [outcome expected-kind]
+  (assert (= outcome.status :failed) "outcome should fail")
+  (assert outcome.error "failed outcome should include error")
+  (assert outcome.error.data "failed outcome should include structured data")
+  (assert (= outcome.error.data.kind expected-kind)
+          (.. "expected error kind " (tostring expected-kind) ", got " (tostring outcome.error.data.kind))))
+
 (fn make-code-store [entities]
   {:get-entity (fn [_self id]
                  (. entities id))})
@@ -43,10 +50,11 @@
   (assert (string.find nil-err "step-2" 1 true) "nil outcome error should include step id")
   (local invalids [{:status :unknown}
                    {:status :failed :error {}}
-                   {:status :waiting}
-                   {:status :retry :delay-ms -1}
-                   {:status :succeeded :next-step-ids ["ok" 3]}
-                   {:status :cancelled :next-step-ids ["not-allowed"]}])
+                    {:status :waiting}
+                    {:status :retry :delay-ms -1}
+                    {:status :succeeded :next-step-ids ["ok" 3]}
+                    {:status :succeeded :next-step-ids {:bad 3}}
+                    {:status :cancelled :next-step-ids ["not-allowed"]}])
   (each [_ outcome (ipairs invalids)]
     (local (ok err) (pcall Outcomes.validate-outcome outcome ctx))
     (assert (not ok) "invalid outcome should raise")
@@ -63,8 +71,16 @@
           (= status :skipped)
           {:status status :reason "expected" :next-step-ids ["step-3"]}
           {:status status}))
-    (local normalized (Outcomes.validate-outcome outcome ctx))
-    (assert (= normalized.status status) "allowed status should validate")))
+     (local normalized (Outcomes.validate-outcome outcome ctx))
+     (assert (= normalized.status status) "allowed status should validate")))
+
+(fn sparse-next-step-ids-fail-loudly []
+  (local ctx (Outcomes.make-context {:run-id "run-sparse" :step-id "step-sparse"}))
+  (local sparse [])
+  (tset sparse 2 3)
+  (local (ok err) (pcall Outcomes.validate-outcome {:status :skipped :next-step-ids sparse} ctx))
+  (assert (not ok) "sparse non-string next-step-ids should raise")
+  (assert (string.find err "next-step-ids" 1 true) "sparse error should describe next-step-ids"))
 
 (fn executor-evaluates-code-entity-factory-with-full-app-access []
   (set app.workflow_executor_test_value "global-visible")
@@ -85,14 +101,43 @@
 
 (fn executor-rejects-missing-code-entity []
   (local executor (make-executor {"lua-code" {:id "lua-code" :language "lua" :source "return {}"}}))
-  (assert-failed-message (executor:run-step {:id "def-1"} {:id "step-1" :code-entity-id "missing"} {} {}) "missing code entity")
-  (assert-failed-message (executor:run-step {:id "def-1"} {:id "step-2" :code-entity-id "lua-code"} {} {}) "unsupported code entity language"))
+  (local missing (executor:run-step {:id "def-1"} {:id "step-1" :code-entity-id "missing"} {} {}))
+  (assert-failed-message missing "missing code entity")
+  (assert-failed-kind missing :missing-code-entity)
+  (local unsupported (executor:run-step {:id "def-1"} {:id "step-2" :code-entity-id "lua-code"} {} {}))
+  (assert-failed-message unsupported "unsupported code entity language")
+  (assert-failed-kind unsupported :unsupported-language))
+
+(fn executor-returns-structured-step-object-errors []
+  (local executor (make-executor {"bad-eval" {:id "bad-eval" :language "fnl" :source "("}
+                                  "bad-factory-return" {:id "bad-factory-return" :language "fnl" :source "(fn [opts] 3)"}
+                                  "factory-error" {:id "factory-error" :language "fnl" :source "(fn [opts] (error {:reason :factory-boom}))"}}))
+  (assert-failed-kind (executor:run-step {:id "def-1"} {:id "step-3" :code-entity-id "bad-eval"} {} {}) :evaluation-failed)
+  (assert-failed-kind (executor:run-step {:id "def-1"} {:id "step-4" :code-entity-id "bad-factory-return"} {} {}) :bad-factory-return)
+  (local factory-error (executor:run-step {:id "def-1"} {:id "step-5" :code-entity-id "factory-error"} {} {}))
+  (assert-failed-kind factory-error :factory-error)
+  (assert (= (type factory-error.error.message) "string") "factory error message should be a string"))
+
+(fn executor-normalizes-non-string-method-errors []
+  (local source "{:run (fn [self ctx input state] (error {:reason :method-boom}))}")
+  (local executor (make-executor {"code-1" {:id "code-1" :language "fnl" :source source}}))
+  (local outcome (executor:run-step {:id "def-1"} {:id "step-1" :code-entity-id "code-1"} {} {}))
+  (assert-failed-kind outcome :method-error)
+  (assert (= (type outcome.error.message) "string") "method error message should be a string"))
 
 (fn ctx-helper-does-not-complete-without-returned-outcome []
   (local source "{:run (fn [self ctx input state] (ctx:succeed {:ignored true}) nil)}")
   (local executor (make-executor {"code-1" {:id "code-1" :language "fnl" :source source}}))
   (local outcome (executor:run-step {:id "def-1"} {:id "step-1" :code-entity-id "code-1"} {} {}))
-  (assert-failed-message outcome "invalid outcome"))
+  (assert-failed-message outcome "invalid outcome")
+  (assert-failed-kind outcome :invalid-outcome))
+
+(fn executor-reports-missing-method-kind []
+  (local source "{:run (fn [self ctx input state] (ctx:succeed {:ok true}))}")
+  (local executor (make-executor {"code-1" {:id "code-1" :language "fnl" :source source}}))
+  (local outcome (executor:resume-step {:id "def-1"} {:id "step-1" :code-entity-id "code-1"} {} {}))
+  (assert-failed-message outcome "missing required method")
+  (assert-failed-kind outcome :missing-method))
 
 (fn executor-adapts-resume-and-cancel-methods []
   (local source "{:run (fn [self ctx input state] (ctx:wait :signal {:id input.id} state)) :resume (fn [self ctx wait-result state] (ctx:succeed {:resumed wait-result.value :state state.token})) :cancel (fn [self ctx state] (ctx:cancelled {:state state.token}))}")
@@ -113,13 +158,21 @@
 (table.insert tests {:name "outcome helpers return strict tables"
                      :fn outcome-helpers-return-strict-tables})
 (table.insert tests {:name "invalid outcomes fail loudly"
-                     :fn invalid-outcomes-fail-loudly})
+                      :fn invalid-outcomes-fail-loudly})
+(table.insert tests {:name "sparse next step ids fail loudly"
+                     :fn sparse-next-step-ids-fail-loudly})
 (table.insert tests {:name "executor evaluates code entity factory with full app access"
                      :fn executor-evaluates-code-entity-factory-with-full-app-access})
 (table.insert tests {:name "executor rejects missing code entity"
-                     :fn executor-rejects-missing-code-entity})
+                      :fn executor-rejects-missing-code-entity})
+(table.insert tests {:name "executor returns structured step object errors"
+                     :fn executor-returns-structured-step-object-errors})
+(table.insert tests {:name "executor normalizes non-string method errors"
+                     :fn executor-normalizes-non-string-method-errors})
 (table.insert tests {:name "ctx helper does not complete without returned outcome"
-                     :fn ctx-helper-does-not-complete-without-returned-outcome})
+                      :fn ctx-helper-does-not-complete-without-returned-outcome})
+(table.insert tests {:name "executor reports missing method kind"
+                     :fn executor-reports-missing-method-kind})
 (table.insert tests {:name "executor adapts resume and cancel methods"
                      :fn executor-adapts-resume-and-cancel-methods})
 

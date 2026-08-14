@@ -33,7 +33,7 @@
       (fail-validation "workflow outcome next-step-ids are only allowed for succeeded or skipped statuses" context))
     (when (not (table? outcome.next-step-ids))
       (fail-validation "workflow outcome next-step-ids must be a table of strings" context))
-    (each [_ step-id (ipairs outcome.next-step-ids)]
+    (each [_ step-id (pairs outcome.next-step-ids)]
       (when (not (= (type step-id) "string"))
         (fail-validation "workflow outcome next-step-ids must be a table of strings" context)))))
 
