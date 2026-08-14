@@ -175,12 +175,6 @@
                     edge))))
 
     (fn remove-edge [_self edge-or-key opts]
-        (local options
-            (if (not (= opts nil))
-                opts
-                (= (type edge-or-key) :table)
-                edge-or-key._opts
-                nil))
         (local edge
             (if (= (type edge-or-key) :string)
                 (. edge-map edge-or-key)
@@ -188,16 +182,16 @@
         (if (not edge)
             nil
             (do
-                (local actual-options (if (= options nil) edge._opts options))
-                (local key (edge-key edge actual-options))
+                (local identity-options edge._opts)
+                (local key (edge-key edge identity-options))
                 (for [i (length edges) 1 -1]
                     (when (= (. edges i) edge)
                         (table.remove edges i)))
                 (set (. edge-map key) nil)
                 (set (. derived-edge-keys key) nil)
-                (edge-removed:emit {:edge edge :opts actual-options})
+                (edge-removed:emit {:edge edge :opts opts})
                 (when (and edge.source edge.source.remove-domain-edge)
-                    (edge.source:remove-domain-edge edge actual-options))
+                    (edge.source:remove-domain-edge edge identity-options))
                 edge)))
 
     (fn remove-nodes [_self nodes-to-remove opts]

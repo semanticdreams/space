@@ -235,6 +235,27 @@
 (fn graph-remove-edge-deletes-canonical-workflow-edge []
   (with-runtime graph-remove-edge-deletes-canonical-workflow-edge-case))
 
+(fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "remove-derived-map"}))
+  (local step-a (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (local step-b (map:load-by-key (.. "workflow-step:" definition.id ":step-b")))
+  (local edge (map:add-edge (GraphEdge {:source step-a :target step-b})))
+  (local workflow-edge-id edge._opts.from-workflow-edge)
+  (local derived-key (.. step-a.key "->" step-b.key "#link:" workflow-edge-id))
+  (assert (. map.edge-map derived-key) "workflow-derived edge should be indexed by derived workflow key before removal")
+  (local removed (map:remove-edge edge {:cause "user"}))
+  (assert (= removed edge) "GraphMap.remove-edge should return the displayed workflow edge")
+  (assert (= (workflow-edge-count runtime definition.id) 0)
+          "removing with caller opts should delete canonical workflow edge using edge identity metadata")
+  (assert (= (. map.edge-map derived-key) nil)
+          "removing with caller opts should clear the derived workflow edge-map entry")
+  (assert (= (map:edge-count) 0) "removing with caller opts should remove displayed workflow edge")
+  (map:drop))
+
+(fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes []
+  (with-runtime graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes-case))
+
 (fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge-case [runtime]
   (local definition (seed-definition-for-authoring runtime))
   (local map (GraphMap.GraphMap {:graph runtime.graph :id "trigger-map"}))
@@ -281,9 +302,11 @@
 (table.insert tests {:name "graph map capture skips workflow derived edges"
                      :fn graph-map-capture-skips-workflow-derived-edges})
 (table.insert tests {:name "graph remove edge deletes canonical workflow edge"
-                     :fn graph-remove-edge-deletes-canonical-workflow-edge})
+                      :fn graph-remove-edge-deletes-canonical-workflow-edge})
+(table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes"
+                     :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
 (table.insert tests {:name "trigger definition node creates visible run node and definition run edge"
-                     :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
+                      :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
 (table.insert tests {:name "trigger context captures graph map and selected node keys"
                      :fn trigger-context-captures-graph-map-and-selected-node-keys})
 
