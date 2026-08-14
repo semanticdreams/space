@@ -81,6 +81,7 @@
      :tests.test-camera-animation
      :tests.test-sandbox-camera-controls
       :tests.test-graph-activity-slots
+     :tests.test-drawing-hit-test
      :tests.test-drawing-activity-slots
      :tests.test-board
      :tests.test-board-activity-string-entities

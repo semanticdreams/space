@@ -8,14 +8,14 @@
             (or (. source 3) source.z 1)
             (or (. source 4) source.w 1)))
 
-(fn screen-pos->canvas-point [canvas payload]
-  (when (and canvas canvas.screen-pos-ray payload)
-    (local ray (canvas:screen-pos-ray payload))
-    (when (and ray ray.origin ray.direction)
-      (local dz (or ray.direction.z 0))
-      (when (not (= dz 0))
-        (local t (/ (- 0 ray.origin.z) dz))
-        (+ ray.origin (* ray.direction t))))))
+(fn screen-pos->canvas-point [_canvas payload]
+  (assert payload "Drawing hit-test requires a pointer payload for canvas ray conversion")
+  (assert (and app app.presentation-screen-pos-ray) "Drawing hit-test requires app.presentation-screen-pos-ray for canvas ray conversion")
+  (local ray (app.presentation-screen-pos-ray payload {:surface :canvas}))
+  (assert (and ray ray.origin ray.direction ray.direction.z) "Drawing hit-test canvas presentation ray requires origin and direction")
+  (when (not (= ray.direction.z 0))
+    (local t (/ (- 0 ray.origin.z) ray.direction.z))
+    (+ ray.origin (* ray.direction t))))
 
 (fn constrain-line [start finish]
   (local delta (- finish start))
