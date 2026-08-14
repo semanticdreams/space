@@ -1,6 +1,7 @@
 (local fs (require :fs))
 (local GraphMap (require :graph/map))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local Templates (require :workflows/templates))
 
 (local _main (require :main))
 
@@ -458,6 +459,42 @@
 (fn graph-code-entity-edits-feed-cached-workflow-executor []
   (with-temp-dir graph-code-entity-edits-feed-cached-workflow-executor-case))
 
+(fn template-helper-creates-durable-workflow-step-and-code-case [dir]
+  (local {:WorkflowStore WorkflowStore} (require :workflows/store))
+  (local {:WorkflowCodeExecutor WorkflowCodeExecutor} (require :workflows/code-executor))
+  (local {:WorkflowRunner WorkflowRunner} (require :workflows/runner))
+  (local CodeEntityStore (require :entities/code))
+  (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-template")}))
+  (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-template")}))
+  (local result (Templates.create-template-workflow workflow-store code-store {:name "Created from graph"}))
+  (assert result.definition "template helper should return a workflow definition")
+  (assert result.step "template helper should return a workflow step")
+  (assert result.code-entity "template helper should return a code entity")
+  (assert (workflow-store:get-definition result.definition.id) "created workflow definition should be durable")
+  (local reloaded-definition (workflow-store:get-definition result.definition.id))
+  (assert (= (length reloaded-definition.steps) 1) "created workflow should have one starter step")
+  (local reloaded-step (. reloaded-definition.steps 1))
+  (assert (= reloaded-step.code-entity-id result.code-entity.id)
+          "starter step should reference the created code entity")
+  (assert (= reloaded-step.source nil) "starter step should not embed source")
+  (local reloaded-code (code-store:get-entity result.code-entity.id))
+  (assert reloaded-code "created code entity should be durable")
+  (assert (= reloaded-code.language "fnl") "template code entity should be Fennel")
+  (assert (string.find reloaded-code.source "workflow step completed")
+          "template source should include completion message")
+  (local executor (WorkflowCodeExecutor {:code-store code-store :app app}))
+  (local runner (WorkflowRunner {:store workflow-store :executor executor :app app}))
+  (local run (runner:start-run result.definition.id {:echo "input"} {:source :test}))
+  (local finished (runner:tick-run run.id {:max-steps 5}))
+  (assert (= finished.status :succeeded) "template workflow should run successfully")
+  (local output (. finished.output result.step.id))
+  (assert output "template run should include starter step output")
+  (assert (= output.message "workflow step completed") "template output should include completion message")
+  (assert (= output.input.echo "input") "template output should echo workflow input"))
+
+(fn template-helper-creates-durable-workflow-step-and-code []
+  (with-temp-dir template-helper-creates-durable-workflow-step-and-code-case))
+
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -492,6 +529,8 @@
                       :fn trigger-context-captures-graph-map-and-selected-node-keys})
 (table.insert tests {:name "graph code entity edits feed cached workflow executor"
                      :fn graph-code-entity-edits-feed-cached-workflow-executor})
+(table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code"
+                     :fn template-helper-creates-durable-workflow-step-and-code})
 
 (local main
   (fn []
