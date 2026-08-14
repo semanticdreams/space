@@ -141,6 +141,23 @@
 (fn runner-resume-reactivates-waiting-run-for-downstream-tick []
   (with-temp-store runner-resume-reactivates-waiting-run-for-downstream-tick-case))
 
+(fn runner-resume-cancelled-outcome-finishes-run-case [store]
+      (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}]))
+      (local (runner executor) (make-runner store {"ask" {:status :waiting :wait-kind :human-input :request {:prompt "continue?"}}
+                                                   "ask:resume" {:status :cancelled}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (runner:resume-step run.id "ask" {:answer "stop"})
+      (local refreshed (store:get-run run.id))
+      (assert (= refreshed.status :cancelled) "cancelled resume outcome should finish run as cancelled")
+      (assert (= (. (store:get-run-step run.id "ask") :status) :cancelled) "cancelled resume outcome should cancel waiting step")
+      (local ticked (runner:tick {:max-steps 1}))
+      (assert (= (length ticked) 0) "cancelled resume outcome should leave run out of active app ticks")
+      (assert (= (length executor.calls) 2) "cancelled resume outcome should not execute again after app tick"))
+
+(fn runner-resume-cancelled-outcome-finishes-run []
+  (with-temp-store runner-resume-cancelled-outcome-finishes-run-case))
+
 (fn retry-outcome [calls _input state]
   (if (= (length calls) 1)
       {:status :retry :delay-ms 0 :state {:token "again"}}
@@ -332,6 +349,7 @@
 (table.insert tests {:name "runner-fails-step-on-invalid-contract" :fn runner-fails-step-on-invalid-contract})
 (table.insert tests {:name "runner-waits-and-resumes-human-input" :fn runner-waits-and-resumes-human-input})
 (table.insert tests {:name "runner-resume-reactivates-waiting-run-for-downstream-tick" :fn runner-resume-reactivates-waiting-run-for-downstream-tick})
+(table.insert tests {:name "runner-resume-cancelled-outcome-finishes-run" :fn runner-resume-cancelled-outcome-finishes-run})
 (table.insert tests {:name "runner-retries-with-attempt-state" :fn runner-retries-with-attempt-state})
 (table.insert tests {:name "runner-cancels-run" :fn runner-cancels-run})
 (table.insert tests {:name "runner-branches-from-next-step-ids" :fn runner-branches-from-next-step-ids})

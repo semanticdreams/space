@@ -251,6 +251,10 @@
       (do
         (append-event self fresh.id :run-failed {})
         (update-run-status self fresh :failed {:finished-at (now)}))
+      (any-status? fresh :cancelled)
+      (do
+        (append-event self fresh.id :run-cancelled {})
+        (update-run-status self fresh :cancelled {:finished-at (now)}))
       (any-status? fresh :waiting)
       (do
         (append-event self fresh.id :run-waiting {})
@@ -358,6 +362,7 @@
 (fn no-ready-failure? [run ready-count]
   (and (= ready-count 0)
        (unresolved-pending? run)
+       (not (any-status? run :cancelled))
        (not (any-status? run :waiting))))
 
 (fn fail-stalled-run [self run]
