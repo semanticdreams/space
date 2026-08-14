@@ -98,6 +98,19 @@
   (local (ok _result) (pcall builder))
   (assert (not ok) message))
 
+(fn assert-missing-build-context-with-fallbacks [Preview node message]
+  (local fallback-ctx (make-preview-ctx))
+  (local previous-graph-ctx (and node node.graph node.graph.ctx))
+  (when (and node node.graph)
+    (set node.graph.ctx fallback-ctx))
+  (local builder (Preview node {:node node :ctx fallback-ctx}))
+  (local (ok result) (pcall builder))
+  (when (and node node.graph)
+    (set node.graph.ctx previous-graph-ctx))
+  (assert (not ok) message)
+  (assert (string.find (tostring result) "requires a build context")
+          "missing build context failure should mention build context"))
+
 (fn seed-definition-with-run [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
   (local code-b (runtime.code-store:create-entity {:id "code-b" :name "B" :source "(+ 2 2)"}))
@@ -202,6 +215,9 @@
   (local node (graph:load-by-key (.. "workflow-definition:" seeded.definition.id)))
   (local (loaded? Preview) (pcall require :graph/view/previews/workflow-definition))
   (assert loaded? "workflow definition preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "definition preview should not fall back to opts.ctx or graph.ctx")
   (local builder (Preview node {:node node}))
   (assert-missing-build-context builder "definition preview should assert on missing build context")
   (local widget (builder (make-preview-ctx)))
@@ -222,6 +238,9 @@
   (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
   (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run))
   (assert loaded? "workflow run preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "run preview should not fall back to opts.ctx or graph.ctx")
   (local builder (Preview node {:node node}))
   (assert-missing-build-context builder "run preview should assert on missing build context")
   (local widget (builder (make-preview-ctx)))
@@ -229,6 +248,8 @@
   (assert (= widget.toggle-button-label "Show Details") "collapsed run preview should show Show Details")
   (widget.toggle-button:on-click {:source :test})
   (assert node.details-expanded? "toggle button should expand run details")
+  (assert (= widget.toggle-button-label "Hide Details")
+          "same run preview widget should update to Hide Details after expanding")
   (widget:drop)
   (local expanded-widget (builder (make-preview-ctx)))
   (assert (= expanded-widget.toggle-button-label "Hide Details") "expanded run preview should show Hide Details")

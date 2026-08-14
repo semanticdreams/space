@@ -5,13 +5,9 @@
 (fn resolve-target [node options]
   (if node node (assert options.node "WorkflowDefinitionNodePreview requires node")))
 
-(fn resolve-build-ctx [ctx options target]
+(fn resolve-build-ctx [ctx]
   (if ctx
       ctx
-      options.ctx
-      options.ctx
-      (and target target.graph target.graph.ctx)
-      target.graph.ctx
       (error "WorkflowDefinitionNodePreview requires a build context")))
 
 (fn existing-widget [widget]
@@ -57,6 +53,6 @@
   (local options (if opts opts {}))
   (local target (resolve-target node options))
   (fn build [ctx]
-    (build-content target (resolve-build-ctx ctx options target))))
+    (build-content target (resolve-build-ctx ctx))))
 
 WorkflowDefinitionNodePreview

@@ -5,13 +5,9 @@
 (fn resolve-target [node options]
   (if node node (assert options.node "WorkflowRunNodePreview requires node")))
 
-(fn resolve-build-ctx [ctx options target]
+(fn resolve-build-ctx [ctx]
   (if ctx
       ctx
-      options.ctx
-      options.ctx
-      (and target target.graph target.graph.ctx)
-      target.graph.ctx
       (error "WorkflowRunNodePreview requires a build context")))
 
 (fn existing-widget [widget]
@@ -33,22 +29,32 @@
           "Workflow run preview requires toggle-details")
   (target:toggle-details))
 
-(fn toggle-click-handler [target]
+(fn update-toggle-label [view target]
+  (local label (toggle-label target))
+  (set view.toggle-button-label label)
+  (when (and view.toggle-button view.toggle-button.text view.toggle-button.text.set-text)
+    (view.toggle-button.text:set-text label))
+  label)
+
+(fn toggle-click-handler [target view]
   (fn [_button _event]
-    (toggle-from-preview target)))
+    (toggle-from-preview target)
+    (update-toggle-label view target)))
 
 (fn build-content [target build-ctx]
   (local view {})
   (local label (if (and target target.label) target.label target.key target.key "Workflow run"))
-  (local button-label (toggle-label target))
   (local title ((Text {:text (tostring label)}) build-ctx))
   (local status-text ((Text {:text (.. "Status: " (tostring (current-status target)))}) build-ctx))
+  (local button-label (update-toggle-label view target))
   (local toggle-button
     ((Button {:text button-label
               :variant :ghost
               :padding [0.25 0.2]
-              :on-click (toggle-click-handler target)})
+              :on-click (toggle-click-handler target view)})
      build-ctx))
+  (set view.toggle-button toggle-button)
+  (update-toggle-label view target)
   (local flex
     ((Flex {:axis 2
             :xalign :stretch
@@ -60,8 +66,6 @@
   (set view.layout flex.layout)
   (set view.title title)
   (set view.status-text status-text)
-  (set view.toggle-button toggle-button)
-  (set view.toggle-button-label button-label)
   (set view.drop
        (fn [_self]
          (title:drop)
@@ -74,6 +78,6 @@
   (local options (if opts opts {}))
   (local target (resolve-target node options))
   (fn build [ctx]
-    (build-content target (resolve-build-ctx ctx options target))))
+    (build-content target (resolve-build-ctx ctx))))
 
 WorkflowRunNodePreview
