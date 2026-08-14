@@ -383,6 +383,11 @@
                         nil))))))
       nil))
 
+(fn legacy-activity-terrain-graph-key? [world key]
+  "Return true for same-world legacy terrain graph keys that GraphMapManager migrates."
+  (local parsed (parse-terrain-persistence-key key))
+  (and parsed (= parsed.world-id world.id)))
+
 (fn invalid-terrain-persistence-keys [world state transient-map-node-keys]
   (local payload (or state {}))
   (local graph-state (or payload.graph {}))
@@ -422,17 +427,21 @@
     (local map-id (and map-state map-state.id))
     (each [_ key (ipairs (or map-state.nodes []))]
       (when (not (transient-map-node-key? map-id key))
-        (validate-key! key)))
+        (when (not (legacy-activity-terrain-graph-key? world key))
+          (validate-key! key))))
     (each [_ edge (ipairs (or map-state.edges []))]
-      (validate-key! edge.source)
-      (validate-key! edge.target)))
+      (when (not (legacy-activity-terrain-graph-key? world edge.source))
+        (validate-key! edge.source))
+      (when (not (legacy-activity-terrain-graph-key? world edge.target))
+        (validate-key! edge.target))))
   ;; Validate all maps when in new format; otherwise validate active/resolved core
   (if (= (type graph-state.maps) :table)
       (each [_ m (ipairs graph-state.maps)]
         (validate-map-entries m))
       (validate-map-entries (resolve-graph-core-state graph-state)))
   (each [_ key (ipairs (or (and graph-state.views graph-state.views.open-node-keys) []))]
-    (validate-key! key))
+    (when (not (legacy-activity-terrain-graph-key? world key))
+      (validate-key! key)))
   (each [_ panel (ipairs (or (and payload.canvas payload.canvas.panels) []))]
     (validate-panel-node-key! panel "graph-node-view"))
   (each [_ panel (ipairs (or (and payload.hud payload.hud.panels) []))]
