@@ -51,6 +51,12 @@
 (local TerrainEditors (require :graph/terrain-editors))
 (local TerrainTools (require :graph/terrain-tools))
  (local WorldData (require :graph/world-data))
+(local {:register-loader register-workflows-loader} (require :graph/nodes/workflows))
+(local {:register-loader register-workflow-definition-loader} (require :graph/nodes/workflow-definition))
+(local {:register-loader register-workflow-step-loader} (require :graph/nodes/workflow-step))
+(local {:register-loader register-workflow-run-loader} (require :graph/nodes/workflow-run))
+(local {:register-loader register-workflow-run-step-loader} (require :graph/nodes/workflow-run-step))
+(local {:register-loader register-workflow-run-event-loader} (require :graph/nodes/workflow-run-event))
 
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
@@ -65,8 +71,9 @@
 (local M {})
 
 (fn split-key-parts [text]
+  (assert text "split-key-parts requires text")
   (local parts [])
-  (each [part (string.gmatch (or text "") "[^:]+")]
+  (each [part (string.gmatch text "[^:]+")]
     (table.insert parts part))
   parts)
 
@@ -133,7 +140,7 @@
   (local options (or opts {}))
 
   (local string-store (or options.string-store options.string_store (StringEntityStore.get-default)))
-  (local code-store (or options.code-store (CodeEntityStore.get-default)))
+  (local code-store (or options.code-store (and app app.code-store) (CodeEntityStore.get-default)))
   (local list-store (or options.list-store options.list_store (ListEntityStore.get-default)))
   (local link-store (or options.link-store options.link_store (LinkEntityStore.get-default)))
   (local identity-store (or options.identity-store (IdentityStore.get-default)))
@@ -143,9 +150,19 @@
   (local world-manager (or options.world-manager (and app app.world-manager)))
   (local asset-path-resolver options.asset-path-resolver)
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
+  (local workflow-store options.workflow-store)
+  (local workflow-runner options.workflow-runner)
 
   (register-string-entity-loader graph {:store string-store})
   (register-code-entity-loader graph {:store code-store})
+  (when workflow-store
+    (register-workflows-loader graph {:store workflow-store :runner workflow-runner})
+    (when workflow-runner
+      (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner})
+      (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
+    (register-workflow-step-loader graph {:store workflow-store})
+    (register-workflow-run-step-loader graph {:store workflow-store})
+    (register-workflow-run-event-loader graph {:store workflow-store}))
   (register-list-entity-loader graph {:store list-store
                                       :identity-store identity-store})
   (register-link-entity-loader graph {:store link-store})

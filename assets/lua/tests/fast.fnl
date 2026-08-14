@@ -153,6 +153,10 @@
     :tests.test-status-badge
     :tests.test-cgltf
     :tests.test-graph-core
+    :tests.test-workflow-store
+    :tests.test-workflow-code-executor
+    :tests.test-workflow-runner
+    :tests.test-workflow-graph
     :tests.test-graph-map
     :tests.test-graph-map-manager
     :tests.test-graph-map-sidebar

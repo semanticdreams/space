@@ -988,6 +988,15 @@
             "HomeWorld requires :home-world-canvas-runtime to return a table")
     module)
 
+  (fn register-runtime-graph-loaders [graph world]
+    (GraphKeyLoaders.register graph
+                              {:world-manager (assert world.graph-world-manager
+                                                      (.. "HomeWorld " world.id " requires :graph-world-manager"))
+                                :asset-path-resolver (assert world.asset-path-resolver
+                                                            (.. "HomeWorld " world.id " requires :asset-path-resolver"))
+                                :code-store app.code-store :workflow-store app.workflow-store
+                                :workflow-runner app.workflow-runner}))
+
   (fn create-runtime [world ctx]
     ;; Create a default scene surface camera.  Activity slots (e.g. sandbox)
     ;; will install their own cameras via slot:set-camera and the scene's
@@ -996,11 +1005,7 @@
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
     (local graph (Graph {:with-start false :entity-events? false}))
-    (GraphKeyLoaders.register graph
-                              {:world-manager (assert world.graph-world-manager
-                                                      (.. "HomeWorld " world.id " requires :graph-world-manager"))
-                               :asset-path-resolver (assert world.asset-path-resolver
-                                                           (.. "HomeWorld " world.id " requires :asset-path-resolver"))})
+    (register-runtime-graph-loaders graph world)
     (local graph-map-manager (GraphMapManager.GraphMapManager
                                {:graph graph
                                 :state (or world.state.graph {})
