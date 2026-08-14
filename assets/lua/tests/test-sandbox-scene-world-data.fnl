@@ -344,6 +344,62 @@
   (assert (string.find (tostring background-err) "missing-activity" 1 true)
           "background failure should include requested id"))
 
+(fn test-active-runtime-missing-activity-fails-before-runtime-use []
+  "Active runtime data must not bypass missing activity session validation."
+  (local WorldData (require :graph/world-data))
+  (var removed? false)
+  (local mock-scene
+    {:active-activity-slot-id "missing-activity"
+     :scene-children [{:element {:id "runtime-panel"}
+                       :persistence {:kind "runtime-panel"}}]
+     :scene-terrains [{:record {:id "runtime-terrain"
+                                :kind "heightfield-terrain"
+                                :name "runtime terrain"}}]
+     :remove-panel-child (fn [_self _element]
+                           (set removed? true)
+                           true)})
+  (local runtime {:scene mock-scene})
+  (local state (make-activity-aware-state))
+  (local entry (make-world-entry {:id "test-world" :state state :runtime runtime :active? true}))
+  (local manager (make-world-manager {:id "test-world" :entry entry :active-world-id "test-world"}))
+  (local (panels-ok panels-err)
+    (pcall WorldData.list-scene-panels manager "test-world" "missing-activity"))
+  (assert (not panels-ok) "list-scene-panels should fail before reading runtime data")
+  (assert (string.find (tostring panels-err) "missing-activity" 1 true)
+          "panel failure should include missing activity id")
+  (local (terrains-ok terrains-err)
+    (pcall WorldData.list-terrains manager "test-world" "missing-activity"))
+  (assert (not terrains-ok) "list-terrains should fail before reading runtime data")
+  (assert (string.find (tostring terrains-err) "missing-activity" 1 true)
+          "terrain failure should include missing activity id")
+  (local (remove-ok remove-err)
+    (pcall WorldData.remove-scene-panel manager "test-world" "missing-activity" 1))
+  (assert (not remove-ok) "remove-scene-panel should fail before runtime mutation")
+  (assert (string.find (tostring remove-err) "missing-activity" 1 true)
+          "remove failure should include missing activity id")
+  (assert (not removed?) "remove-scene-panel must not mutate runtime before validation"))
+
+(fn test-public-scene-apis-require-activity-id-before-world-lookup []
+  "Old-arity calls must fail even when the world is missing."
+  (local WorldData (require :graph/world-data))
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry (make-world-entry {:id "test-world"})}))
+  (local (background-ok background-err)
+    (pcall WorldData.get-background manager "missing-world"))
+  (assert (not background-ok) "get-background should require activity id before world lookup")
+  (assert (string.find (tostring background-err) "activity-id" 1 true)
+          "get-background failure should mention activity-id")
+  (local (skybox-ok skybox-err)
+    (pcall WorldData.get-skybox manager "missing-world"))
+  (assert (not skybox-ok) "get-skybox should require activity id before world lookup")
+  (assert (string.find (tostring skybox-err) "activity-id" 1 true)
+          "get-skybox failure should mention activity-id")
+  (local (lights-ok lights-err)
+    (pcall WorldData.list-light-types manager "missing-world"))
+  (assert (not lights-ok) "list-light-types should require activity id before world lookup")
+  (assert (string.find (tostring lights-err) "activity-id" 1 true)
+          "list-light-types failure should mention activity-id"))
+
 (fn test-graph-activity-slot-scene-not-treated-as-sandbox-world-content []
   "WorldData must not treat another activity's scene state as sandbox world content."
   (local WorldData (require :graph/world-data))
@@ -563,6 +619,10 @@
                      :fn test-explicit-graph-activity_mutations_are_isolated})
 (table.insert tests {:name "activity scene access fails on missing requested activity"
                      :fn test-activity-scene-access-fails-on-missing-requested-activity})
+(table.insert tests {:name "active runtime missing activity fails before runtime use"
+                     :fn test-active-runtime-missing-activity-fails-before-runtime-use})
+(table.insert tests {:name "public scene APIs require activity id before world lookup"
+                     :fn test-public-scene-apis-require-activity-id-before-world-lookup})
 (table.insert tests {:name "graph activity slot scene not treated as sandbox world content"
                      :fn test-graph-activity-slot-scene-not-treated-as-sandbox-world-content})
 (table.insert tests {:name "sandbox skybox reads from sandbox session"

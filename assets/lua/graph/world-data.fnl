@@ -226,6 +226,7 @@
   (or scene.terrains []))
 
 (fn scene-state-skybox [world-manager world-id activity-id]
+  (require-activity-id activity-id "WorldData.scene-state-skybox")
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
@@ -238,6 +239,7 @@
           (.. "WorldData[" world-id "] activity " activity-id " scene.skybox")))))
 
 (fn scene-state-background [world-manager world-id activity-id]
+  (require-activity-id activity-id "WorldData.scene-state-background")
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
@@ -338,6 +340,7 @@
         (refresh-sandbox-slot-if-inactive scene world-manager world-id activity-id))))
 
 (fn scene-state-lights [world-manager world-id activity-id]
+  (require-activity-id activity-id "WorldData.scene-state-lights")
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
@@ -478,6 +481,8 @@
 
 (fn list-scene-panels [world-manager world-id activity-id]
   (require-activity-id activity-id "WorldData.list-scene-panels")
+  (local activity-scene (require-activity-scene-state world-manager world-id activity-id
+                                                       (.. "WorldData.list-scene-panels[" world-id ":" activity-id "]")))
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
   (if (and scene scene.scene-children (= scene.active-activity-slot-id activity-id))
@@ -491,7 +496,7 @@
                                  :label label
                                  :source "runtime"}
                                 label]))
-      (each [idx panel (ipairs (scene-state-panels world-manager world-id activity-id))]
+      (each [idx panel (ipairs (or activity-scene.panels []))]
         (local kind (or (and panel panel.kind) "unknown"))
         (local label (.. kind " [" idx "]"))
         (table.insert produced [{:index idx
@@ -556,6 +561,8 @@
 
 (fn list-terrains [world-manager world-id activity-id]
   (require-activity-id activity-id "WorldData.list-terrains")
+  (local activity-scene (require-activity-scene-state world-manager world-id activity-id
+                                                       (.. "WorldData.list-terrains[" world-id ":" activity-id "]")))
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
   (if (and scene scene.scene-terrains (= scene.active-activity-slot-id activity-id))
@@ -572,7 +579,7 @@
                                  :label label
                                  :source "runtime"}
                                 label]))
-      (each [_ record (ipairs (terrain-state-records world-manager world-id activity-id))]
+      (each [_ record (ipairs (or activity-scene.terrains []))]
         (local terrain-id (or record.id "unknown"))
         (local kind (or record.kind "unknown"))
         (local name (and record record.name))
@@ -758,6 +765,8 @@
 
 (fn remove-scene-panel [world-manager world-id activity-id panel-index]
   (require-activity-id activity-id "WorldData.remove-scene-panel")
+  (local activity-scene (require-activity-scene-state world-manager world-id activity-id
+                                                       (.. "WorldData.remove-scene-panel[" world-id ":" activity-id "]")))
   (local scene (resolve-scene world-manager world-id))
   ;; Only use runtime scene when the requested activity is the active slot.
   (if (and scene scene.scene-children scene.remove-panel-child
@@ -774,8 +783,7 @@
               ;; Use the runtime panel-index for canonical removal so
               ;; duplicate panels with identical persistence (except
               ;; position/rotation) remove the correct entry.
-              (local canonical (require-activity-scene-state world-manager world-id activity-id
-                                                             (.. "WorldData.remove-scene-panel[" world-id ":" activity-id "]")))
+              (local canonical activity-scene)
               (when (and canonical canonical.panels)
                 (when (and (>= panel-index 1)
                            (<= panel-index (length canonical.panels)))
@@ -797,7 +805,7 @@
               true)
             false))
       (do
-        (local panels (scene-state-panels world-manager world-id activity-id))
+        (local panels (or activity-scene.panels []))
         (if (and (>= panel-index 1) (<= panel-index (length panels)))
             (do
               (table.remove panels panel-index)
