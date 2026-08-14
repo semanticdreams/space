@@ -8,20 +8,15 @@
 
 (local M {})
 
-(fn activity-node-key? [key]
-  (= (string.sub (or key "") 1 (string.len "activity-scene-panels:")) "activity-scene-panels:"))
-
 (fn scene-panel-key [self panel-index]
-  (if (activity-node-key? self.key)
-      (.. "activity-scene-panel:" self.world-id ":" self.activity-id ":" panel-index)
-      (.. "scene-panel:" self.world-id ":" panel-index)))
+  (.. "activity-scene-panel:" self.world-id ":" self.activity-id ":" panel-index))
 
 (fn M.ScenePanelsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelsNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "ScenePanelsNode requires :activity-id"))
   (local world-manager (assert options.world-manager "ScenePanelsNode requires :world-manager"))
-  (local key (or options.key (.. "scene-panels:" world-id)))
+  (local key (or options.key (.. "activity-scene-panels:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                            :label "scene panels"
                            :color (glm.vec4 0.55 0.45 0.75 1)

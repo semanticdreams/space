@@ -515,14 +515,6 @@
 
   (register-activity-hierarchy-loaders graph world-manager asset-path-resolver)
 
-  (graph:register-key-loader "scene-panels"
-    (prefix-loader "scene-panels:"
-      (fn [world-id key]
-        (when world-manager
-          (ScenePanelsNode {:world-id world-id
-                            :world-manager world-manager
-                            :key key})))))
-
   (graph:register-key-loader "hud-panels"
     (prefix-loader "hud-panels:"
       (fn [world-id key]
@@ -530,39 +522,6 @@
           (HudPanelsNode {:world-id world-id
                           :world-manager world-manager
                           :key key})))))
-
-  (graph:register-key-loader "terrains"
-    (prefix-loader "terrains:"
-      (fn [world-id key]
-        (when world-manager
-          (TerrainsNode {:world-id world-id
-                         :world-manager world-manager
-                         :key key})))))
-
-  (graph:register-key-loader "skybox"
-    (prefix-loader "skybox:"
-      (fn [world-id key]
-        (when world-manager
-          (SkyboxNode {:world-id world-id
-                       :world-manager world-manager
-                       :asset-path-resolver asset-path-resolver
-                       :key key})))))
-
-  (graph:register-key-loader "background"
-    (prefix-loader "background:"
-      (fn [world-id key]
-        (when world-manager
-          (BackgroundNode {:world-id world-id
-                           :world-manager world-manager
-                           :key key})))))
-
-  (graph:register-key-loader "lights"
-    (prefix-loader "lights:"
-      (fn [world-id key]
-        (when world-manager
-          (LightsNode {:world-id world-id
-                       :world-manager world-manager
-                       :key key})))))
 
   (graph:register-key-loader "light-type"
     (prefix-loader "light-type:"

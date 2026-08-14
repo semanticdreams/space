@@ -8,20 +8,15 @@
 
 (local M {})
 
-(fn activity-node-key? [key]
-  (= (string.sub (or key "") 1 (string.len "activity-lights:")) "activity-lights:"))
-
 (fn light-type-node-key [self type-key]
-  (if (activity-node-key? self.key)
-      (.. "activity-light-type:" self.world-id ":" self.activity-id ":" type-key)
-      (.. "light-type:" self.world-id ":" type-key)))
+  (.. "activity-light-type:" self.world-id ":" self.activity-id ":" type-key))
 
 (fn M.LightsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightsNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "LightsNode requires :activity-id"))
   (local world-manager (assert options.world-manager "LightsNode requires :world-manager"))
-  (local key (or options.key (.. "lights:" world-id)))
+  (local key (or options.key (.. "activity-lights:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label "lights"
                           :color (glm.vec4 0.8 0.72 0.3 1)

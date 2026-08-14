@@ -10,14 +10,14 @@
 (fn M.BackgroundNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "BackgroundNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "BackgroundNode requires :activity-id"))
   (local world-manager (assert options.world-manager "BackgroundNode requires :world-manager"))
   (local background-record
     (BackgroundState.normalize-complete-state
       (or options.background-record
            (WorldData.get-background world-manager world-id activity-id))
       (.. "BackgroundNode[" world-id "]")))
-  (local key (or options.key (.. "background:" world-id)))
+  (local key (or options.key (.. "activity-background:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label "background"
                           :color (glm.vec4 0.18 0.18 0.24 1)

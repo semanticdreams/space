@@ -423,8 +423,9 @@
 (fn test-scene-panels-node-has-correct-key []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
   (local node (ScenePanelsNode {:world-id "test-world-123"
+                                :activity-id "sandbox"
                                 :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "scene-panels:test-world-123") "ScenePanelsNode key should include world-id")
+  (assert (= node.key "activity-scene-panels:test-world-123:sandbox") "ScenePanelsNode key should include world-id and activity-id")
   (assert (= node.label "scene panels") "ScenePanelsNode label should be 'scene panels'")
   (node:drop))
 
@@ -439,16 +440,18 @@
 (fn test-terrains-node-has-correct-key []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
   (local node (TerrainsNode {:world-id "test-world-123"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "terrains:test-world-123") "TerrainsNode key should include world-id")
+  (assert (= node.key "activity-terrains:test-world-123:sandbox") "TerrainsNode key should include world-id and activity-id")
   (assert (= node.label "terrains") "TerrainsNode label should be 'terrains'")
   (node:drop))
 
 (fn test-lights-node-has-correct-key []
   (local {:LightsNode LightsNode} (require :graph/nodes/lights))
   (local node (LightsNode {:world-id "test-world-123"
+                           :activity-id "sandbox"
                            :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "lights:test-world-123") "LightsNode key should include world-id")
+  (assert (= node.key "activity-lights:test-world-123:sandbox") "LightsNode key should include world-id and activity-id")
   (assert (= node.label "lights") "LightsNode label should be 'lights'")
   (node:drop))
 
@@ -592,6 +595,7 @@
 (fn test-scene-panels-node-has-emit-items []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
   (local node (ScenePanelsNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "ScenePanelsNode should have emit-items method")
   (local items (node:emit-items))
@@ -610,6 +614,7 @@
 (fn test-terrains-node-has-emit-items []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "TerrainsNode should have emit-items method")
   (local items (node:emit-items))
@@ -624,12 +629,57 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightsNode {:world-id "test-world"
+                           :activity-id "sandbox"
                            :world-manager (make-world-manager {:id "test-world" :entry entry})}))
   (local items (node:emit-items))
   (assert (= (length items) 4) "lights node should expose four light types")
   (assert (= (. (. items 1) 1 :type-key) "ambient") "first light type should be ambient")
   (assert (= (. (. items 2) 1 :type-key) "directional") "second light type should be directional")
   (node:drop))
+
+(fn test-scene-category-nodes-isolate-activity-state []
+  (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (local sandbox-light (make-light-record "point" {:id "sandbox-point"}))
+  (local graph-light (make-light-record "point" {:id "graph-point"}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox {:scene {:panels [{:kind "sandbox-panel"}]
+                                                        :terrains [(make-heightfield-terrain-record {:id "sandbox-terrain"})]
+                                                        :lights (make-light-state {:point [sandbox-light]})
+                                                        :skybox (make-skybox-state)
+                                                        :background (make-background-state)
+                                                        :containment {:enabled? false}}}
+                                      :graph {:scene {:panels [{:kind "graph-panel"}]
+                                                      :terrains [(make-heightfield-terrain-record {:id "graph-terrain"})]
+                                                      :lights (make-light-state {:point [graph-light]})
+                                                      :skybox (make-skybox-state)
+                                                      :background (make-background-state)
+                                                      :containment {:enabled? false}}}}}})
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry (make-world-entry {:id "test-world" :state state})}))
+  (local graph-panels (ScenePanelsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-panels (ScenePanelsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (assert (= (. (. (graph-panels:emit-items) 1) 1 :kind) "graph-panel") "graph panels node should read graph session")
+  (assert (= (. (. (sandbox-panels:emit-items) 1) 1 :kind) "sandbox-panel") "sandbox panels node should read sandbox session")
+  (local graph-terrains (TerrainsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-terrains (TerrainsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (assert (= (. (. (graph-terrains:emit-items) 1) 1 :terrain-id) "graph-terrain") "graph terrains node should read graph session")
+  (assert (= (. (. (sandbox-terrains:emit-items) 1) 1 :terrain-id) "sandbox-terrain") "sandbox terrains node should read sandbox session")
+  (local graph-lights (LightsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-lights (LightsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (local graph-light-items (graph-lights:emit-items))
+  (local sandbox-light-items (sandbox-lights:emit-items))
+  (assert (= (. (. graph-light-items 3) 1 :count) 1) "graph lights node should expose graph point count")
+  (assert (= (. (. sandbox-light-items 3) 1 :count) 1) "sandbox lights node should expose sandbox point count")
+  (graph-panels:drop)
+  (sandbox-panels:drop)
+  (graph-terrains:drop)
+  (sandbox-terrains:drop)
+  (graph-lights:drop)
+  (sandbox-lights:drop))
 
 (fn test-world-node-has-actions []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
@@ -1303,8 +1353,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "adding a heightfield terrain should return the created record")
   (assert (= (length state.scene.terrains) 1) "adding a terrain should append to world state")
@@ -1317,8 +1368,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "adding a heightfield terrain should return the created record")
   (assert (= (. added :kind) "heightfield-terrain") "heightfield add should preserve terrain kind")
@@ -1691,8 +1743,9 @@
                                   :on-save (fn [_state]
                                              (set saved-count (+ saved-count 1)))}))
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :entry entry})}))
+                                                                  :entry entry})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "active terrain add should return the created record")
   (assert added-record "active terrain add should sync into the live scene")
@@ -1705,8 +1758,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local (ok err) (pcall (fn []
                            (node:add-terrain "voxel-terrain"))))
   (assert (not ok) "unsupported terrain kinds should fail loudly")
@@ -1721,12 +1775,13 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (graph:add-node node {})
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "graph terrain add should return the created record")
-  (local terrain-key (.. "terrain:test-world:" added.id))
+  (local terrain-key (.. "activity-terrain:test-world:sandbox:" added.id))
   (local terrain-node (graph:lookup terrain-key))
   (assert terrain-node "new terrain should appear in the graph when parent node is mounted")
   (assert (= (graph:edge-count) 1) "new terrain graph attachment should add one edge from terrains node")
@@ -1925,7 +1980,7 @@
                                                   :terrains []}
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (ScenePanelsNode {:world-id "test-world" :world-manager manager}))
+  (local node (ScenePanelsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
   (local items (node:emit-items))
   (assert (= (length items) 2) "ScenePanelsNode should read inactive world scene state")
   (assert (= (. (. items 1) 2) "alpha [1]") "first scene panel label should come from world state")
@@ -2067,9 +2122,9 @@
     (fn [dir]
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
-      (local result (graph:load-by-key "scene-panels:test-world"))
+      (local result (graph:load-by-key "activity-scene-panels:test-world:sandbox"))
       (assert result "scene-panels loader should create node")
-      (assert (= result.key "scene-panels:test-world") "scene-panels key should match")
+      (assert (= result.key "activity-scene-panels:test-world:sandbox") "scene-panels key should match")
       (result:drop)
       (graph:drop))))
 
@@ -2089,9 +2144,9 @@
     (fn [dir]
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
-      (local result (graph:load-by-key "terrains:test-world"))
+      (local result (graph:load-by-key "activity-terrains:test-world:sandbox"))
       (assert result "terrains loader should create node")
-      (assert (= result.key "terrains:test-world") "terrains key should match")
+      (assert (= result.key "activity-terrains:test-world:sandbox") "terrains key should match")
       (result:drop)
       (graph:drop))))
 
@@ -2216,9 +2271,9 @@
                                                       :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local lights-node (graph:load-by-key "lights:test-world"))
-      (local type-node (graph:load-by-key "light-type:test-world:point"))
-      (local light-node (graph:load-by-key "light:test-world:point:point-1"))
+      (local lights-node (graph:load-by-key "activity-lights:test-world:sandbox"))
+      (local type-node (graph:load-by-key "activity-light-type:test-world:sandbox:point"))
+      (local light-node (graph:load-by-key "activity-light:test-world:sandbox:point:point-1"))
       (assert lights-node "lights loader should create node")
       (assert type-node "light type loader should create node")
       (assert light-node "light loader should create node")
@@ -2379,6 +2434,7 @@
 (table.insert tests {:name "hud panels node has emit items" :fn test-hud-panels-node-has-emit-items})
 (table.insert tests {:name "terrains node has emit items" :fn test-terrains-node-has-emit-items})
 (table.insert tests {:name "lights node has emit items" :fn test-lights-node-has-emit-items})
+(table.insert tests {:name "scene category nodes isolate activity state" :fn test-scene-category-nodes-isolate-activity-state})
 (table.insert tests {:name "world node has actions" :fn test-world-node-has-actions})
 (table.insert tests {:name "scene panel node has remove action" :fn test-scene-panel-node-has-remove-action})
 (table.insert tests {:name "hud panel node has remove action" :fn test-hud-panel-node-has-remove-action})

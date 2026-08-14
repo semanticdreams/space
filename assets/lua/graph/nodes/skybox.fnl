@@ -10,7 +10,7 @@
 (fn M.SkyboxNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "SkyboxNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "SkyboxNode requires :activity-id"))
   (local world-manager (assert options.world-manager "SkyboxNode requires :world-manager"))
   (local asset-path-resolver
     (assert options.asset-path-resolver
@@ -34,7 +34,7 @@
       (or options.skybox-record
            (WorldData.get-skybox world-manager world-id activity-id))
       (.. "SkyboxNode[" world-id "]")))
-  (local key (or options.key (.. "skybox:" world-id)))
+  (local key (or options.key (.. "activity-skybox:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label "skybox"
                           :color (glm.vec4 0.26 0.48 0.7 1)

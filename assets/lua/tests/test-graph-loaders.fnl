@@ -656,6 +656,8 @@
     (assert (= node.key key) (.. "loader should preserve key " key)))
   (assert (= (graph:load-by-key "activity-hud:test-world:sandbox") nil) "activity-hud loader should return nil when session has no hud")
   (assert (= (graph:load-by-key "activity-canvas:test-world:sandbox") nil) "activity-canvas loader should return nil when session has no canvas")
+  (each [_ key (ipairs ["scene-panels:test-world" "terrains:test-world" "skybox:test-world" "background:test-world" "lights:test-world"])]
+    (assert (= (graph:load-by-key key) nil) (.. "legacy scene category loader should be absent: " key)))
   (graph:drop))
 
 (table.insert tests {:name "graph has register-key-loader"

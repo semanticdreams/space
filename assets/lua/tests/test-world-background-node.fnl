@@ -156,6 +156,7 @@
                                       :active-world-id "test-world"}))
   (local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
   (local node (BackgroundNode {:world-id "test-world"
+                               :activity-id "sandbox"
                                :world-manager manager}))
   (local builder (BackgroundNodeView node))
   (local view (builder ctx))
@@ -181,8 +182,9 @@
 (fn background-node-has-correct-key []
   (local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
   (local node (BackgroundNode {:world-id "test-world-123"
+                               :activity-id "sandbox"
                                :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "background:test-world-123") "BackgroundNode key should include world-id")
+  (assert (= node.key "activity-background:test-world-123:sandbox") "BackgroundNode key should include world-id and activity-id")
   (assert (= node.label "background") "BackgroundNode label should be 'background'")
   (node:drop))
 
@@ -191,11 +193,37 @@
     (fn [_dir]
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
-      (local result (graph:load-by-key "background:test-world"))
+      (local result (graph:load-by-key "activity-background:test-world:sandbox"))
       (assert result "background loader should create node")
-      (assert (= result.key "background:test-world") "background key should match")
+      (assert (= result.key "activity-background:test-world:sandbox") "background key should match")
       (result:drop)
       (graph:drop))))
+
+(fn background-node-isolates-activity-state []
+  (local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox {:scene {:panels []
+                                                        :terrains []
+                                                        :lights (LightSystemModule.default-state)
+                                                        :skybox (make-skybox-state)
+                                                        :background (make-background-state {:color [0.1 0.2 0.3]})
+                                                        :containment {:enabled? false}}}
+                                      :graph {:scene {:panels []
+                                                      :terrains []
+                                                      :lights (LightSystemModule.default-state)
+                                                      :skybox (make-skybox-state)
+                                                      :background (make-background-state {:color [0.7 0.8 0.9]})
+                                                      :containment {:enabled? false}}}}}})
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry (make-world-entry {:id "test-world" :state state})}))
+  (local graph-node (BackgroundNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-node (BackgroundNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (assert (= (. (. (graph-node:get-record) :color) 1) 0.7) "graph background should read graph session")
+  (assert (= (. (. (sandbox-node:get-record) :color) 1) 0.1) "sandbox background should read sandbox session")
+  (graph-node:drop)
+  (sandbox-node:drop))
 
 (fn background-node-view-builds []
   (local harness (make-background-node-view-harness))
@@ -232,7 +260,9 @@
 (table.insert tests {:name "background node has correct key"
                      :fn background-node-has-correct-key})
 (table.insert tests {:name "graph key loaders load background node"
-                     :fn graph-key-loaders-load-background-node})
+                      :fn graph-key-loaders-load-background-node})
+(table.insert tests {:name "background node isolates activity state"
+                     :fn background-node-isolates-activity-state})
 (table.insert tests {:name "background node view builds"
                      :fn background-node-view-builds})
 (table.insert tests {:name "background node view applies changes"

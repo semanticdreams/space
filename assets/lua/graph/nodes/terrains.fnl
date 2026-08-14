@@ -9,20 +9,15 @@
 
 (local M {})
 
-(fn activity-node-key? [key]
-  (= (string.sub (or key "") 1 (string.len "activity-terrains:")) "activity-terrains:"))
-
 (fn terrain-node-key [self terrain-id]
-  (if (activity-node-key? self.key)
-      (.. "activity-terrain:" self.world-id ":" self.activity-id ":" terrain-id)
-      (.. "terrain:" self.world-id ":" terrain-id)))
+  (.. "activity-terrain:" self.world-id ":" self.activity-id ":" terrain-id))
 
 (fn M.TerrainsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainsNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "TerrainsNode requires :activity-id"))
   (local world-manager (assert options.world-manager "TerrainsNode requires :world-manager"))
-  (local key (or options.key (.. "terrains:" world-id)))
+  (local key (or options.key (.. "activity-terrains:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                            :label "terrains"
                            :color (glm.vec4 0.35 0.55 0.35 1)
