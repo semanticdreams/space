@@ -56,7 +56,9 @@
 
     (fn derived-edge-id [edge edge-opts]
         (or (and edge-opts edge-opts.from-link-entity)
-            (and edge edge._opts edge._opts.from-link-entity)))
+            (and edge-opts edge-opts.from-workflow-edge)
+            (and edge edge._opts edge._opts.from-link-entity)
+            (and edge edge._opts edge._opts.from-workflow-edge)))
 
     (fn edge-key [edge edge-opts]
         (local base (.. (node-id edge.source) "->" (node-id edge.target)))
@@ -139,9 +141,15 @@
             (local target (self:add-node edge.target))
             (set edge.source source)
             (set edge.target target)
-            (local key (edge-key edge edge-opts))
+            (var options edge-opts)
+            (when (and (= (derived-edge-id edge options) nil)
+                       source.author-domain-edge)
+                (local authored-options (source:author-domain-edge edge options))
+                (when authored-options
+                    (set options authored-options)))
+            (local key (edge-key edge options))
             (local existing (. edge-map key))
-            (local derived? (not (= (derived-edge-id edge edge-opts) nil)))
+            (local derived? (not (= (derived-edge-id edge options) nil)))
             (if existing
                 (do
                     (when (not (and (not (. derived-edge-keys key))
@@ -150,21 +158,41 @@
                         (if derived?
                             (set (. derived-edge-keys key) true)
                             (set (. derived-edge-keys key) nil))
-                        (set edge._opts edge-opts)
+                        (set edge._opts options)
                         (for [i 1 (length edges)]
                             (when (= (. edges i) existing)
                                 (set (. edges i) edge)))
-                        (edge-added:emit {:edge edge :opts edge-opts}))
+                        (edge-added:emit {:edge edge :opts options}))
                     edge)
                 (do
                     (table.insert edges edge)
                     (set (. edge-map key) edge)
                     (when derived?
                         (set (. derived-edge-keys key) true))
-                    (when edge-opts
-                        (set edge._opts edge-opts))
-                    (edge-added:emit {:edge edge :opts edge-opts})
+                    (when options
+                        (set edge._opts options))
+                    (edge-added:emit {:edge edge :opts options})
                     edge))))
+
+    (fn remove-edge [_self edge-or-key opts]
+        (local edge
+            (if (= (type edge-or-key) :string)
+                (. edge-map edge-or-key)
+                edge-or-key))
+        (if (not edge)
+            nil
+            (do
+                (local identity-options edge._opts)
+                (local key (edge-key edge identity-options))
+                (for [i (length edges) 1 -1]
+                    (when (= (. edges i) edge)
+                        (table.remove edges i)))
+                (set (. edge-map key) nil)
+                (set (. derived-edge-keys key) nil)
+                (edge-removed:emit {:edge edge :opts opts})
+                (when (and edge.source edge.source.remove-domain-edge)
+                    (edge.source:remove-domain-edge edge identity-options))
+                edge)))
 
     (fn remove-nodes [_self nodes-to-remove opts]
         (local options (or opts {}))
@@ -218,6 +246,7 @@
 
     (set self.add-node add-node)
     (set self.add-edge add-edge)
+    (set self.remove-edge remove-edge)
     (set self.remove-nodes remove-nodes)
 
     (set self.trigger
