@@ -417,11 +417,12 @@
   runs)
 
 (fn resume-step [self run-id step-id wait-result]
-  (local run (refresh-run self run-id))
+  (var run (refresh-run self run-id))
   (local definition (assert (self.store:get-definition run.definition-id) (.. "missing workflow definition: " run.definition-id)))
   (local step (assert (find-step definition step-id) (.. "missing workflow step: " step-id)))
   (local run-step (assert (. run.steps step-id) (.. "missing workflow run step: " step-id)))
   (assert (= run-step.status :waiting) (.. "workflow run step is not waiting: " step-id))
+  (set run (update-run-status self run :running {}))
   (step-update self run step-id {:status :running})
   (append-event self run.id :step-started {:step-id step-id :resume true})
   (local outcome (self.executor:resume-step definition step wait-result (table-or-empty run-step.state)))

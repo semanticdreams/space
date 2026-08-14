@@ -122,6 +122,25 @@
 (fn runner-waits-and-resumes-human-input []
   (with-temp-store runner-waits-and-resumes-human-input-case))
 
+(fn runner-resume-reactivates-waiting-run-for-downstream-tick-case [store]
+      (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}
+                                                {:id "continue" :code-entity-id "code-continue"}]
+                                        [{:source-step-id "ask" :target-step-id "continue"}]))
+      (local (runner executor) (make-runner store {"ask" {:status :waiting :wait-kind :human-input :request {:prompt "continue?"}}
+                                                   "ask:resume" {:status :succeeded :output {:answer "yes"}}
+                                                   "continue" {:status :succeeded :output {:done true}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (assert (= (. (store:get-run run.id) :status) :waiting) "waiting step should remove run from active app ticks")
+      (runner:resume-step run.id "ask" {:answer "yes"})
+      (runner:tick {:max-steps 1})
+      (assert (= (length executor.calls) 3) "app tick after resume should execute one downstream step")
+      (assert (= (. executor.calls 3 :step-id) "continue") "app tick after resume should execute downstream step")
+      (assert (= (. (store:get-run run.id) :status) :succeeded) "resumed workflow should complete after downstream app tick"))
+
+(fn runner-resume-reactivates-waiting-run-for-downstream-tick []
+  (with-temp-store runner-resume-reactivates-waiting-run-for-downstream-tick-case))
+
 (fn retry-outcome [calls _input state]
   (if (= (length calls) 1)
       {:status :retry :delay-ms 0 :state {:token "again"}}
@@ -312,6 +331,7 @@
 (table.insert tests {:name "runner-succeeds-linear-workflow-and-data-edge" :fn runner-succeeds-linear-workflow-and-data-edge})
 (table.insert tests {:name "runner-fails-step-on-invalid-contract" :fn runner-fails-step-on-invalid-contract})
 (table.insert tests {:name "runner-waits-and-resumes-human-input" :fn runner-waits-and-resumes-human-input})
+(table.insert tests {:name "runner-resume-reactivates-waiting-run-for-downstream-tick" :fn runner-resume-reactivates-waiting-run-for-downstream-tick})
 (table.insert tests {:name "runner-retries-with-attempt-state" :fn runner-retries-with-attempt-state})
 (table.insert tests {:name "runner-cancels-run" :fn runner-cancels-run})
 (table.insert tests {:name "runner-branches-from-next-step-ids" :fn runner-branches-from-next-step-ids})
