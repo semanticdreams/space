@@ -635,6 +635,29 @@
   (when list-node.drop (list-node:drop))
   (when root.drop (root:drop)))
 
+(fn make-activity-world-manager []
+  (local Signal (require :signal))
+  (local scene-state {:panels [] :terrains [] :lights {:ambient {:id "ambient"} :directional [] :point [] :spot []}
+                      :skybox {:enabled? true :default {:name "lake" :brightness 0.1} :by-theme {}}
+                      :background {:color [0.0 0.0 0.0]} :containment {:enabled? false}})
+  (local entry {:id "test-world" :name "Test World" :world {:state {:scene {:panels [] :terrains []} :hud {:panels []}
+                                                                   :activity {:active_id "sandbox" :sessions {:sandbox {:scene scene-state}}}}}})
+  {:changed (Signal) :list-tabs (fn [_self] [{:index 1 :id "test-world" :name "Test World"}])
+   :get-world-entry (fn [_self world-id] (if (= world-id "test-world") entry nil))})
+
+(fn activity-hierarchy-loaders-resolve-existing-session []
+  (local Graph (require :graph/init))
+  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local graph (Graph {:with-start false}))
+  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager)})
+  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox"])]
+    (local node (graph:load-by-key key))
+    (assert node (.. "loader should resolve " key))
+    (assert (= node.key key) (.. "loader should preserve key " key)))
+  (assert (= (graph:load-by-key "activity-hud:test-world:sandbox") nil) "activity-hud loader should return nil when session has no hud")
+  (assert (= (graph:load-by-key "activity-canvas:test-world:sandbox") nil) "activity-canvas loader should return nil when session has no canvas")
+  (graph:drop))
+
 (table.insert tests {:name "graph has register-key-loader"
                      :fn graph-has-register-key-loader})
 (table.insert tests {:name "graph has load-by-key"
@@ -656,7 +679,9 @@
 (table.insert tests {:name "load-by-key returns nil when loader returns nil"
                      :fn load-by-key-returns-nil-when-loader-returns-nil})
 (table.insert tests {:name "world-backed loaders return nil for missing objects"
-                     :fn world-backed-loaders-return-nil-for-missing-objects})
+                      :fn world-backed-loaders-return-nil-for-missing-objects})
+(table.insert tests {:name "activity hierarchy loaders resolve existing session"
+                     :fn activity-hierarchy-loaders-resolve-existing-session})
 (table.insert tests {:name "multiple loaders match by scheme"
                      :fn multiple-loaders-match-by-scheme})
 (table.insert tests {:name "load-by-key parses scheme before first colon"
@@ -708,6 +733,14 @@
 (table.insert tests {:name "fs loader returns nil for missing path"
                      :fn fs-loader-returns-nil-for-missing-path})
 (table.insert tests {:name "hackernews ensure-client propagates to child nodes"
-                      :fn hackernews-ensure-client-propagates-to-child-nodes})
+                       :fn hackernews-ensure-client-propagates-to-child-nodes})
 
-tests
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "graph-loaders"
+                       :tests tests})))
+
+{:name "graph-loaders"
+ :tests tests
+ :main main}

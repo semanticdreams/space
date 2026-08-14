@@ -37,6 +37,10 @@
 (local TextModuleNode (require :graph/nodes/text-module))
 (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
 (local {:WorldNode WorldNode} (require :graph/nodes/world))
+(local {:WorldActivitiesNode WorldActivitiesNode} (require :graph/nodes/world-activities))
+(local {:WorldActivityNode WorldActivityNode} (require :graph/nodes/world-activity))
+(local {:ActivitySurfacesNode ActivitySurfacesNode} (require :graph/nodes/activity-surfaces))
+(local {:ActivitySurfaceNode ActivitySurfaceNode} (require :graph/nodes/activity-surface))
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
@@ -121,11 +125,75 @@
       (when (and stat stat.exists)
         (make-node path key)))))
 
+(fn activity-surface-key [surface-key]
+  (if (= surface-key "scene") "activity-scene"
+      (= surface-key "hud") "activity-hud"
+      (= surface-key "canvas") "activity-canvas"
+      (error (.. "unsupported activity surface " (tostring surface-key)))))
+
+(fn activity-pair-loader [prefix make-node]
+  (assert (non-empty-string? prefix) "activity-pair-loader requires string prefix")
+  (assert (= (type make-node) "function") "activity-pair-loader requires make-node function")
+  (prefix-loader prefix
+    (fn [rest key]
+      (local parts (split-key-parts rest))
+      (when (= (length parts) 2)
+        (make-node (. parts 1) (. parts 2) key)))))
+
 (fn require-table-global [name]
   (when (and name (not (string.find name ":" 1 true)))
     (if (= name "_G")
         _G
         (. _G name))))
+
+(fn make-activity-surface-loader [world-manager asset-path-resolver surface-key]
+  (activity-pair-loader (.. (activity-surface-key surface-key) ":")
+    (fn [world-id activity-id key]
+      (local surface-state
+        (and world-manager
+             (WorldData.resolve-activity-surface-state world-manager world-id activity-id surface-key)))
+      (when surface-state
+        (ActivitySurfaceNode {:world-id world-id
+                              :activity-id activity-id
+                              :surface-key surface-key
+                              :world-manager world-manager
+                              :asset-path-resolver asset-path-resolver
+                              :key key})))))
+
+(fn register-activity-hierarchy-loaders [graph world-manager asset-path-resolver]
+  (graph:register-key-loader "world-activities"
+    (prefix-loader "world-activities:"
+      (fn [world-id key]
+        (local world-entry (and world-manager
+                               (WorldData.resolve-world-entry world-manager world-id)))
+        (when world-entry
+          (WorldActivitiesNode {:world-id world-id
+                                :world-manager world-manager
+                                :key key})))))
+  (graph:register-key-loader "world-activity"
+    (activity-pair-loader "world-activity:"
+      (fn [world-id activity-id key]
+        (local session (and world-manager
+                            (WorldData.resolve-activity-session world-manager world-id activity-id)))
+        (when session
+          (WorldActivityNode {:world-id world-id
+                              :activity-id activity-id
+                              :world-manager world-manager
+                              :key key})))))
+  (graph:register-key-loader "activity-surfaces"
+    (activity-pair-loader "activity-surfaces:"
+      (fn [world-id activity-id key]
+        (local session (and world-manager
+                            (WorldData.resolve-activity-session world-manager world-id activity-id)))
+        (when session
+          (ActivitySurfacesNode {:world-id world-id
+                                 :activity-id activity-id
+                                 :world-manager world-manager
+                                 :asset-path-resolver asset-path-resolver
+                                 :key key})))))
+  (each [_ surface-key (ipairs ["scene" "hud" "canvas"])]
+    (graph:register-key-loader (activity-surface-key surface-key)
+      (make-activity-surface-loader world-manager asset-path-resolver surface-key))))
 
 (fn M.register [graph opts]
   (assert graph "GraphKeyLoaders.register requires graph")
@@ -344,8 +412,10 @@
           (WorldNode {:world-id world-id
                       :world-manager world-manager
                       :asset-path-resolver asset-path-resolver
-                      :world-entry world-entry
-                      :key key})))))
+                       :world-entry world-entry
+                       :key key})))))
+
+  (register-activity-hierarchy-loaders graph world-manager asset-path-resolver)
 
   (graph:register-key-loader "scene-panels"
     (prefix-loader "scene-panels:"
@@ -419,7 +489,8 @@
           (local light-id (. parts 3))
           (local activity-id "sandbox")
           (local light-entry (and world-manager
-                                   (WorldData.find-light world-manager world-id activity-id type-key light-id)))
+                                    (WorldData.resolve-world-entry world-manager world-id)
+                                    (WorldData.find-light world-manager world-id activity-id type-key light-id)))
           (when light-entry
             (LightNode {:world-id world-id
                         :activity-id activity-id
@@ -438,7 +509,8 @@
           (local panel-index (tonumber (. parts 2)))
           (local activity-id "sandbox")
           (local panel-entry (and world-manager panel-index
-                                   (WorldData.find-scene-panel world-manager world-id activity-id panel-index)))
+                                    (WorldData.resolve-world-entry world-manager world-id)
+                                    (WorldData.find-scene-panel world-manager world-id activity-id panel-index)))
           (when panel-entry
             (ScenePanelNode {:world-id world-id
                              :activity-id activity-id
@@ -474,7 +546,8 @@
           (local terrain-id (. parts 2))
           (local activity-id "sandbox")
           (local terrain-entry (and world-manager
-                                     (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
+                                      (WorldData.resolve-world-entry world-manager world-id)
+                                      (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
           (when terrain-entry
             (TerrainNode {:world-id world-id
                           :activity-id activity-id
@@ -492,6 +565,7 @@
           (local terrain-id (. parts 2))
           (local activity-id "sandbox")
           (local terrain-entry (and world-manager
+                                     (WorldData.resolve-world-entry world-manager world-id)
                                      (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
           (when terrain-entry
 	            (TerrainEditors.create-editor-node {:world-id world-id
@@ -508,10 +582,10 @@
 	          (local world-id (. parts 1))
 	          (local terrain-id (. parts 2))
 	          (local tool-id (. parts 3))
-	          (when world-manager
-	            (local activity-id "sandbox")
-	            (local terrain-entry
-	              (WorldData.find-terrain world-manager world-id activity-id terrain-id))
+          (when (and world-manager (WorldData.resolve-world-entry world-manager world-id))
+            (local activity-id "sandbox")
+            (local terrain-entry
+              (WorldData.find-terrain world-manager world-id activity-id terrain-id))
 	            (local terrain-kind (and terrain-entry terrain-entry.kind))
 	            (when terrain-kind
 	              (TerrainTools.create-tool-node {:world-id world-id
