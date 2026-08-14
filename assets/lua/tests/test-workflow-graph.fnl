@@ -1,4 +1,6 @@
 (local fs (require :fs))
+(local GraphMap (require :graph/map))
+(local {:GraphEdge GraphEdge} (require :graph/edge))
 
 (local tests [])
 (var temp-counter 0)
@@ -172,6 +174,98 @@
     (assert color (.. "status color should exist for " (tostring status)))
     (assert (= (type color) :userdata) (.. "status color should be vec4 for " (tostring status)))))
 
+(fn seed-definition-for-authoring [runtime]
+  (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
+  (local code-b (runtime.code-store:create-entity {:id "code-b" :name "B" :source "(+ 2 2)"}))
+  (runtime.store:create-definition {:id "wf-author"
+                                    :name "Author workflow"
+                                    :steps [{:id "step-a" :name "A" :code-entity-id code-a.id}
+                                            {:id "step-b" :name "B" :code-entity-id code-b.id}]
+                                    :edges []}))
+
+(fn workflow-edge-count [runtime definition-id]
+  (local definition (runtime.store:get-definition definition-id))
+  (local edges (if (and definition definition.edges) definition.edges []))
+  (length edges))
+
+(fn graph-step-connection-creates-canonical-workflow-control-edge-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "author-map"}))
+  (local step-a (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (local step-b (map:load-by-key (.. "workflow-step:" definition.id ":step-b")))
+  (local edge (map:add-edge (GraphEdge {:source step-a :target step-b})))
+  (local current (runtime.store:get-definition definition.id))
+  (assert (= (length current.edges) 1) "graph step connection should create one canonical workflow edge")
+  (local workflow-edge (. current.edges 1))
+  (assert (= workflow-edge.kind :control) "authored workflow edge should default to control")
+  (assert (= workflow-edge.source-step-id "step-a") "authored workflow edge should use source step")
+  (assert (= workflow-edge.target-step-id "step-b") "authored workflow edge should use target step")
+  (assert (and edge edge._opts edge._opts.from-workflow-edge) "display edge should reference canonical workflow edge")
+  (map:drop))
+
+(fn graph-step-connection-creates-canonical-workflow-control-edge []
+  (with-runtime graph-step-connection-creates-canonical-workflow-control-edge-case))
+
+(fn graph-map-capture-skips-workflow-derived-edges-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "capture-map"}))
+  (local step-a (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (local step-b (map:load-by-key (.. "workflow-step:" definition.id ":step-b")))
+  (map:add-edge (GraphEdge {:source step-a :target step-b}))
+  (local state (map:capture-state))
+  (assert (= (length state.edges) 0) "workflow-derived graph edges should not be captured as map topology")
+  (map:drop))
+
+(fn graph-map-capture-skips-workflow-derived-edges []
+  (with-runtime graph-map-capture-skips-workflow-derived-edges-case))
+
+(fn graph-remove-edge-deletes-canonical-workflow-edge-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "remove-map"}))
+  (local step-a (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (local step-b (map:load-by-key (.. "workflow-step:" definition.id ":step-b")))
+  (local edge (map:add-edge (GraphEdge {:source step-a :target step-b})))
+  (assert (= (workflow-edge-count runtime definition.id) 1) "workflow edge should exist before graph removal")
+  (local removed (map:remove-edge edge))
+  (assert removed "GraphMap.remove-edge should return removed edge")
+  (assert (= (map:edge-count) 0) "displayed workflow edge should be removed from graph map")
+  (assert (= (workflow-edge-count runtime definition.id) 0) "removing displayed workflow edge should delete canonical edge")
+  (map:drop))
+
+(fn graph-remove-edge-deletes-canonical-workflow-edge []
+  (with-runtime graph-remove-edge-deletes-canonical-workflow-edge-case))
+
+(fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "trigger-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local run (node:start-workflow-from-graph {:prompt "go"} {}))
+  (assert run "starting workflow from graph should return run")
+  (assert (runtime.store:get-run run.id) "run should be durable immediately")
+  (assert (map:lookup (.. "workflow-run:" run.id)) "run node should be visible in active graph map")
+  (assert-edge-target map.edges (.. "workflow-run:" run.id) "definition-to-run edge should be inserted in graph map")
+  (map:drop))
+
+(fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge []
+  (with-runtime trigger-definition-node-creates-visible-run-node-and-definition-run-edge-case))
+
+(fn trigger-context-captures-graph-map-and-selected-node-keys-case [runtime]
+  (local definition (seed-definition-for-authoring runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
+  (set map.selected_node_keys [node.key (.. "workflow-step:" definition.id ":step-a")])
+  (node:start-workflow-from-graph {:prompt "go"} {})
+  (local started (. runtime.runner.started 1))
+  (assert (= started.context.graph-map-id "context-map") "run context should include active graph map id")
+  (assert (= (. started.context.graph-node-keys 1) node.key) "run context should include first selected node key")
+  (assert (= (. started.context.graph-node-keys 2) (.. "workflow-step:" definition.id ":step-a"))
+          "run context should include selected workflow step key")
+  (map:drop))
+
+(fn trigger-context-captures-graph-map-and-selected-node-keys []
+  (with-runtime trigger-context-captures-graph-map-and-selected-node-keys-case))
+
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -181,7 +275,17 @@
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"
                      :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"
-                     :fn workflow-status-color-mapping-covers-all-statuses})
+                      :fn workflow-status-color-mapping-covers-all-statuses})
+(table.insert tests {:name "graph step connection creates canonical workflow control edge"
+                     :fn graph-step-connection-creates-canonical-workflow-control-edge})
+(table.insert tests {:name "graph map capture skips workflow derived edges"
+                     :fn graph-map-capture-skips-workflow-derived-edges})
+(table.insert tests {:name "graph remove edge deletes canonical workflow edge"
+                     :fn graph-remove-edge-deletes-canonical-workflow-edge})
+(table.insert tests {:name "trigger definition node creates visible run node and definition run edge"
+                     :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
+(table.insert tests {:name "trigger context captures graph map and selected node keys"
+                     :fn trigger-context-captures-graph-map-and-selected-node-keys})
 
 (local main
   (fn []

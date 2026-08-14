@@ -23,9 +23,30 @@
     (set node (graph:load-by-key key)))
   node)
 
-(fn add-edge [edges source target label]
+(fn add-edge [edges source target label opts]
   (when (and source target)
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
+    (local edge (GraphEdge {:source source :target target :label label}))
+    (when opts
+      (set edge._opts opts))
+    (table.insert edges edge)))
+
+(fn copy-array [items]
+  (local source (if (= items nil) [] items))
+  (local out [])
+  (each [_ item (ipairs source)]
+    (table.insert out item))
+  out)
+
+(fn graph-context [graph context-opts]
+  (local context (if (= context-opts nil) {} context-opts))
+  (local out {})
+  (each [k v (pairs context)]
+    (set (. out k) v))
+  (when (and graph graph.id)
+    (set out.graph-map-id graph.id))
+  (when (and graph graph.selected_node_keys)
+    (set out.graph-node-keys (copy-array graph.selected_node_keys)))
+  out)
 
 (fn edge-label [edge]
   (if edge.kind edge.kind "workflow"))
@@ -59,10 +80,21 @@
   (set node.workflow-definition-id definition-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)
+  (set node.start-workflow-from-graph
+       (fn [self input context-opts]
+         (local run-input (if (= input nil) {} input))
+         (local run (self.workflow-runner:start-run self.workflow-definition-id
+                                                    run-input
+                                                    (graph-context self.graph context-opts)))
+         (local run-node (and self.graph self.graph.load-by-key
+                              (self.graph:load-by-key (.. "workflow-run:" run.id))))
+         (when (and run-node self.graph self.graph.add-edge)
+           (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
+         run))
   (set node.actions [{:name "Start Run"
-                      :icon "play_arrow"
-                      :fn (fn [_button _event]
-                            (node.workflow-runner:start-run node.workflow-definition-id {} {}))}])
+                       :icon "play_arrow"
+                       :fn (fn [_button _event]
+                             (node:start-workflow-from-graph {} {}))}])
   (set node.get-edges
        (fn [self]
          (local current (self.workflow-store:get-definition self.workflow-definition-id))
@@ -79,7 +111,7 @@
            (each [_ edge (ipairs current.edges)]
              (local source (cached-or-resolved-step-node step-nodes self.graph current.id edge.source-step-id))
              (local target (cached-or-resolved-step-node step-nodes self.graph current.id edge.target-step-id))
-             (add-edge edges source target (edge-label edge)))
+              (add-edge edges source target (edge-label edge) {:from-workflow-edge edge.id}))
            (each [_ run (ipairs (self.workflow-store:list-runs {:definition-id current.id}))]
              (add-edge edges self (resolve-node self.graph (.. "workflow-run:" run.id)) "run")))
          edges))

@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphAuthoring (require :workflows/graph-authoring))
 
 (local STEP_GREEN (glm.vec4 0.18 0.58 0.34 1))
 (local STEP_GREEN_ACCENT (glm.vec4 0.28 0.72 0.46 1))
@@ -33,9 +34,12 @@
 (fn step-key [definition-id step-id]
   (.. "workflow-step:" definition-id ":" step-id))
 
-(fn add-edge [edges source target label]
+(fn add-edge [edges source target label opts]
   (when (and source target)
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
+    (local edge (GraphEdge {:source source :target target :label label}))
+    (when opts
+      (set edge._opts opts))
+    (table.insert edges edge)))
 
 (fn edge-label [edge]
   (if edge.kind edge.kind "workflow"))
@@ -61,6 +65,12 @@
   (set node.workflow-definition-id definition-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)
+  (set node.author-domain-edge
+       (fn [self edge edge-opts]
+         (GraphAuthoring.author-edge self (and edge edge.target) edge-opts)))
+  (set node.remove-domain-edge
+       (fn [_self edge edge-opts]
+         (GraphAuthoring.delete-authored-edge edge edge-opts)))
   (set node.get-step (fn [self]
                        (find-step (self.workflow-store:get-definition self.workflow-definition-id)
                                   self.workflow-step-id)))
@@ -73,9 +83,10 @@
            (add-edge edges self (resolve-node self.graph (.. "code-entity:" current-step.code-entity-id)) "code")
            (each [_ edge (ipairs current.edges)]
              (when (= edge.source-step-id self.workflow-step-id)
-               (add-edge edges self
-                         (resolve-node self.graph (step-key self.workflow-definition-id edge.target-step-id))
-                         (edge-label edge)))))
+                (add-edge edges self
+                          (resolve-node self.graph (step-key self.workflow-definition-id edge.target-step-id))
+                          (edge-label edge)
+                          {:from-workflow-edge edge.id}))))
          edges))
   node)
 
