@@ -512,15 +512,14 @@
 (var default-store nil)
 
 (fn get-default [opts]
-  (if default-store
-      default-store
-      (do
-        (local options (table-or-empty opts))
-        (local base-dir (or options.base-dir
-                            (and appdirs (appdirs.user-data-dir "space"))))
-        (assert base-dir "WorkflowStore.get-default requires app user data dir")
-        (set default-store (WorkflowStore {:base-dir base-dir}))
-        default-store)))
+  (local options (table-or-empty opts))
+  (local base-dir (or options.base-dir
+                      (and appdirs (appdirs.user-data-dir "space"))))
+  (assert base-dir "WorkflowStore.get-default requires app user data dir")
+  (when (or (= default-store nil)
+            (not (= default-store.base-dir base-dir)))
+    (set default-store (WorkflowStore {:base-dir base-dir})))
+  default-store)
 
 {:WorkflowStore WorkflowStore
  :get-default get-default}

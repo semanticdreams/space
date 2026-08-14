@@ -261,6 +261,18 @@
 (fn runner-joins-after-all-inbound-steps-succeed []
   (with-temp-store runner-joins-after-all-inbound-steps-succeed-case))
 
+(fn runner-tick-advances-active-app-scoped-runs-case [store]
+      (local definition (define-workflow store [{:id "app-step" :code-entity-id "code-app-step"}]))
+      (local (runner executor) (make-runner store {"app-step" {:status :succeeded :output {:app true}}}))
+      (local run (runner:start-run definition.id {:prompt "tick"} {:scope :app}))
+      (local ticked (runner:tick {:max-steps 1}))
+      (assert (= (length ticked) 1) "runner tick should return the active app-scoped run")
+      (assert (= (. executor.calls 1 :step-id) "app-step") "runner tick should execute the active run step")
+      (assert (= (. (store:get-run run.id) :status) :succeeded) "runner tick should advance active runs to completion"))
+
+(fn runner-tick-advances-active-app-scoped-runs []
+  (with-temp-store runner-tick-advances-active-app-scoped-runs-case))
+
 (table.insert tests {:name "runner-start-run-creates-run-steps-and-events" :fn runner-start-run-creates-run-steps-and-events})
 (table.insert tests {:name "runner-succeeds-linear-workflow-and-data-edge" :fn runner-succeeds-linear-workflow-and-data-edge})
 (table.insert tests {:name "runner-fails-step-on-invalid-contract" :fn runner-fails-step-on-invalid-contract})
@@ -272,6 +284,7 @@
 (table.insert tests {:name "runner-loops-with-one-step-per-tick" :fn runner-loops-with-one-step-per-tick})
 (table.insert tests {:name "runner-loop-exit-clears-stale-next-step-ids" :fn runner-loop-exit-clears-stale-next-step-ids})
 (table.insert tests {:name "runner-joins-after-all-inbound-steps-succeed" :fn runner-joins-after-all-inbound-steps-succeed})
+(table.insert tests {:name "runner-tick-advances-active-app-scoped-runs" :fn runner-tick-advances-active-app-scoped-runs})
 
 (local main
   (fn []

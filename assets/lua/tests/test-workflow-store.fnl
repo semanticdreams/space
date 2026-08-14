@@ -239,6 +239,26 @@
 (fn workflow-store-get-default-uses-app-user-data-dir []
   (with-temp-user-data-dir assert-get-default-uses-user-data-dir))
 
+(fn assert-explicit-default-second-root [first-root second-root]
+  (local {: get-default} (require :workflows/store))
+  (local first-store (get-default {:base-dir first-root}))
+  (assert (= first-store.base-dir first-root)
+          "get-default should use explicit app/user base dir")
+  (local second-store (get-default {:base-dir second-root}))
+  (assert (= second-store.base-dir second-root)
+          "get-default should not keep a stale default when a new explicit app/user base dir is passed")
+  (local definition (second-store:create-definition {:name "explicit default"}))
+  (local definition-path (fs.join-path second-root "workflows" "definitions" (.. definition.id ".json")))
+  (assert-file-json definition-path "explicit default store should persist below the passed app user data dir"))
+
+(fn assert-explicit-default-first-root [first-root]
+  (with-temp-dir
+    (fn [second-root]
+      (assert-explicit-default-second-root first-root second-root))))
+
+(fn workflow-store-get-default-honors-explicit-app-base-dir []
+  (with-temp-dir assert-explicit-default-first-root))
+
 (table.insert tests {:name "workflow-store-persists-definitions-app-scoped"
                      :fn workflow-store-persists-definitions-app-scoped})
 (table.insert tests {:name "workflow-store-creates-updates-steps-and-edges"
@@ -254,7 +274,9 @@
 (table.insert tests {:name "workflow-store-update-step-rejects-id-changes"
                      :fn workflow-store-update-step-rejects-id-changes})
 (table.insert tests {:name "workflow-store-get-default-uses-app-user-data-dir"
-                     :fn workflow-store-get-default-uses-app-user-data-dir})
+                      :fn workflow-store-get-default-uses-app-user-data-dir})
+(table.insert tests {:name "workflow-store-get-default-honors-explicit-app-base-dir"
+                     :fn workflow-store-get-default-honors-explicit-app-base-dir})
 
 (local main
   (fn []

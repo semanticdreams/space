@@ -1422,6 +1422,10 @@
               true)
             false))))
 
+(fn tick-workflow-runner []
+  (when (and app.workflow-runner app.workflow-runner.tick)
+    (app.workflow-runner:tick)))
+
 (fn app.init []
   (local init-start-ms (wall-now-ms))
   (assert (and app.engine app.engine.events) "app.engine.events missing; load engine-events before app.init")
@@ -1561,8 +1565,9 @@
                  (lua "return nil")))
              (when app.remote-control
                (app.remote-control:tick))
-             (when (and app.kernels app.kernels.tick)
-               (app.kernels:tick))))))
+              (when (and app.kernels app.kernels.tick)
+                (app.kernels:tick))
+              (tick-workflow-runner)))))
   (when (and app.global-shortcuts-handler app.engine.events app.engine.events.key-down)
     (app.engine.events.key-down:disconnect app.global-shortcuts-handler true)
     (set app.global-shortcuts-handler nil))
@@ -1582,6 +1587,21 @@
     (set app.kernels nil))
   (local Kernels (require :kernels))
   (set app.kernels (Kernels.get-default))
+  (local CodeEntityStore (require :entities/code))
+  (local WorkflowStore (require :workflows/store))
+  (local WorkflowCodeExecutor (require :workflows/code-executor))
+  (local WorkflowRunner (require :workflows/runner))
+  (set app.code-store
+       (CodeEntityStore.CodeEntityStore {:base-dir app.user-data-dir}))
+  (set app.workflow-store
+       (WorkflowStore.get-default {:base-dir app.user-data-dir}))
+  (set app.workflow-code-executor
+       (WorkflowCodeExecutor.WorkflowCodeExecutor {:code-store app.code-store
+                                                   :app app}))
+  (set app.workflow-runner
+       (WorkflowRunner.WorkflowRunner {:store app.workflow-store
+                                       :executor app.workflow-code-executor
+                                       :app app}))
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
   (AppBootstrap.init-input-systems)
@@ -2028,6 +2048,10 @@
 
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
+  (set app.workflow-runner nil)
+  (set app.workflow-code-executor nil)
+  (set app.workflow-store nil)
+  (set app.code-store nil)
   (drop-agent-runtime!)
   (InputState.release-active-input)
   (AppBootstrap.drop-states)
