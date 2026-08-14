@@ -521,6 +521,28 @@
 (fn template-helper-keeps-code-entity-when-add-step-fails-after-commit []
   (with-temp-dir template-helper-keeps-code-entity-when-add-step-fails-after-commit-case))
 
+(fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit-case [dir]
+  (local {:WorkflowStore WorkflowStore} (require :workflows/store))
+  (local CodeEntityStore (require :entities/code))
+  (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-template-workflow-rollback")}))
+  (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-template-workflow-rollback")}))
+  (local failing-handler
+    (workflow-store.definition-updated:connect
+      (fn [_definition]
+        (error "simulated definition-updated failure"))))
+  (local (ok err) (pcall Templates.create-template-workflow workflow-store code-store {:name "Rollback workflow"}))
+  (workflow-store.definition-updated:disconnect failing-handler true)
+  (assert (not ok) "simulated post-commit starter-step failure should be surfaced")
+  (assert (string.find (tostring err) "simulated definition-updated failure" 1 true)
+          "create-template-workflow should rethrow the starter-step failure")
+  (assert (= (length (workflow-store:list-definitions)) 0)
+          "failed template workflow creation should delete the new definition")
+  (assert (= (length (code-store:list-entities)) 0)
+          "failed template workflow creation should delete the starter step code entity"))
+
+(fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit []
+  (with-temp-dir template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit-case))
+
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -558,7 +580,9 @@
 (table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code"
                       :fn template-helper-creates-durable-workflow-step-and-code})
 (table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit"
-                     :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
+                      :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
+(table.insert tests {:name "template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit"
+                     :fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit})
 
 (local main
   (fn []

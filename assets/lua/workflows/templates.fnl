@@ -18,6 +18,15 @@
           (set found? true)))))
   found?)
 
+(fn definition-step-code-entity-ids [workflow-store definition-id]
+  (local definition (workflow-store:get-definition definition-id))
+  (local ids [])
+  (when definition
+    (each [_ step (ipairs (assert definition.steps "workflow definition requires steps"))]
+      (when step.code-entity-id
+        (table.insert ids step.code-entity-id))))
+  ids)
+
 (fn create-template-code-entity [code-store opts]
   (local options (or opts {}))
   (assert code-store "create-template-code-entity requires code-store")
@@ -63,7 +72,13 @@
        :step step-result-or-err.step
        :code-entity step-result-or-err.code-entity}
       (do
+        (local code-entity-ids (definition-step-code-entity-ids workflow-store definition.id))
         (workflow-store:delete-definition definition.id)
+        (when (> (length code-entity-ids) 0)
+          (assert code-store "create-template-workflow rollback requires code-store")
+          (assert code-store.delete-entity "create-template-workflow rollback requires code-store:delete-entity")
+          (each [_ code-entity-id (ipairs code-entity-ids)]
+            (code-store:delete-entity code-entity-id)))
         (error step-result-or-err))))
 
 {:starter-source starter-source
