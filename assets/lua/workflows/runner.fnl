@@ -66,6 +66,15 @@
 (fn nonterminal? [run-step]
   (not (terminal? run-step)))
 
+(fn cancellable-run-status? [status]
+  (if (= status :queued)
+      true
+      (= status :running)
+      true
+      (= status :waiting)
+      true
+      false))
+
 (fn unselected-skip? [run-step]
   (and run-step (= run-step.status :skipped) (= run-step.skip-reason :unselected)))
 
@@ -437,6 +446,8 @@
 
 (fn cancel-run [self run-id reason]
   (local run (refresh-run self run-id))
+  (assert (cancellable-run-status? run.status)
+          (.. "workflow run is not cancellable: " run-id " status=" (tostring run.status)))
   (local definition (assert (self.store:get-definition run.definition-id) (.. "missing workflow definition: " run.definition-id)))
   (each [_ step (ipairs (array-or-empty definition.steps))]
     (local step-id step.id)

@@ -82,8 +82,25 @@
    :icon "cancel"
    :fn node.cancel-run-action})
 
+(fn cancellable-run-status? [status]
+  (local key (status-key status))
+  (if (= key :queued)
+      true
+      (= key :running)
+      true
+      (= key :waiting)
+      true
+      false))
+
+(fn cancellable-run? [node]
+  (local run (and node node.workflow-store (node.workflow-store:get-run node.workflow-run-id)))
+  (and run (cancellable-run-status? run.status)))
+
 (fn run-actions [self]
-  [(make-toggle-action self) (make-cancel-action self)])
+  (local actions [(make-toggle-action self)])
+  (when (cancellable-run? self)
+    (table.insert actions (make-cancel-action self)))
+  actions)
 
 (fn WorkflowRunNode [opts]
   (local options (or opts {}))

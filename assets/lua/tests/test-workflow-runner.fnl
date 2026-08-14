@@ -189,6 +189,22 @@
 (fn runner-cancels-run []
   (with-temp-store runner-cancels-run-case))
 
+(fn runner-rejects-cancel-for-succeeded-run-case [store]
+      (local definition (define-workflow store [{:id "a" :code-entity-id "code-a"}]))
+      (local (runner _executor) (make-runner store {"a" {:status :succeeded :output {:done true}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (local event-count-before (length (store:list-events run.id)))
+      (local (ok _err) (pcall runner.cancel-run runner run.id "too late"))
+      (local refreshed (store:get-run run.id))
+      (assert (not ok) "cancel should reject terminal succeeded runs")
+      (assert (= refreshed.status :succeeded) "cancel should not rewrite succeeded run status")
+      (assert (= (. (store:get-run-step run.id "a") :status) :succeeded) "cancel should not rewrite succeeded run step")
+      (assert (= (length (store:list-events run.id)) event-count-before) "cancel should not append events for terminal runs"))
+
+(fn runner-rejects-cancel-for-succeeded-run []
+  (with-temp-store runner-rejects-cancel-for-succeeded-run-case))
+
 (fn runner-branches-from-next-step-ids-case [store]
       (local definition (define-workflow store [{:id "start" :code-entity-id "code-start"}
                                                 {:id "left" :code-entity-id "code-left"}
@@ -352,6 +368,7 @@
 (table.insert tests {:name "runner-resume-cancelled-outcome-finishes-run" :fn runner-resume-cancelled-outcome-finishes-run})
 (table.insert tests {:name "runner-retries-with-attempt-state" :fn runner-retries-with-attempt-state})
 (table.insert tests {:name "runner-cancels-run" :fn runner-cancels-run})
+(table.insert tests {:name "runner-rejects-cancel-for-succeeded-run" :fn runner-rejects-cancel-for-succeeded-run})
 (table.insert tests {:name "runner-branches-from-next-step-ids" :fn runner-branches-from-next-step-ids})
 (table.insert tests {:name "runner-skips-unselected-branch-descendants" :fn runner-skips-unselected-branch-descendants})
 (table.insert tests {:name "runner-loops-with-one-step-per-tick" :fn runner-loops-with-one-step-per-tick})

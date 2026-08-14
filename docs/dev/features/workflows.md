@@ -22,7 +22,7 @@ Graph-visible keys include `workflows`, `workflow-definition:<id>`, `workflow-st
 
 ## Executable step contract
 
-Workflow execution is code-entity-first. Durable workflow steps reference code entities; they do not embed durable source bodies. The code executor evaluates the referenced Fennel code entity with full app/global access and expects a step object with execution methods such as `:run-step` and optional resume/cancel behavior.
+Workflow execution is code-entity-first. Durable workflow steps reference code entities; they do not embed durable source bodies. The code executor evaluates the referenced Fennel code entity with full app/global access and expects a step object with a required `:run` method plus optional `:resume` and `:cancel` methods.
 
 Every execution result must be an outcome table. Valid statuses are `:succeeded`, `:failed`, `:waiting`, `:retry`, `:skipped`, and `:cancelled`. `:succeeded` and `:skipped` outcomes may include `:next-step-ids` to select downstream control-flow targets; omitting it selects all normal downstream continuations. Invalid or unknown outcomes fail the step with structured error data.
 

@@ -79,6 +79,13 @@
       (set (. keys edge.target.key) true)))
   keys)
 
+(fn action-named? [actions name]
+  (var found false)
+  (each [_ action (ipairs (if actions actions []))]
+    (when (= action.name name)
+      (set found true)))
+  found)
+
 (fn assert-edge-target [edges key message]
   (local keys (edge-target-key-set edges))
   (assert (. keys key) message))
@@ -279,6 +286,17 @@
 (fn workflow-run-details-toggle-changes-expanded-edge-projection []
   (with-runtime workflow-run-details-toggle-changes-expanded-edge-projection-case))
 
+(fn workflow-run-node-omits-cancel-action-for-succeeded-run-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (runtime.store:update-run seeded.run.id {:status :succeeded :finished-at (os.time)})
+  (local node (runtime.graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (assert node "workflow run node should load")
+  (assert (action-named? (node:actions) "Show Details") "terminal run should still expose detail toggle")
+  (assert (not (action-named? (node:actions) "Cancel Run")) "terminal run should omit cancel action"))
+
+(fn workflow-run-node-omits-cancel-action-for-succeeded-run []
+  (with-runtime workflow-run-node-omits-cancel-action-for-succeeded-run-case))
+
 (fn workflow-run-step-status-colors-cover-all-run-step-statuses []
   (local WorkflowRunStepNode (require :graph/nodes/workflow-run-step))
   (local statuses [:pending :queued :ready :running :waiting :failed :succeeded :skipped :cancelled])
@@ -455,9 +473,11 @@
 (table.insert tests {:name "workflow run preview builds with toggle action"
                      :fn workflow-run-preview-builds-with-toggle-action})
 (table.insert tests {:name "workflow run details toggle changes expanded edge projection"
-                     :fn workflow-run-details-toggle-changes-expanded-edge-projection})
+                      :fn workflow-run-details-toggle-changes-expanded-edge-projection})
+(table.insert tests {:name "workflow run node omits cancel action for succeeded run"
+                      :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
 (table.insert tests {:name "workflow run step status colors cover all run step statuses"
-                     :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
+                      :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
 (table.insert tests {:name "graph step connection creates canonical workflow control edge"
                      :fn graph-step-connection-creates-canonical-workflow-control-edge})
 (table.insert tests {:name "graph map capture skips workflow derived edges"
