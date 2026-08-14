@@ -23,6 +23,128 @@
     (assert (safe-map-id? id)
             (.. context ": map-id contains invalid characters: " (tostring id))))
 
+(fn split-key-parts [key]
+    (local parts [])
+    (when (= (type key) :string)
+        (each [part (string.gmatch key "[^:]+")]
+            (table.insert parts part)))
+    parts)
+
+(fn canonicalize-legacy-activity-key [key]
+    (if (not (= (type key) :string))
+        (values key false)
+        (do
+            (local parts (split-key-parts key))
+            (local scheme (. parts 1))
+            (local sandbox "sandbox")
+            (local category-key?
+                   (if (= scheme "background") true
+                       (= scheme "skybox") true
+                       (= scheme "lights") true
+                       (= scheme "terrains") true
+                       (= scheme "scene-panels") true
+                       false))
+            (if (and (= (length parts) 2) category-key?)
+                (values (.. "activity-" scheme ":" (. parts 2) ":" sandbox) true)
+                (and (= (length parts) 3)
+                     (= scheme "light-type"))
+                (values (.. "activity-light-type:" (. parts 2) ":" sandbox ":" (. parts 3)) true)
+                (and (= (length parts) 4)
+                     (= scheme "light"))
+                (values (.. "activity-light:" (. parts 2) ":" sandbox ":" (. parts 3) ":" (. parts 4)) true)
+                (and (= (length parts) 3)
+                     (= scheme "terrain"))
+                (values (.. "activity-terrain:" (. parts 2) ":" sandbox ":" (. parts 3)) true)
+                (and (= (length parts) 3)
+                     (= scheme "terrain-editor"))
+                (values (.. "activity-terrain-editor:" (. parts 2) ":" sandbox ":" (. parts 3)) true)
+                (and (= (length parts) 4)
+                     (= scheme "terrain-tool"))
+                (values (.. "activity-terrain-tool:" (. parts 2) ":" sandbox ":" (. parts 3) ":" (. parts 4)) true)
+                (and (= (length parts) 3)
+                     (= scheme "scene-panel"))
+                (values (.. "activity-scene-panel:" (. parts 2) ":" sandbox ":" (. parts 3)) true)
+                (values key false)))))
+
+(fn sorted-keys [tbl]
+    (local keys [])
+    (local source (if tbl tbl {}))
+    (each [key _ (pairs source)]
+        (table.insert keys key))
+    (table.sort keys (fn [a b] (< (tostring a) (tostring b))))
+    keys)
+
+(fn migrate-keyed-metadata-table! [tbl]
+    (var migrated? false)
+    (each [_ key (ipairs (sorted-keys tbl))]
+        (local (canonical-key key-migrated?) (canonicalize-legacy-activity-key key))
+        (when key-migrated?
+            (when (= (. tbl canonical-key) nil)
+                (tset tbl canonical-key (. tbl key)))
+            (tset tbl key nil)
+            (set migrated? true)))
+    migrated?)
+
+(fn migrate-panel-node-keys! [panels]
+    (var migrated? false)
+    (local source (if panels panels []))
+    (each [_ panel (ipairs source)]
+        (local (canonical-key key-migrated?) (canonicalize-legacy-activity-key (and panel panel.node-key)))
+        (when key-migrated?
+            (tset panel :node-key canonical-key)
+            (set migrated? true)))
+    migrated?)
+
+(fn migrate-map-entry-state [entry]
+    (local node-set {})
+    (local migrated-nodes [])
+    (var migrated? false)
+    (local source-nodes (if entry.nodes entry.nodes []))
+    (each [_ key (ipairs source-nodes)]
+        (local (canonical-key key-migrated?) (canonicalize-legacy-activity-key key))
+        (when key-migrated?
+            (set migrated? true))
+        (when (not (. node-set canonical-key))
+            (tset node-set canonical-key true)
+            (table.insert migrated-nodes canonical-key)))
+    (local edge-set {})
+    (local migrated-edges [])
+    (local source-edges (if entry.edges entry.edges []))
+    (each [_ edge (ipairs source-edges)]
+        (if (= (type edge) :table)
+            (do
+                (local (source source-migrated?) (canonicalize-legacy-activity-key edge.source))
+                (local (target target-migrated?) (canonicalize-legacy-activity-key edge.target))
+                (when (if source-migrated? true target-migrated?)
+                    (set migrated? true))
+                (if (and (= source target) (if source-migrated? true target-migrated?))
+                    (set migrated? true)
+                    (do
+                        (local edge-key (.. (tostring source) "->" (tostring target)))
+                        (when (not (. edge-set edge-key))
+                            (tset edge-set edge-key true)
+                            (local migrated-edge {})
+                            (each [k v (pairs edge)]
+                                (tset migrated-edge k v))
+                            (tset migrated-edge :source source)
+                            (tset migrated-edge :target target)
+                            (table.insert migrated-edges migrated-edge)))))))
+    (local migrated-selection [])
+    (local source-selection (if entry.selected_node_keys entry.selected_node_keys []))
+    (each [_ key (ipairs source-selection)]
+        (local (canonical-key key-migrated?) (canonicalize-legacy-activity-key key))
+        (when key-migrated?
+            (set migrated? true))
+        (table.insert migrated-selection canonical-key))
+    (local (focused-key focused-migrated?) (canonicalize-legacy-activity-key entry.focused_node_key))
+    (when focused-migrated?
+        (set migrated? true))
+    (tset entry :nodes migrated-nodes)
+    (tset entry :edges migrated-edges)
+    (tset entry :selected_node_keys migrated-selection)
+    (tset entry :focused_node_key focused-key)
+    (values entry migrated?))
+
 (fn GraphMapManager [opts]
     (local options (or opts {}))
     (local shared-graph (assert options.graph "GraphMapManager requires :graph"))
@@ -123,6 +245,16 @@
             (local kept-panels [])
             (local kept-extra-panels [])
             (var pruned-metadata? false)
+            (when (migrate-keyed-metadata-table! positions)
+                (set pruned-metadata? true))
+            (when (migrate-keyed-metadata-table! presentations)
+                (set pruned-metadata? true))
+            (when (migrate-keyed-metadata-table! sizes)
+                (set pruned-metadata? true))
+            (when (migrate-panel-node-keys! panels)
+                (set pruned-metadata? true))
+            (when (migrate-panel-node-keys! extra-panels)
+                (set pruned-metadata? true))
             (fn valid-node-key? [key]
                 (and (= (type key) :string)
                      (. valid-node-keys key)))
@@ -434,15 +566,16 @@
     (each [_ entry (ipairs parsed-maps)]
         (assert (not (. entries entry.id))
                 (.. "GraphMapManager duplicate map id in state: " entry.id))
-        (set (. entries entry.id) {:id entry.id
-                                   :name entry.name
-                                   :nodes entry.nodes
-                                   :edges entry.edges
-                                   :selected_node_keys (or entry.selected_node_keys [])
-                                   :focused_node_key entry.focused_node_key
-                                   :restored-from-state? restored-from-state?
-                                   :seed-start? seed-start-for-legacy-empty?
-                                   :map nil}))
+        (local (migrated-entry _activity-migrated?) (migrate-map-entry-state entry))
+        (set (. entries migrated-entry.id) {:id migrated-entry.id
+                                            :name migrated-entry.name
+                                            :nodes migrated-entry.nodes
+                                            :edges migrated-entry.edges
+                                            :selected_node_keys (or migrated-entry.selected_node_keys [])
+                                            :focused_node_key migrated-entry.focused_node_key
+                                            :restored-from-state? restored-from-state?
+                                            :seed-start? seed-start-for-legacy-empty?
+                                            :map nil}))
 
     (when (not (. entries active-id))
         (error (.. "GraphMapManager active_map_id does not reference a map: "

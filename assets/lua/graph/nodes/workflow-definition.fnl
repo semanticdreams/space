@@ -52,14 +52,14 @@
 (fn edge-label [edge]
   (if edge.kind edge.kind "workflow"))
 
+(fn step-key [definition-id step-id]
+  (.. "workflow-step:" definition-id ":" step-id))
+
 (fn cached-or-resolved-step-node [step-nodes graph definition-id step-id]
   (local cached (. step-nodes step-id))
   (if cached
       cached
       (resolve-node graph (step-key definition-id step-id))))
-
-(fn step-key [definition-id step-id]
-  (.. "workflow-step:" definition-id ":" step-id))
 
 (fn definition-label [definition definition-id]
   (if (and definition (> (string.len (if definition.name definition.name "")) 0))

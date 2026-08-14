@@ -9,16 +9,17 @@
 (fn M.ScenePanelNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelNode requires :world-id"))
+  (local activity-id (assert options.activity-id "ScenePanelNode requires :activity-id"))
   (local world-manager (assert options.world-manager "ScenePanelNode requires :world-manager"))
   (local panel-index (assert options.panel-index "ScenePanelNode requires :panel-index"))
   (local resolved (or options.panel-entry
-                      (WorldData.find-scene-panel world-manager world-id panel-index)
+                       (WorldData.find-scene-panel world-manager world-id activity-id panel-index)
                       {}))
   (local panel (or options.panel resolved.metadata {}))
   (local panel-record (or options.panel-record resolved.panel {}))
   (local persistence (or panel.persistence panel-record {}))
   (local panel-kind (or persistence.kind resolved.kind "unknown"))
-  (local key (or options.key (.. "scene-panel:" world-id ":" panel-index)))
+  (local key (or options.key (.. "activity-scene-panel:" world-id ":" activity-id ":" panel-index)))
   (local label (or options.label panel-kind))
   (local node (GraphNode {:key key
                            :label label
@@ -27,6 +28,7 @@
                            :size 7.0
                            :view ScenePanelNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.panel-index panel-index)
   (set node.panel-kind panel-kind)
@@ -35,26 +37,33 @@
   (set node.changed (Signal))
   (set node.remove-panel
        (fn [self]
-         (WorldData.remove-scene-panel self.world-manager self.world-id self.panel-index)))
+          (WorldData.remove-scene-panel self.world-manager self.world-id self.activity-id self.panel-index)))
   (set node.actions
         [{:name "Delete Scene Panel"
          :icon "delete"
          :fn (fn [_button _event]
-               (when (node:remove-panel)
-                  (when (and node.graph node.graph.remove-nodes)
-                    (node.graph:remove-nodes [node] {:cause "shared-delete"}))))}])
+                (when (node:remove-panel)
+                   (when (and node.graph node.graph.remove-nodes)
+                     (node.graph:remove-nodes [node] {:cause "shared-delete"}))))}])
+  (fn remove-self []
+    (when (and node.graph node.graph.remove-nodes)
+      (node.graph:remove-nodes [node] {:cause "shared-delete"})))
+  (fn refresh-or-remove []
+    (if (not (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene"))
+        (remove-self)
+        (do
+          (local current (WorldData.find-scene-panel world-manager world-id activity-id panel-index))
+          (local stale?
+            (or (not current)
+                (and node.panel current.metadata (not (= current.metadata node.panel)))
+                (and node.panel-record current.panel (not (= current.panel node.panel-record)))))
+          (when stale?
+            (remove-self)))))
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
          (fn [_payload]
-            (local current (WorldData.find-scene-panel world-manager world-id panel-index))
-            (local stale?
-              (or (not current)
-                  (and node.panel current.metadata (not (= current.metadata node.panel)))
-                  (and node.panel-record current.panel (not (= current.panel node.panel-record)))))
-            (when stale?
-              (when (and node.graph node.graph.remove-nodes)
-                (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
+           (refresh-or-remove))))
   (set node.drop
        (fn [self]
          (when changed-handler

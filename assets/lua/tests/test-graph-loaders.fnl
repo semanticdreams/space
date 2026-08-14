@@ -116,11 +116,12 @@
                         :list-tabs (fn [_self] [])})
   (GraphKeyLoaders.register graph {:world-manager world-manager})
   (local keys ["world:missing"
-               "terrain:missing:t1"
-               "terrain-editor:missing:t1"
-               "terrain-tool:missing:t1:resize-terrain"
-               "light:missing:point:p1"
-               "scene-panel:missing:1"
+               "activity-terrain:missing:sandbox:t1"
+               "activity-terrain-editor:missing:sandbox:t1"
+               "activity-terrain-tool:missing:sandbox:t1:resize-terrain"
+               "activity-light-type:missing:sandbox:point"
+               "activity-light:missing:sandbox:point:p1"
+               "activity-scene-panel:missing:sandbox:1"
                "hud-panel:missing:tiles:1"])
   (each [_ key (ipairs keys)]
     (local (ok result) (pcall (fn [] (graph:create-node-by-key key))))
@@ -635,6 +636,47 @@
   (when list-node.drop (list-node:drop))
   (when root.drop (root:drop)))
 
+(fn make-activity-world-manager []
+  (local Signal (require :signal))
+  (local scene-state {:panels [{:kind "alpha"}] :terrains [{:id "terrain-a" :kind "heightfield-terrain" :options {}}] :lights {:ambient {:id "ambient"} :directional [] :point [{:id "point-1"}] :spot []}
+                      :skybox {:enabled? true :default {:name "lake" :brightness 0.1} :by-theme {}}
+                      :background {:color [0.0 0.0 0.0]} :containment {:enabled? false}})
+  (local entry {:id "test-world" :name "Test World" :world {:state {:scene {:panels [] :terrains []} :hud {:panels []}
+                                                                   :activity {:active_id "sandbox" :sessions {:sandbox {:scene scene-state}}}}}})
+  {:changed (Signal) :list-tabs (fn [_self] [{:index 1 :id "test-world" :name "Test World"}])
+   :get-world-entry (fn [_self world-id] (if (= world-id "test-world") entry nil))})
+
+(fn activity-hierarchy-loaders-resolve-existing-session []
+  (local Graph (require :graph/init))
+  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local graph (Graph {:with-start false}))
+  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-terrain-editor:test-world:sandbox:terrain-a" "activity-terrain-tool:test-world:sandbox:terrain-a:apply-perlin" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
+    (local node (graph:load-by-key key))
+    (assert node (.. "loader should resolve " key))
+    (assert (= node.key key) (.. "loader should preserve key " key)))
+  (assert (= (graph:load-by-key "activity-hud:test-world:sandbox") nil) "activity-hud loader should return nil when session has no hud")
+  (assert (= (graph:load-by-key "activity-canvas:test-world:sandbox") nil) "activity-canvas loader should return nil when session has no canvas")
+  (each [_ key (ipairs ["scene-panels:test-world" "terrains:test-world" "skybox:test-world" "background:test-world" "lights:test-world"])]
+    (assert (= (graph:load-by-key key) nil) (.. "legacy scene category loader should be absent: " key)))
+  (graph:drop))
+
+(fn legacy-scene-detail-loaders-are-absent-after-map-key-migration []
+  "Legacy persisted detail keys migrate in GraphMapManager; loaders should not keep aliases."
+  (local Graph (require :graph/init))
+  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local graph (Graph {:with-start false}))
+  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (each [_ key (ipairs ["scene-panel:test-world:1"
+                        "terrain:test-world:terrain-a"
+                        "terrain-editor:test-world:terrain-a"
+                        "terrain-tool:test-world:terrain-a:apply-perlin"
+                        "light-type:test-world:point"
+                        "light:test-world:point:point-1"])]
+    (assert (= (graph:load-by-key key) nil)
+            (.. "legacy scene detail loader should be absent: " key)))
+  (graph:drop))
+
 (table.insert tests {:name "graph has register-key-loader"
                      :fn graph-has-register-key-loader})
 (table.insert tests {:name "graph has load-by-key"
@@ -656,9 +698,13 @@
 (table.insert tests {:name "load-by-key returns nil when loader returns nil"
                      :fn load-by-key-returns-nil-when-loader-returns-nil})
 (table.insert tests {:name "world-backed loaders return nil for missing objects"
-                     :fn world-backed-loaders-return-nil-for-missing-objects})
+                      :fn world-backed-loaders-return-nil-for-missing-objects})
+(table.insert tests {:name "activity hierarchy loaders resolve existing session"
+                      :fn activity-hierarchy-loaders-resolve-existing-session})
+(table.insert tests {:name "legacy scene detail loaders are absent after map-key migration"
+                     :fn legacy-scene-detail-loaders-are-absent-after-map-key-migration})
 (table.insert tests {:name "multiple loaders match by scheme"
-                     :fn multiple-loaders-match-by-scheme})
+                      :fn multiple-loaders-match-by-scheme})
 (table.insert tests {:name "load-by-key parses scheme before first colon"
                      :fn load-by-key-parses-scheme-before-first-colon})
 (table.insert tests {:name "load-by-key uses entire key as scheme when missing colon"
@@ -708,6 +754,14 @@
 (table.insert tests {:name "fs loader returns nil for missing path"
                      :fn fs-loader-returns-nil-for-missing-path})
 (table.insert tests {:name "hackernews ensure-client propagates to child nodes"
-                      :fn hackernews-ensure-client-propagates-to-child-nodes})
+                       :fn hackernews-ensure-client-propagates-to-child-nodes})
 
-tests
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "graph-loaders"
+                       :tests tests})))
+
+{:name "graph-loaders"
+ :tests tests
+ :main main}

@@ -20,8 +20,8 @@
      :label "Apply Perlin"
      :node-kind HeightfieldPerlinToolNode}]})
 
-(fn tool-key [world-id terrain-id tool-id]
-  (.. "terrain-tool:" world-id ":" terrain-id ":" tool-id))
+(fn tool-key [world-id activity-id terrain-id tool-id]
+  (.. "activity-terrain-tool:" world-id ":" activity-id ":" terrain-id ":" tool-id))
 
 (fn list-tools [terrain-kind]
   (local specs (. tool-specs terrain-kind))
@@ -39,17 +39,19 @@
 (fn create-tool-node [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainTools.create-tool-node requires :world-id"))
+  (local activity-id (assert options.activity-id "TerrainTools.create-tool-node requires :activity-id"))
   (local terrain-id (assert options.terrain-id "TerrainTools.create-tool-node requires :terrain-id"))
   (local terrain-kind (assert options.terrain-kind "TerrainTools.create-tool-node requires :terrain-kind"))
   (local world-manager (assert options.world-manager "TerrainTools.create-tool-node requires :world-manager"))
   (local tool-id (assert options.tool-id "TerrainTools.create-tool-node requires :tool-id"))
   (local spec (tool-spec terrain-kind tool-id))
   (if spec
-      (spec.node-kind {:world-id world-id
-                       :terrain-id terrain-id
+       (spec.node-kind {:world-id world-id
+                        :activity-id activity-id
+                        :terrain-id terrain-id
                        :world-manager world-manager
                        :tool-id tool-id
-                       :key (or options.key (tool-key world-id terrain-id tool-id))})
+                       :key (or options.key (tool-key world-id activity-id terrain-id tool-id))})
       nil))
 
 {:list-tools list-tools

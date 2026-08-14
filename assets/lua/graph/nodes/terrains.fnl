@@ -9,11 +9,15 @@
 
 (local M {})
 
+(fn terrain-node-key [self terrain-id]
+  (.. "activity-terrain:" self.world-id ":" self.activity-id ":" terrain-id))
+
 (fn M.TerrainsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainsNode requires :world-id"))
+  (local activity-id (assert options.activity-id "TerrainsNode requires :activity-id"))
   (local world-manager (assert options.world-manager "TerrainsNode requires :world-manager"))
-  (local key (or options.key (.. "terrains:" world-id)))
+  (local key (or options.key (.. "activity-terrains:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                            :label "terrains"
                            :color (glm.vec4 0.35 0.55 0.35 1)
@@ -21,12 +25,13 @@
                            :size 8.0
                            :view TerrainsNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.items-changed (Signal))
   (set node.supported-terrain-kinds (TerrainRecords.supported-kinds))
   (set node.known-terrain-ids {})
   (fn collect-items [self]
-    (WorldData.list-terrains self.world-manager self.world-id))
+    (WorldData.list-terrains self.world-manager self.world-id self.activity-id))
   (fn update-known-terrain-ids [self items]
     (local known {})
     (each [_ item (ipairs (or items []))]
@@ -39,14 +44,16 @@
   (fn attach-terrain-node [self entry]
     (local graph self.graph)
     (when (and graph entry entry.terrain-id)
-      (local terrain-key (.. "terrain:" self.world-id ":" entry.terrain-id))
+      (local terrain-key (terrain-node-key self entry.terrain-id))
 	      (local terrain-node
 	        (or (graph:lookup terrain-key)
 	            (TerrainNode {:world-id self.world-id
+                              :activity-id self.activity-id
 	                          :world-manager self.world-manager
 	                          :terrain-id entry.terrain-id
 	                          :terrain entry.entry
-	                          :terrain-record entry.record})))
+	                          :terrain-record entry.record
+                              :key terrain-key})))
       (graph:add-edge (GraphEdge {:source self
                                   :target terrain-node}))))
   (fn emit-items [self]
@@ -63,7 +70,7 @@
          (attach-terrain-node self entry)))
   (set node.add-terrain
        (fn [self terrain-kind]
-         (WorldData.add-terrain self.world-manager self.world-id terrain-kind)))
+          (WorldData.add-terrain self.world-manager self.world-id self.activity-id terrain-kind)))
   (update-known-terrain-ids node (collect-items node))
   (set node.actions
        [{:name "Refresh"
@@ -72,11 +79,11 @@
                (node:emit-items))}])
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [payload]
-           (if (WorldData.resolve-world-entry world-manager world-id)
-               (do
-                 (local items (collect-items node))
+        (world-manager.changed:connect
+          (fn [payload]
+            (if (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene")
+                (do
+                  (local items (collect-items node))
                  (when (and node.graph
                             payload
                             (= payload.world-id world-id)

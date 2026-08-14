@@ -3,12 +3,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local Signal (require :signal))
 (local WorldNodeView (require :graph/view/views/world))
-(local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
-(local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
-(local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
-(local {:LightsNode LightsNode} (require :graph/nodes/lights))
-(local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
-(local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
+(local {:WorldActivitiesNode WorldActivitiesNode} (require :graph/nodes/world-activities))
 (local WorldData (require :graph/world-data))
 
 (local M {})
@@ -37,24 +32,20 @@
   (set node.categories-changed (Signal))
   (fn emit-categories [self]
     (local categories
-      [{:key "scene-panels" :label "scene panels" :kind ScenePanelsNode}
-       {:key "hud-panels" :label "hud panels" :kind HudPanelsNode}
-       {:key "terrains" :label "terrains" :kind TerrainsNode}
-       {:key "skybox" :label "skybox" :kind SkyboxNode}
-       {:key "background" :label "background" :kind BackgroundNode}
-       {:key "lights" :label "lights" :kind LightsNode}])
+      [{:key "activities" :label "activities" :kind WorldActivitiesNode}])
     (when self.categories-changed
       (self.categories-changed:emit categories))
     categories)
   (set node.emit-categories emit-categories)
   (set node.add-category-node
        (fn [self category]
-         (local graph self.graph)
-         (when (and graph category category.kind)
-           (local category-node (category.kind {:world-id self.world-id
-                                               :world-manager self.world-manager
-                                               :asset-path-resolver self.asset-path-resolver}))
-           (graph:add-edge (GraphEdge {:source self :target category-node})))))
+          (local graph self.graph)
+          (when (and graph category category.kind)
+            (local category-node (category.kind {:world-id self.world-id
+                                                :world-manager self.world-manager
+                                                :asset-path-resolver self.asset-path-resolver
+                                                :key (.. "world-activities:" self.world-id)}))
+            (graph:add-edge (GraphEdge {:source self :target category-node})))))
   (set node.activate
        (fn [self]
          (local tabs (self.world-manager:list-tabs))

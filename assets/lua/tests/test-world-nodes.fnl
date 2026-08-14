@@ -423,8 +423,9 @@
 (fn test-scene-panels-node-has-correct-key []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
   (local node (ScenePanelsNode {:world-id "test-world-123"
+                                :activity-id "sandbox"
                                 :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "scene-panels:test-world-123") "ScenePanelsNode key should include world-id")
+  (assert (= node.key "activity-scene-panels:test-world-123:sandbox") "ScenePanelsNode key should include world-id and activity-id")
   (assert (= node.label "scene panels") "ScenePanelsNode label should be 'scene panels'")
   (node:drop))
 
@@ -439,25 +440,28 @@
 (fn test-terrains-node-has-correct-key []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
   (local node (TerrainsNode {:world-id "test-world-123"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "terrains:test-world-123") "TerrainsNode key should include world-id")
+  (assert (= node.key "activity-terrains:test-world-123:sandbox") "TerrainsNode key should include world-id and activity-id")
   (assert (= node.label "terrains") "TerrainsNode label should be 'terrains'")
   (node:drop))
 
 (fn test-lights-node-has-correct-key []
   (local {:LightsNode LightsNode} (require :graph/nodes/lights))
   (local node (LightsNode {:world-id "test-world-123"
+                           :activity-id "sandbox"
                            :world-manager (make-world-manager {:id "test-world-123"})}))
-  (assert (= node.key "lights:test-world-123") "LightsNode key should include world-id")
+  (assert (= node.key "activity-lights:test-world-123:sandbox") "LightsNode key should include world-id and activity-id")
   (assert (= node.label "lights") "LightsNode label should be 'lights'")
   (node:drop))
 
 (fn test-scene-panel-node-has-correct-key []
   (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
   (local node (ScenePanelNode {:world-id "test-world-123"
-                               :world-manager (make-world-manager {:id "test-world-123"})
-                               :panel-index 5}))
-  (assert (= node.key "scene-panel:test-world-123:5") "ScenePanelNode key should include world-id and index")
+                               :activity-id "sandbox"
+                                :world-manager (make-world-manager {:id "test-world-123"})
+                                :panel-index 5}))
+  (assert (= node.key "activity-scene-panel:test-world-123:sandbox:5") "ScenePanelNode key should include world-id, activity-id, and index")
   (node:drop))
 
 (fn test-hud-panel-node-has-correct-key []
@@ -472,9 +476,10 @@
 (fn test-terrain-node-has-correct-key []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local node (TerrainNode {:world-id "test-world-123"
+                            :activity-id "sandbox"
                             :world-manager (make-world-manager {:id "test-world-123"})
                             :terrain-id "terrain-abc"}))
-  (assert (= node.key "terrain:test-world-123:terrain-abc") "TerrainNode key should include world-id and terrain-id")
+  (assert (= node.key "activity-terrain:test-world-123:sandbox:terrain-abc") "TerrainNode key should include world-id, activity-id, and terrain-id")
   (node:drop))
 
 (fn test-terrain-node-default-label-is-generic []
@@ -486,6 +491,7 @@
                                                               :options {}}]}
                                           :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world-123"
+                            :activity-id "sandbox"
                             :world-manager (make-world-manager {:id "test-world-123"
                                                                 :entry entry})
                             :terrain-id "terrain-abc"}))
@@ -500,6 +506,7 @@
                                                                                                :name "mesa"})]}
                                           :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world-123"
+                            :activity-id "sandbox"
                             :world-manager (make-world-manager {:id "test-world-123"
                                                                 :entry entry})
                             :terrain-id "terrain-abc"}))
@@ -513,9 +520,10 @@
                                                   :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
                                           :hud {:panels []}}}))
   (local node (FlatTerrainNode {:world-id "test-world-123"
-                                :world-manager (make-world-manager {:id "test-world-123" :entry entry})
-                                :terrain-id "terrain-abc"}))
-  (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "FlatTerrainNode key should include world-id and terrain-id")
+                                :activity-id "sandbox"
+                                 :world-manager (make-world-manager {:id "test-world-123" :entry entry})
+                                 :terrain-id "terrain-abc"}))
+  (assert (= node.key "activity-terrain-editor:test-world-123:sandbox:terrain-abc") "FlatTerrainNode key should include world-id, activity-id, and terrain-id")
   (node:drop))
 
 (fn test-perlin-terrain-node-has-correct-key []
@@ -525,9 +533,10 @@
                                                   :terrains [(make-perlin-terrain-record {:id "terrain-abc"})]}
                                           :hud {:panels []}}}))
   (local node (PerlinTerrainNode {:world-id "test-world-123"
-                                  :world-manager (make-world-manager {:id "test-world-123" :entry entry})
-                                  :terrain-id "terrain-abc"}))
-  (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "PerlinTerrainNode key should include world-id and terrain-id")
+                                  :activity-id "sandbox"
+                                   :world-manager (make-world-manager {:id "test-world-123" :entry entry})
+                                   :terrain-id "terrain-abc"}))
+  (assert (= node.key "activity-terrain-editor:test-world-123:sandbox:terrain-abc") "PerlinTerrainNode key should include world-id, activity-id, and terrain-id")
   (node:drop))
 
 (fn test-heightfield-terrain-node-has-correct-key []
@@ -537,9 +546,10 @@
                                                   :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                           :hud {:panels []}}}))
   (local node (HeightfieldTerrainNode {:world-id "test-world-123"
-                                       :world-manager (make-world-manager {:id "test-world-123" :entry entry})
-                                       :terrain-id "terrain-abc"}))
-  (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "HeightfieldTerrainNode key should include world-id and terrain-id")
+                                       :activity-id "sandbox"
+                                        :world-manager (make-world-manager {:id "test-world-123" :entry entry})
+                                        :terrain-id "terrain-abc"}))
+  (assert (= node.key "activity-terrain-editor:test-world-123:sandbox:terrain-abc") "HeightfieldTerrainNode key should include world-id, activity-id, and terrain-id")
   (node:drop))
 
 (fn test-world-node-has-emit-categories []
@@ -548,32 +558,31 @@
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert node.emit-categories "WorldNode should have emit-categories method")
   (local categories (node:emit-categories))
-  (assert (= (length categories) 6) "WorldNode should have 6 categories")
+  (assert (= (length categories) 1) "WorldNode should expose only the activities category")
   (local cat1 (. categories 1))
-  (local cat2 (. categories 2))
-  (local cat3 (. categories 3))
-  (local cat4 (. categories 4))
-  (local cat5 (. categories 5))
-  (local cat6 (. categories 6))
-  (assert (= cat1.key "scene-panels") "first category should be scene-panels")
-  (assert (= cat2.key "hud-panels") "second category should be hud-panels")
-  (assert (= cat3.key "terrains") "third category should be terrains")
-  (assert (= cat4.key "skybox") "fourth category should be skybox")
-  (assert (= cat5.key "background") "fifth category should be background")
-  (assert (= cat6.key "lights") "sixth category should be lights")
+  (assert (= cat1.key "activities") "first category should be activities")
+  (assert (= cat1.label "activities") "activities category label should be activities")
   (node:drop))
 
 (fn test-world-node-add-category-node []
-  (local {:WorldNode WorldNode} (require :graph/nodes/world))
-  (local graph (Graph {:with-start false}))
-  (local mock-manager (make-world-manager {:id "test-world-123"}))
-  (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
-  (graph:add-node node {})
-  (local categories (node:emit-categories))
-  (node:add-category-node (. categories 1))
-  (assert (= (graph:edge-count) 1) "WorldNode add-category-node should create 1 edge")
-  (node:drop)
-  (graph:drop))
+  (local {:WorldNode WorldNode} (require :graph/nodes/world)) (local {:WorldActivitiesNode WorldActivitiesNode} (require :graph/nodes/world-activities)) (local {:WorldActivityNode WorldActivityNode} (require :graph/nodes/world-activity)) (local {:ActivitySurfacesNode ActivitySurfacesNode} (require :graph/nodes/activity-surfaces)) (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels)) (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains)) (local {:LightsNode LightsNode} (require :graph/nodes/lights)) (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type)) (local graph (Graph {:with-start false}))
+  (local state {:scene {:panels [] :terrains []} :hud {:panels []} :activity {:active_id "sandbox" :sessions {:sandbox {:scene {:panels [] :terrains [] :lights (make-light-state) :skybox (make-skybox-state) :background (make-background-state) :containment {:enabled? false}}} :graph {:scene {:panels [{:kind "alpha"}] :terrains [(make-heightfield-terrain-record {:id "terrain-a"})] :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]}) :skybox (make-skybox-state) :background (make-background-state)} :hud {:panels []} :canvas {:items []}} :drawing {:scene {:panels [{:kind "beta"}] :terrains [(make-heightfield-terrain-record {:id "terrain-a"})] :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]}) :skybox (make-skybox-state) :background (make-background-state)}} :board {:scene {:panels [] :terrains []}}}}})
+  (local entry (make-world-entry {:id "test-world-123" :state state})) (local mock-manager (make-world-manager {:id "test-world-123" :entry entry})) (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
+  (graph:add-node node {}) (local categories (node:emit-categories)) (node:add-category-node (. categories 1))
+  (assert (= (graph:edge-count) 1) "WorldNode add-category-node should create 1 edge") (local activities (WorldActivitiesNode {:world-id "test-world-123" :world-manager mock-manager}))
+  (local seen {}) (each [_ item (ipairs (activities:emit-items))] (set (. seen (. item 1 :id)) true)) (assert (and seen.sandbox seen.graph seen.drawing seen.board) "activities node should list all sessions")
+  (local activity (WorldActivityNode {:world-id "test-world-123" :activity-id "sandbox" :world-manager mock-manager})) (graph:add-node activity {}) (local opened-surfaces (activity:open-surfaces))
+  (assert (= opened-surfaces.key "activity-surfaces:test-world-123:sandbox") "activity node should open surfaces") (local surfaces (ActivitySurfacesNode {:world-id "test-world-123" :activity-id "graph" :world-manager mock-manager}))
+  (local surface-seen {}) (each [_ item (ipairs (surfaces:emit-items))] (set (. surface-seen (. item 1 :surface-key)) true))
+  (assert (and surface-seen.scene surface-seen.hud surface-seen.canvas) "surfaces node should list owned scene/hud/canvas")
+  (local scene-panels (ScenePanelsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-scene-panels:test-world-123:drawing"})) (graph:add-node scene-panels {}) (scene-panels:add-panel-node (. (. (scene-panels:emit-items) 1) 1))
+  (assert (graph:lookup "activity-scene-panel:test-world-123:drawing:1") "activity scene panel key should include activity-id")
+  (local terrains (TerrainsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-terrains:test-world-123:drawing"})) (graph:add-node terrains {}) (terrains:open-terrain-node (. (. (terrains:emit-items) 1) 1))
+  (assert (graph:lookup "activity-terrain:test-world-123:drawing:terrain-a") "activity terrain key should include activity-id")
+  (local lights (LightsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-lights:test-world-123:drawing"})) (graph:add-node lights {}) (lights:add-type-node (. (. (lights:emit-items) 3) 1))
+  (local light-type (assert (graph:lookup "activity-light-type:test-world-123:drawing:point") "activity light type key should include activity-id")) (light-type:open-light-node (. (. (light-type:emit-items) 1) 1))
+  (assert (graph:lookup "activity-light:test-world-123:drawing:point:point-1") "activity light key should include activity-id")
+  (node:drop) (activities:drop) (surfaces:drop) (graph:drop))
 
 (fn test-worlds-node-has-emit-items []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
@@ -593,6 +602,7 @@
 (fn test-scene-panels-node-has-emit-items []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
   (local node (ScenePanelsNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "ScenePanelsNode should have emit-items method")
   (local items (node:emit-items))
@@ -611,6 +621,7 @@
 (fn test-terrains-node-has-emit-items []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "TerrainsNode should have emit-items method")
   (local items (node:emit-items))
@@ -625,12 +636,57 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightsNode {:world-id "test-world"
+                           :activity-id "sandbox"
                            :world-manager (make-world-manager {:id "test-world" :entry entry})}))
   (local items (node:emit-items))
   (assert (= (length items) 4) "lights node should expose four light types")
   (assert (= (. (. items 1) 1 :type-key) "ambient") "first light type should be ambient")
   (assert (= (. (. items 2) 1 :type-key) "directional") "second light type should be directional")
   (node:drop))
+
+(fn test-scene-category-nodes-isolate-activity-state []
+  (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (local sandbox-light (make-light-record "point" {:id "sandbox-point"}))
+  (local graph-light (make-light-record "point" {:id "graph-point"}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox {:scene {:panels [{:kind "sandbox-panel"}]
+                                                        :terrains [(make-heightfield-terrain-record {:id "sandbox-terrain"})]
+                                                        :lights (make-light-state {:point [sandbox-light]})
+                                                        :skybox (make-skybox-state)
+                                                        :background (make-background-state)
+                                                        :containment {:enabled? false}}}
+                                      :graph {:scene {:panels [{:kind "graph-panel"}]
+                                                      :terrains [(make-heightfield-terrain-record {:id "graph-terrain"})]
+                                                      :lights (make-light-state {:point [graph-light]})
+                                                      :skybox (make-skybox-state)
+                                                      :background (make-background-state)
+                                                      :containment {:enabled? false}}}}}})
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry (make-world-entry {:id "test-world" :state state})}))
+  (local graph-panels (ScenePanelsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-panels (ScenePanelsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (assert (= (. (. (graph-panels:emit-items) 1) 1 :kind) "graph-panel") "graph panels node should read graph session")
+  (assert (= (. (. (sandbox-panels:emit-items) 1) 1 :kind) "sandbox-panel") "sandbox panels node should read sandbox session")
+  (local graph-terrains (TerrainsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-terrains (TerrainsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (assert (= (. (. (graph-terrains:emit-items) 1) 1 :terrain-id) "graph-terrain") "graph terrains node should read graph session")
+  (assert (= (. (. (sandbox-terrains:emit-items) 1) 1 :terrain-id) "sandbox-terrain") "sandbox terrains node should read sandbox session")
+  (local graph-lights (LightsNode {:world-id "test-world" :activity-id "graph" :world-manager manager}))
+  (local sandbox-lights (LightsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
+  (local graph-light-items (graph-lights:emit-items))
+  (local sandbox-light-items (sandbox-lights:emit-items))
+  (assert (= (. (. graph-light-items 3) 1 :count) 1) "graph lights node should expose graph point count")
+  (assert (= (. (. sandbox-light-items 3) 1 :count) 1) "sandbox lights node should expose sandbox point count")
+  (graph-panels:drop)
+  (sandbox-panels:drop)
+  (graph-terrains:drop)
+  (sandbox-terrains:drop)
+  (graph-lights:drop)
+  (sandbox-lights:drop))
 
 (fn test-world-node-has-actions []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
@@ -648,6 +704,7 @@
 (fn test-scene-panel-node-has-remove-action []
   (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
   (local node (ScenePanelNode {:world-id "test-world"
+                               :activity-id "sandbox"
                                :world-manager (make-world-manager {:id "test-world"})
                                :panel-index 1}))
   (assert node.actions "ScenePanelNode should have actions")
@@ -675,6 +732,7 @@
                                                   :terrains [(make-heightfield-terrain-record {:id "t1"})]}
                                           :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager (make-world-manager {:id "test-world" :entry entry})
                             :terrain-id "t1"}))
   (assert (= node.label "terrain") "terrain node should stay generic")
@@ -697,6 +755,7 @@
                                              (set save-count (+ save-count 1)))}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (node:apply-values {:width 64
@@ -735,6 +794,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (node:apply-values {:width 72
@@ -766,6 +826,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (local (ok err)
@@ -789,6 +850,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (node:apply-values {:width 72
@@ -832,6 +894,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (node:apply-values {:width 72
@@ -869,6 +932,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (local (ok err)
@@ -904,6 +968,7 @@
                                              (set save-count (+ save-count 1)))}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldTerrainNode {:world-id "test-world"
+                                       :activity-id "sandbox"
                                        :world-manager manager
                                        :terrain-id "terrain-a"}))
   (node:apply-values {:name "mesa"
@@ -939,6 +1004,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldTerrainNode {:world-id "test-world"
+                                       :activity-id "sandbox"
                                        :world-manager manager
                                        :terrain-id "terrain-a"}))
   (node:apply-values {:name "mesa"
@@ -970,6 +1036,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldTerrainNode {:world-id "test-world"
+                                       :activity-id "sandbox"
                                        :world-manager manager
                                        :terrain-id "terrain-a"}))
   (local (ok err)
@@ -992,6 +1059,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:seed 99
@@ -1020,6 +1088,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldFlatToolNode {:world-id "test-world"
+                                        :activity-id "sandbox"
                                         :world-manager manager
                                         :terrain-id "terrain-a"}))
   (node:apply-values {:target {:mode :rect
@@ -1046,6 +1115,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:target {:mode :rect
@@ -1072,6 +1142,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:target {:mode :rect
@@ -1108,6 +1179,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:min-chunk-x -1
@@ -1142,6 +1214,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:seed 99
@@ -1182,6 +1255,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:min-chunk-x 0
@@ -1214,6 +1288,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-values {:target {:mode :whole}
@@ -1248,6 +1323,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (node:apply-stroke-values {:targets [{:mode :rect :x0 1 :z0 1 :x1 1 :z1 1}
@@ -1271,12 +1347,13 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
   (local editor (node:open-editor))
   (assert editor "TerrainNode should create a type-specific editor")
-  (assert (= editor.key "terrain-editor:test-world:terrain-a") "editor key should be stable")
+  (assert (= editor.key "activity-terrain-editor:test-world:sandbox:terrain-a") "editor key should include activity-id")
   (assert (= (graph:edge-count) 1) "opening terrain editor should add one edge")
   (graph:drop))
 
@@ -1291,6 +1368,7 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
@@ -1304,8 +1382,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "adding a heightfield terrain should return the created record")
   (assert (= (length state.scene.terrains) 1) "adding a terrain should append to world state")
@@ -1318,8 +1397,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "adding a heightfield terrain should return the created record")
   (assert (= (. added :kind) "heightfield-terrain") "heightfield add should preserve terrain kind")
@@ -1338,6 +1418,7 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
@@ -1345,7 +1426,7 @@
   (assert (= node.has-editor? true) "heightfield terrain should advertise its editor")
   (local editor (node:open-editor))
   (assert editor "heightfield terrain should open a type-specific editor")
-  (assert (= editor.key "terrain-editor:test-world:terrain-a") "heightfield terrain editor key should be stable")
+  (assert (= editor.key "activity-terrain-editor:test-world:sandbox:terrain-a") "heightfield terrain editor key should include activity-id")
   (graph:drop))
 
 (fn test-light-type-node-add-light-updates-world-state []
@@ -1356,6 +1437,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightTypeNode {:world-id "test-world"
+                              :activity-id "sandbox"
                               :world-manager (make-world-manager {:id "test-world" :entry entry})
                               :type-key "point"}))
   (local added (node:add-light))
@@ -1375,6 +1457,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightTypeNode {:world-id "test-world"
+                              :activity-id "sandbox"
                               :world-manager (make-world-manager {:id "test-world" :entry entry})
                               :type-key "point"}))
   (local added (node:add-light))
@@ -1394,6 +1477,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightTypeNode {:world-id "test-world"
+                              :activity-id "sandbox"
                               :world-manager (make-world-manager {:id "test-world" :entry entry})
                               :type-key "point"}))
   (assert (not (node:can-add-light?)) "point light type node should stop additions at max count")
@@ -1412,6 +1496,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightTypeNode {:world-id "test-world"
+                              :activity-id "sandbox"
                               :world-manager (make-world-manager {:id "test-world" :entry entry})
                               :type-key "ambient"}))
   (assert (not (node:show-add-controls?)) "ambient light type node should not behave like an addable collection")
@@ -1442,9 +1527,9 @@
    (local manager (make-world-manager {:id "test-world" :entry entry}))
    (local (ok err)
      (pcall (fn []
-              (WorldData.list-light-types manager "test-world"))))
+               (WorldData.list-light-types manager "test-world" "sandbox"))))
    (assert (not ok) "light reads should fail loudly when sandbox scene lights are missing")
-   (assert (string.find (tostring err) "requires sandbox scene.lights" 1 true)
+    (assert (string.find (tostring err) "requires activity sandbox scene.lights" 1 true)
            "missing sandbox scene lights should be reported directly"))
 
 (fn test-light-node-updates-world-state-and-active-scene []
@@ -1465,6 +1550,7 @@
                                       :entry entry
                                       :active-world-id "test-world"}))
   (local node (LightNode {:world-id "test-world"
+                          :activity-id "sandbox"
                           :world-manager manager
                           :type-key "point"
                           :light-id "point-1"}))
@@ -1500,6 +1586,7 @@
                                       :entry entry
                                       :active-world-id "test-world"}))
   (local node (LightNode {:world-id "test-world"
+                          :activity-id "sandbox"
                           :world-manager manager
                           :type-key "ambient"
                           :light-id "ambient"}))
@@ -1522,7 +1609,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.update-light-record manager "test-world" "point" "point-1"
+              (WorldData.update-light-record manager "test-world" "sandbox" "point" "point-1"
                (fn [record]
                  (set record.linear "bad"))))))
   (assert (not ok) "world-data light updates should fail loudly for invalid light values")
@@ -1539,7 +1626,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.update-light-record manager "test-world" "point" "point-9"
+              (WorldData.update-light-record manager "test-world" "sandbox" "point" "point-9"
                (fn [_record] nil)))))
   (assert (not ok) "world-data should fail loudly when updating a missing light")
   (assert (string.find (tostring err) "Cannot update missing point light point-9" 1 true)
@@ -1554,6 +1641,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightNode {:world-id "test-world"
+                          :activity-id "sandbox"
                           :world-manager (make-world-manager {:id "test-world" :entry entry})
                           :type-key "point"
                           :light-id "point-1"}))
@@ -1572,7 +1660,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.remove-light manager "test-world" "point" "point-9"))))
+              (WorldData.remove-light manager "test-world" "sandbox" "point" "point-9"))))
   (assert (not ok) "world-data should fail loudly when removing a missing light")
   (assert (string.find (tostring err) "Cannot remove missing point light point-9" 1 true)
           "missing light removal should identify the absent light"))
@@ -1586,21 +1674,21 @@
                   :active-world-id (fn [_self] nil)})
   (local (ok-add err-add)
     (pcall (fn []
-             (WorldData.add-light manager "missing-world" "point"))))
+              (WorldData.add-light manager "missing-world" "sandbox" "point"))))
   (assert (not ok-add) "add-light should fail loudly when the world is missing")
   (assert (string.find (tostring err-add) "missing world missing-world" 1 true)
           "add-light should identify the missing world")
   (local (ok-update err-update)
     (pcall
       (fn []
-        (WorldData.update-light-record manager "missing-world" "point" "point-1"
+        (WorldData.update-light-record manager "missing-world" "sandbox" "point" "point-1"
           (fn [_record] nil)))))
   (assert (not ok-update) "update-light-record should fail loudly when the world is missing")
   (assert (string.find (tostring err-update) "missing world missing-world" 1 true)
           "update-light-record should identify the missing world")
   (local (ok-remove err-remove)
     (pcall (fn []
-             (WorldData.remove-light manager "missing-world" "point" "point-1"))))
+              (WorldData.remove-light manager "missing-world" "sandbox" "point" "point-1"))))
   (assert (not ok-remove) "remove-light should fail loudly when the world is missing")
   (assert (string.find (tostring err-remove) "missing world missing-world" 1 true)
           "remove-light should identify the missing world"))
@@ -1613,6 +1701,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightNode {:world-id "test-world"
+                          :activity-id "sandbox"
                           :world-manager (make-world-manager {:id "test-world" :entry entry})
                           :type-key "ambient"
                           :light-id "ambient"}))
@@ -1632,12 +1721,13 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
   (local tool-node (node:open-tool "apply-perlin"))
   (assert tool-node "TerrainNode should create a dedicated terrain tool node")
-  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:apply-perlin") "terrain tool key should be stable")
+  (assert (= tool-node.key "activity-terrain-tool:test-world:sandbox:terrain-a:apply-perlin") "terrain tool key should include activity-id")
   (assert (= (graph:edge-count) 1) "opening a terrain tool should add one edge")
   (graph:drop))
 
@@ -1650,12 +1740,13 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
   (local tool-node (node:open-tool "resize-terrain"))
   (assert tool-node "TerrainNode should create a resize terrain tool node")
-  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:resize-terrain") "resize terrain tool key should be stable")
+  (assert (= tool-node.key "activity-terrain-tool:test-world:sandbox:terrain-a:resize-terrain") "resize terrain tool key should include activity-id")
   (assert (= (graph:edge-count) 1) "opening the resize terrain tool should add one edge")
   (graph:drop))
 
@@ -1668,12 +1759,13 @@
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
+                            :activity-id "sandbox"
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
   (local tool-node (node:open-tool "adjust-height"))
   (assert tool-node "TerrainNode should create an adjust-height tool node")
-  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:adjust-height") "adjust-height tool key should be stable")
+  (assert (= tool-node.key "activity-terrain-tool:test-world:sandbox:terrain-a:adjust-height") "adjust-height tool key should include activity-id")
   (assert (= (graph:edge-count) 1) "opening the adjust-height tool should add one edge")
   (graph:drop))
 
@@ -1692,8 +1784,9 @@
                                   :on-save (fn [_state]
                                              (set saved-count (+ saved-count 1)))}))
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :entry entry})}))
+                                                                  :entry entry})}))
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "active terrain add should return the created record")
   (assert added-record "active terrain add should sync into the live scene")
@@ -1706,8 +1799,9 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (local (ok err) (pcall (fn []
                            (node:add-terrain "voxel-terrain"))))
   (assert (not ok) "unsupported terrain kinds should fail loudly")
@@ -1722,12 +1816,13 @@
   (local state {:scene {:panels [] :terrains []}
                 :hud {:panels []}})
   (local node (TerrainsNode {:world-id "test-world"
+                             :activity-id "sandbox"
                              :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
+                                                                  :state state})}))
   (graph:add-node node {})
   (local added (node:add-terrain "heightfield-terrain"))
   (assert added "graph terrain add should return the created record")
-  (local terrain-key (.. "terrain:test-world:" added.id))
+  (local terrain-key (.. "activity-terrain:test-world:sandbox:" added.id))
   (local terrain-node (graph:lookup terrain-key))
   (assert terrain-node "new terrain should appear in the graph when parent node is mounted")
   (assert (= (graph:edge-count) 1) "new terrain graph attachment should add one edge from terrains node")
@@ -1742,6 +1837,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (assert (node:remove-terrain) "flat terrain removal should succeed")
@@ -1770,6 +1866,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (assert (node:remove-terrain) "active flat terrain removal should succeed")
@@ -1791,6 +1888,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (local (ok err) (pcall (fn [] (node:remove-terrain))))
@@ -1807,6 +1905,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (assert (node:remove-terrain) "perlin terrain removal should succeed")
@@ -1832,6 +1931,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (assert (node:remove-terrain) "active perlin terrain removal should succeed")
@@ -1852,6 +1952,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :activity-id "sandbox"
                                   :world-manager manager
                                   :terrain-id "terrain-a"}))
   (local (ok err) (pcall (fn [] (node:remove-terrain))))
@@ -1926,7 +2027,7 @@
                                                   :terrains []}
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (ScenePanelsNode {:world-id "test-world" :world-manager manager}))
+  (local node (ScenePanelsNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager}))
   (local items (node:emit-items))
   (assert (= (length items) 2) "ScenePanelsNode should read inactive world scene state")
   (assert (= (. (. items 1) 2) "alpha [1]") "first scene panel label should come from world state")
@@ -1960,6 +2061,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (ScenePanelNode {:world-id "test-world"
+                               :activity-id "sandbox"
                                :world-manager manager
                                :panel-index 1}))
   (assert (node:remove-panel) "scene panel removal should succeed")
@@ -1984,15 +2086,17 @@
                                          entry
                                          nil))})
   (local node-a (ScenePanelNode {:world-id "test-world"
+                                 :activity-id "sandbox"
                                  :world-manager manager
                                  :panel-index 1}))
   (local node-b (ScenePanelNode {:world-id "test-world"
+                                 :activity-id "sandbox"
                                  :world-manager manager
                                  :panel-index 2}))
   (graph:add-node node-a {})
   (graph:add-node node-b {})
   (assert (node-a:remove-panel) "scene panel removal should succeed")
-  (assert (= (graph:lookup "scene-panel:test-world:2") nil)
+  (assert (= (graph:lookup "activity-scene-panel:test-world:sandbox:2") nil)
           "shifted sibling nodes should be removed after panel deletion")
   (graph:drop))
 
@@ -2054,12 +2158,13 @@
                                          entry
                                          nil))})
   (local node (ScenePanelNode {:world-id "test-world"
+                               :activity-id "sandbox"
                                :world-manager manager
                                :panel-index 1}))
   (graph:add-node node {})
   (set entry nil)
   (changed:emit {})
-  (assert (= (graph:lookup "scene-panel:test-world:1") nil)
+  (assert (= (graph:lookup "activity-scene-panel:test-world:sandbox:1") nil)
           "ScenePanelNode should remove itself when its world disappears")
   (graph:drop))
 
@@ -2068,9 +2173,9 @@
     (fn [dir]
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
-      (local result (graph:load-by-key "scene-panels:test-world"))
+      (local result (graph:load-by-key "activity-scene-panels:test-world:sandbox"))
       (assert result "scene-panels loader should create node")
-      (assert (= result.key "scene-panels:test-world") "scene-panels key should match")
+      (assert (= result.key "activity-scene-panels:test-world:sandbox") "scene-panels key should match")
       (result:drop)
       (graph:drop))))
 
@@ -2090,9 +2195,9 @@
     (fn [dir]
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
-      (local result (graph:load-by-key "terrains:test-world"))
+      (local result (graph:load-by-key "activity-terrains:test-world:sandbox"))
       (assert result "terrains loader should create node")
-      (assert (= result.key "terrains:test-world") "terrains key should match")
+      (assert (= result.key "activity-terrains:test-world:sandbox") "terrains key should match")
       (result:drop)
       (graph:drop))))
 
@@ -2112,9 +2217,9 @@
                                                       :background (make-background-state)}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "scene-panel:test-world:5"))
+      (local result (graph:load-by-key "activity-scene-panel:test-world:sandbox:5"))
       (assert result "scene-panel loader should create node")
-      (assert (= result.key "scene-panel:test-world:5") "scene-panel key should match")
+      (assert (= result.key "activity-scene-panel:test-world:sandbox:5") "scene-panel key should match")
       (assert (= result.panel-index 5) "scene-panel index should be parsed")
       (result:drop)
       (graph:drop))))
@@ -2150,9 +2255,9 @@
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "terrain:test-world:terrain-abc"))
+      (local result (graph:load-by-key "activity-terrain:test-world:sandbox:terrain-abc"))
       (assert result "terrain loader should create node")
-      (assert (= result.key "terrain:test-world:terrain-abc") "terrain key should match")
+      (assert (= result.key "activity-terrain:test-world:sandbox:terrain-abc") "terrain key should match")
       (assert (= result.terrain-id "terrain-abc") "terrain-id should be parsed")
       (result:drop)
       (graph:drop))))
@@ -2166,9 +2271,9 @@
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
+      (local result (graph:load-by-key "activity-terrain-editor:test-world:sandbox:terrain-abc"))
       (assert result "terrain editor loader should create node")
-      (assert (= result.key "terrain-editor:test-world:terrain-abc") "terrain editor key should match")
+      (assert (= result.key "activity-terrain-editor:test-world:sandbox:terrain-abc") "terrain editor key should match")
       (assert (= result.terrain-id "terrain-abc") "terrain editor terrain-id should be parsed")
       (assert (= result.terrain-kind "heightfield-terrain") "terrain editor should preserve terrain kind")
       (result:drop)
@@ -2183,9 +2288,9 @@
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
+      (local result (graph:load-by-key "activity-terrain-editor:test-world:sandbox:terrain-abc"))
       (assert result "heightfield terrain editor loader should create node")
-      (assert (= result.key "terrain-editor:test-world:terrain-abc") "heightfield terrain editor key should match")
+      (assert (= result.key "activity-terrain-editor:test-world:sandbox:terrain-abc") "heightfield terrain editor key should match")
       (assert (= result.terrain-id "terrain-abc") "heightfield terrain editor terrain-id should be parsed")
       (assert (= result.terrain-kind "heightfield-terrain") "heightfield terrain editor should preserve terrain kind")
       (result:drop)
@@ -2200,9 +2305,9 @@
                                                       :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "terrain-tool:test-world:terrain-abc:apply-perlin"))
+      (local result (graph:load-by-key "activity-terrain-tool:test-world:sandbox:terrain-abc:apply-perlin"))
       (assert result "terrain tool loader should create node")
-      (assert (= result.key "terrain-tool:test-world:terrain-abc:apply-perlin") "terrain tool key should match")
+      (assert (= result.key "activity-terrain-tool:test-world:sandbox:terrain-abc:apply-perlin") "terrain tool key should match")
       (assert (= result.terrain-id "terrain-abc") "terrain tool terrain-id should be parsed")
       (result:drop)
       (graph:drop))))
@@ -2217,9 +2322,9 @@
                                                       :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local lights-node (graph:load-by-key "lights:test-world"))
-      (local type-node (graph:load-by-key "light-type:test-world:point"))
-      (local light-node (graph:load-by-key "light:test-world:point:point-1"))
+      (local lights-node (graph:load-by-key "activity-lights:test-world:sandbox"))
+      (local type-node (graph:load-by-key "activity-light-type:test-world:sandbox:point"))
+      (local light-node (graph:load-by-key "activity-light:test-world:sandbox:point:point-1"))
       (assert lights-node "lights loader should create node")
       (assert type-node "light type loader should create node")
       (assert light-node "light loader should create node")
@@ -2278,6 +2383,7 @@
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local node (LightTypeNode {:world-id "test-world"
+                              :activity-id "sandbox"
                               :world-manager (make-world-manager {:id "test-world" :entry entry})
                               :type-key "ambient"}))
   (local builder (LightTypeNodeView node))
@@ -2380,6 +2486,7 @@
 (table.insert tests {:name "hud panels node has emit items" :fn test-hud-panels-node-has-emit-items})
 (table.insert tests {:name "terrains node has emit items" :fn test-terrains-node-has-emit-items})
 (table.insert tests {:name "lights node has emit items" :fn test-lights-node-has-emit-items})
+(table.insert tests {:name "scene category nodes isolate activity state" :fn test-scene-category-nodes-isolate-activity-state})
 (table.insert tests {:name "world node has actions" :fn test-world-node-has-actions})
 (table.insert tests {:name "scene panel node has remove action" :fn test-scene-panel-node-has-remove-action})
 (table.insert tests {:name "hud panel node has remove action" :fn test-hud-panel-node-has-remove-action})
@@ -2535,6 +2642,7 @@
                                       :entry entry
                                       :active-world-id entry.id}))
   (local node (LightNode {:world-id entry.id
+                          :activity-id "sandbox"
                           :world-manager manager
                           :type-key options.type-key
                           :light-id options.light-id}))
@@ -3359,6 +3467,7 @@
                                       :active? true
                                       :entry entry}))
   (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :activity-id "sandbox"
                                           :world-manager manager
                                           :terrain-id "terrain-a"}))
   (local updated
@@ -3503,6 +3612,7 @@
                                :hud {:panels []}}}))
   (local world-manager (make-world-manager {:id "world-a" :entry entry}))
   (local node (HeightfieldAdjustToolNode {:world-id "world-a"
+                                          :activity-id "sandbox"
                                           :world-manager world-manager
                                           :terrain-id "terrain-a"}))
   (var payload nil)
