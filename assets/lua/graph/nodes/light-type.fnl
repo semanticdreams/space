@@ -9,6 +9,14 @@
 
 (local M {})
 
+(fn activity-node-key? [key]
+  (= (string.sub (or key "") 1 (string.len "activity-light-type:")) "activity-light-type:"))
+
+(fn light-node-key [self light-id]
+  (if (activity-node-key? self.key)
+      (.. "activity-light:" self.world-id ":" self.activity-id ":" self.type-key ":" light-id)
+      (.. "light:" self.world-id ":" self.type-key ":" light-id)))
+
 (fn M.LightTypeNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightTypeNode requires :world-id"))
@@ -17,7 +25,10 @@
   (local type-key (assert options.type-key "LightTypeNode requires :type-key"))
   (local spec (assert (LightSystemModule.type-spec type-key)
                       (.. "LightTypeNode unsupported type " (tostring type-key))))
-  (local key (or options.key (.. "light-type:" world-id ":" type-key)))
+  (local key (or options.key
+                 (if options.activity-id
+                     (.. "activity-light-type:" world-id ":" activity-id ":" type-key)
+                     (.. "light-type:" world-id ":" type-key))))
   (local node (GraphNode {:key key
                           :label spec.label
                           :color (glm.vec4 0.78 0.68 0.28 1)
@@ -61,11 +72,12 @@
          (when (and graph entry entry.light-id)
            (local light-node
               (LightNode {:world-id self.world-id
-                          :activity-id self.activity-id
-                          :world-manager self.world-manager
-                         :type-key self.type-key
-                         :light-id entry.light-id
-                         :light-record entry.record}))
+                           :activity-id self.activity-id
+                           :world-manager self.world-manager
+                          :type-key self.type-key
+                          :light-id entry.light-id
+                          :light-record entry.record
+                          :key (light-node-key self entry.light-id)}))
            (graph:add-edge (GraphEdge {:source self
                                        :target light-node})))))
   (set node.add-light

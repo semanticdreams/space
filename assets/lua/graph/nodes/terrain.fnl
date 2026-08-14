@@ -14,6 +14,19 @@
       fallback
       "terrain"))
 
+(fn activity-node-key? [key]
+  (= (string.sub (or key "") 1 (string.len "activity-terrain:")) "activity-terrain:"))
+
+(fn terrain-editor-key [self]
+  (if (activity-node-key? self.key)
+      (.. "activity-terrain-editor:" self.world-id ":" self.activity-id ":" self.terrain-id)
+      (.. "terrain-editor:" self.world-id ":" self.terrain-id)))
+
+(fn terrain-tool-key [self tool-id]
+  (if (activity-node-key? self.key)
+      (.. "activity-terrain-tool:" self.world-id ":" self.activity-id ":" self.terrain-id ":" tool-id)
+      (.. "terrain-tool:" self.world-id ":" self.terrain-id ":" tool-id)))
+
 (fn M.TerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainNode requires :world-id"))
@@ -26,7 +39,10 @@
   (local terrain (or options.terrain resolved.entry resolved.record {}))
   (local terrain-record (or options.terrain-record resolved.record {}))
   (local terrain-kind (or terrain.kind terrain-record.kind resolved.kind "unknown"))
-  (local key (or options.key (.. "terrain:" world-id ":" terrain-id)))
+  (local key (or options.key
+                 (if options.activity-id
+                     (.. "activity-terrain:" world-id ":" activity-id ":" terrain-id)
+                     (.. "terrain:" world-id ":" terrain-id))))
   (local label (terrain-node-label terrain-record options.label))
   (local node (GraphNode {:key key
                            :label label
@@ -49,10 +65,11 @@
          (local graph self.graph)
          (local editor
            (and graph
-                 (TerrainEditors.create-editor-node {:world-id self.world-id
-                                                     :activity-id self.activity-id
-                                                     :terrain-id self.terrain-id
-                                                    :world-manager self.world-manager})))
+                  (TerrainEditors.create-editor-node {:world-id self.world-id
+                                                      :activity-id self.activity-id
+                                                      :terrain-id self.terrain-id
+                                                     :world-manager self.world-manager
+                                                     :key (terrain-editor-key self)})))
          (when (and graph editor)
            (graph:add-edge (GraphEdge {:source self :target editor})))
 	         editor))
@@ -64,9 +81,10 @@
                  (TerrainTools.create-tool-node {:world-id self.world-id
                                                  :activity-id self.activity-id
                                                  :terrain-id self.terrain-id
-                                                :terrain-kind self.terrain-kind
-                                                :world-manager self.world-manager
-                                                :tool-id tool-id})))
+                                                 :terrain-kind self.terrain-kind
+                                                 :world-manager self.world-manager
+                                                 :tool-id tool-id
+                                                 :key (terrain-tool-key self tool-id)})))
          (when (and graph tool-node)
            (graph:add-edge (GraphEdge {:source self :target tool-node})))
          tool-node))

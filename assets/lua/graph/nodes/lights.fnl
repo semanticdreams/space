@@ -8,6 +8,14 @@
 
 (local M {})
 
+(fn activity-node-key? [key]
+  (= (string.sub (or key "") 1 (string.len "activity-lights:")) "activity-lights:"))
+
+(fn light-type-node-key [self type-key]
+  (if (activity-node-key? self.key)
+      (.. "activity-light-type:" self.world-id ":" self.activity-id ":" type-key)
+      (.. "light-type:" self.world-id ":" type-key)))
+
 (fn M.LightsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightsNode requires :world-id"))
@@ -37,10 +45,11 @@
          (local graph self.graph)
          (when (and graph entry entry.type-key)
             (local light-type-node
-              (LightTypeNode {:world-id self.world-id
-                              :activity-id self.activity-id
-                              :world-manager self.world-manager
-                             :type-key entry.type-key}))
+               (LightTypeNode {:world-id self.world-id
+                               :activity-id self.activity-id
+                               :world-manager self.world-manager
+                              :type-key entry.type-key
+                              :key (light-type-node-key self entry.type-key)}))
            (graph:add-edge (GraphEdge {:source self
                                        :target light-type-node})))))
   (set node.actions

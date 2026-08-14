@@ -8,6 +8,14 @@
 
 (local M {})
 
+(fn activity-node-key? [key]
+  (= (string.sub (or key "") 1 (string.len "activity-scene-panels:")) "activity-scene-panels:"))
+
+(fn scene-panel-key [self panel-index]
+  (if (activity-node-key? self.key)
+      (.. "activity-scene-panel:" self.world-id ":" self.activity-id ":" panel-index)
+      (.. "scene-panel:" self.world-id ":" panel-index)))
+
 (fn M.ScenePanelsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelsNode requires :world-id"))
@@ -36,13 +44,14 @@
        (fn [self entry]
          (local graph self.graph)
          (when (and graph entry entry.index)
-            (local panel-node (ScenePanelNode {:world-id self.world-id
-                                               :activity-id self.activity-id
-                                               :world-manager self.world-manager
-                                              :panel-index entry.index
-                                              :panel entry.metadata
-                                              :panel-record entry.panel
-                                              :label entry.kind}))
+             (local panel-node (ScenePanelNode {:world-id self.world-id
+                                                :activity-id self.activity-id
+                                                :world-manager self.world-manager
+                                               :panel-index entry.index
+                                               :panel entry.metadata
+                                               :panel-record entry.panel
+                                               :label entry.kind
+                                               :key (scene-panel-key self entry.index)}))
            (graph:add-edge (GraphEdge {:source self
                                        :target panel-node})))))
   (set node.actions

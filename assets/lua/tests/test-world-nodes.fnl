@@ -555,8 +555,8 @@
   (node:drop))
 
 (fn test-world-node-add-category-node []
-  (local {:WorldNode WorldNode} (require :graph/nodes/world)) (local {:WorldActivitiesNode WorldActivitiesNode} (require :graph/nodes/world-activities)) (local {:WorldActivityNode WorldActivityNode} (require :graph/nodes/world-activity)) (local {:ActivitySurfacesNode ActivitySurfacesNode} (require :graph/nodes/activity-surfaces)) (local graph (Graph {:with-start false}))
-  (local state {:scene {:panels [] :terrains []} :hud {:panels []} :activity {:active_id "sandbox" :sessions {:sandbox {:scene {:panels [] :terrains [] :lights (make-light-state) :skybox (make-skybox-state) :background (make-background-state) :containment {:enabled? false}}} :graph {:scene {:panels [] :terrains []} :hud {:panels []} :canvas {:items []}} :drawing {:scene {:panels [] :terrains []}} :board {:scene {:panels [] :terrains []}}}}})
+  (local {:WorldNode WorldNode} (require :graph/nodes/world)) (local {:WorldActivitiesNode WorldActivitiesNode} (require :graph/nodes/world-activities)) (local {:WorldActivityNode WorldActivityNode} (require :graph/nodes/world-activity)) (local {:ActivitySurfacesNode ActivitySurfacesNode} (require :graph/nodes/activity-surfaces)) (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels)) (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains)) (local {:LightsNode LightsNode} (require :graph/nodes/lights)) (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type)) (local graph (Graph {:with-start false}))
+  (local state {:scene {:panels [] :terrains []} :hud {:panels []} :activity {:active_id "sandbox" :sessions {:sandbox {:scene {:panels [] :terrains [] :lights (make-light-state) :skybox (make-skybox-state) :background (make-background-state) :containment {:enabled? false}}} :graph {:scene {:panels [{:kind "alpha"}] :terrains [(make-heightfield-terrain-record {:id "terrain-a"})] :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]}) :skybox (make-skybox-state) :background (make-background-state)} :hud {:panels []} :canvas {:items []}} :drawing {:scene {:panels [{:kind "beta"}] :terrains [(make-heightfield-terrain-record {:id "terrain-a"})] :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]}) :skybox (make-skybox-state) :background (make-background-state)}} :board {:scene {:panels [] :terrains []}}}}})
   (local entry (make-world-entry {:id "test-world-123" :state state})) (local mock-manager (make-world-manager {:id "test-world-123" :entry entry})) (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (graph:add-node node {}) (local categories (node:emit-categories)) (node:add-category-node (. categories 1))
   (assert (= (graph:edge-count) 1) "WorldNode add-category-node should create 1 edge") (local activities (WorldActivitiesNode {:world-id "test-world-123" :world-manager mock-manager}))
@@ -565,6 +565,13 @@
   (assert (= opened-surfaces.key "activity-surfaces:test-world-123:sandbox") "activity node should open surfaces") (local surfaces (ActivitySurfacesNode {:world-id "test-world-123" :activity-id "graph" :world-manager mock-manager}))
   (local surface-seen {}) (each [_ item (ipairs (surfaces:emit-items))] (set (. surface-seen (. item 1 :surface-key)) true))
   (assert (and surface-seen.scene surface-seen.hud surface-seen.canvas) "surfaces node should list owned scene/hud/canvas")
+  (local scene-panels (ScenePanelsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-scene-panels:test-world-123:drawing"})) (graph:add-node scene-panels {}) (scene-panels:add-panel-node (. (. (scene-panels:emit-items) 1) 1))
+  (assert (graph:lookup "activity-scene-panel:test-world-123:drawing:1") "activity scene panel key should include activity-id")
+  (local terrains (TerrainsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-terrains:test-world-123:drawing"})) (graph:add-node terrains {}) (terrains:open-terrain-node (. (. (terrains:emit-items) 1) 1))
+  (assert (graph:lookup "activity-terrain:test-world-123:drawing:terrain-a") "activity terrain key should include activity-id")
+  (local lights (LightsNode {:world-id "test-world-123" :activity-id "drawing" :world-manager mock-manager :key "activity-lights:test-world-123:drawing"})) (graph:add-node lights {}) (lights:add-type-node (. (. (lights:emit-items) 3) 1))
+  (local light-type (assert (graph:lookup "activity-light-type:test-world-123:drawing:point") "activity light type key should include activity-id")) (light-type:open-light-node (. (. (light-type:emit-items) 1) 1))
+  (assert (graph:lookup "activity-light:test-world-123:drawing:point:point-1") "activity light key should include activity-id")
   (node:drop) (activities:drop) (surfaces:drop) (graph:drop))
 
 (fn test-worlds-node-has-emit-items []

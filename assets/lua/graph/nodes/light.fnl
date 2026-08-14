@@ -31,7 +31,10 @@
                        (WorldData.find-light world-manager world-id activity-id type-key light-id)
                       {}))
   (local light-record (or options.light-record resolved.record {}))
-  (local key (or options.key (.. "light:" world-id ":" type-key ":" light-id)))
+  (local key (or options.key
+                 (if options.activity-id
+                     (.. "activity-light:" world-id ":" activity-id ":" type-key ":" light-id)
+                     (.. "light:" world-id ":" type-key ":" light-id))))
   (local node (GraphNode {:key key
                           :label (light-label type-key light-id)
                           :color (glm.vec4 0.82 0.7 0.26 1)

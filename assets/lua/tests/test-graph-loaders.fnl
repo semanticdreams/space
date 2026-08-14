@@ -637,7 +637,7 @@
 
 (fn make-activity-world-manager []
   (local Signal (require :signal))
-  (local scene-state {:panels [] :terrains [] :lights {:ambient {:id "ambient"} :directional [] :point [] :spot []}
+  (local scene-state {:panels [{:kind "alpha"}] :terrains [{:id "terrain-a" :kind "heightfield-terrain" :options {}}] :lights {:ambient {:id "ambient"} :directional [] :point [{:id "point-1"}] :spot []}
                       :skybox {:enabled? true :default {:name "lake" :brightness 0.1} :by-theme {}}
                       :background {:color [0.0 0.0 0.0]} :containment {:enabled? false}})
   (local entry {:id "test-world" :name "Test World" :world {:state {:scene {:panels [] :terrains []} :hud {:panels []}
@@ -649,8 +649,8 @@
   (local Graph (require :graph/init))
   (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
-  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager)})
-  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox"])]
+  (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
+  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
     (local node (graph:load-by-key key))
     (assert node (.. "loader should resolve " key))
     (assert (= node.key key) (.. "loader should preserve key " key)))

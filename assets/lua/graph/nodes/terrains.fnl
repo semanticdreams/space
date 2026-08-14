@@ -9,6 +9,14 @@
 
 (local M {})
 
+(fn activity-node-key? [key]
+  (= (string.sub (or key "") 1 (string.len "activity-terrains:")) "activity-terrains:"))
+
+(fn terrain-node-key [self terrain-id]
+  (if (activity-node-key? self.key)
+      (.. "activity-terrain:" self.world-id ":" self.activity-id ":" terrain-id)
+      (.. "terrain:" self.world-id ":" terrain-id)))
+
 (fn M.TerrainsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainsNode requires :world-id"))
@@ -41,7 +49,7 @@
   (fn attach-terrain-node [self entry]
     (local graph self.graph)
     (when (and graph entry entry.terrain-id)
-      (local terrain-key (.. "terrain:" self.world-id ":" entry.terrain-id))
+      (local terrain-key (terrain-node-key self entry.terrain-id))
 	      (local terrain-node
 	        (or (graph:lookup terrain-key)
 	            (TerrainNode {:world-id self.world-id
@@ -49,7 +57,8 @@
 	                          :world-manager self.world-manager
 	                          :terrain-id entry.terrain-id
 	                          :terrain entry.entry
-	                          :terrain-record entry.record})))
+	                          :terrain-record entry.record
+                              :key terrain-key})))
       (graph:add-edge (GraphEdge {:source self
                                   :target terrain-node}))))
   (fn emit-items [self]

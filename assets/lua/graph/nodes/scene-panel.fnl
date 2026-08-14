@@ -19,7 +19,10 @@
   (local panel-record (or options.panel-record resolved.panel {}))
   (local persistence (or panel.persistence panel-record {}))
   (local panel-kind (or persistence.kind resolved.kind "unknown"))
-  (local key (or options.key (.. "scene-panel:" world-id ":" panel-index)))
+  (local key (or options.key
+                 (if options.activity-id
+                     (.. "activity-scene-panel:" world-id ":" activity-id ":" panel-index)
+                     (.. "scene-panel:" world-id ":" panel-index))))
   (local label (or options.label panel-kind))
   (local node (GraphNode {:key key
                            :label label
