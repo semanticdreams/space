@@ -96,11 +96,12 @@
 
 (fn runner-fails-step-on-invalid-contract-case [store]
       (local definition (define-workflow store [{:id "bad" :code-entity-id "code-bad"}]))
-      (local (runner _executor) (make-runner store {"bad" {:status :failed :error {:message "invalid outcome returned by workflow step" :data {:kind :invalid-outcome}}}}))
+      (local (runner _executor) (make-runner store {"bad" nil}))
       (local run (runner:start-run definition.id {} {}))
       (runner:tick-run run.id {})
       (assert (= (. (store:get-run-step run.id "bad") :status) :failed) "invalid contract should fail step")
       (assert (= (. (store:get-run run.id) :status) :failed) "invalid contract should fail run")
+      (assert (= (. (store:get-run-step run.id "bad") :error :data :kind) :invalid-outcome) "invalid contract should store structured error data")
       (assert (= (event-kind-count store run.id :step-failed) 1) "step-failed event should be appended"))
 
 (fn runner-fails-step-on-invalid-contract []
@@ -170,6 +171,28 @@
 (fn runner-branches-from-next-step-ids []
   (with-temp-store runner-branches-from-next-step-ids-case))
 
+(fn runner-skips-unselected-branch-descendants-case [store]
+      (local definition (define-workflow store [{:id "start" :code-entity-id "code-start"}
+                                                {:id "left" :code-entity-id "code-left"}
+                                                {:id "child" :code-entity-id "code-child"}
+                                                {:id "right" :code-entity-id "code-right"}]
+                                        [{:source-step-id "start" :target-step-id "left"}
+                                         {:source-step-id "start" :target-step-id "right"}
+                                         {:source-step-id "left" :target-step-id "child"}]))
+      (local (runner executor) (make-runner store {"start" {:status :succeeded :next-step-ids ["right"]}
+                                                   "child" {:status :succeeded :output {:side-effect true}}
+                                                   "right" {:status :succeeded :output {:ok true}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (runner:tick-run run.id {})
+      (assert (= (. executor.calls 2 :step-id) "right") "selected branch should run before any unselected descendant")
+      (assert (= (. (store:get-run-step run.id "left") :status) :skipped) "unselected branch root should be skipped")
+      (assert (= (. (store:get-run-step run.id "child") :status) :skipped) "unselected branch descendant should be skipped")
+      (assert (= (. (store:get-run run.id) :status) :succeeded) "workflow should succeed without running unselected descendant"))
+
+(fn runner-skips-unselected-branch-descendants []
+  (with-temp-store runner-skips-unselected-branch-descendants-case))
+
 (fn loop-outcome [calls _input _state]
   (if (< (length calls) 3)
       {:status :succeeded :next-step-ids ["loop"] :output {:count (length calls)}}
@@ -189,6 +212,31 @@
 
 (fn runner-loops-with-one-step-per-tick []
   (with-temp-store runner-loops-with-one-step-per-tick-case))
+
+(fn loop-exit-outcome [calls _input _state]
+  (if (= (length calls) 1)
+      {:status :succeeded :next-step-ids ["loop"] :output {:iteration 1}}
+      {:status :succeeded :output {:iteration 2}}))
+
+(fn runner-loop-exit-clears-stale-next-step-ids-case [store]
+      (local definition (define-workflow store [{:id "loop" :code-entity-id "code-loop"}
+                                                {:id "done" :code-entity-id "code-done"}]
+                                        [{:source-step-id "loop" :target-step-id "loop"}
+                                         {:source-step-id "loop" :target-step-id "done"}]))
+      (local (runner executor) (make-runner store {"loop" loop-exit-outcome
+                                                   "done" {:status :succeeded :output {:complete true}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (runner:tick-run run.id {})
+      (local done-status (. (store:get-run-step run.id "done") :status))
+      (local loop-next (. (store:get-run-step run.id "loop") :next-step-ids))
+      (assert (= done-status :ready) (.. "downstream continuation should become ready after loop exits, status=" (tostring done-status) " next=" (tostring loop-next)))
+      (runner:tick-run run.id {})
+      (assert (= (. executor.calls 3 :step-id) "done") "loop exit without next-step-ids should select downstream continuation")
+      (assert (= (. (store:get-run run.id) :status) :succeeded) "loop exit workflow should succeed"))
+
+(fn runner-loop-exit-clears-stale-next-step-ids []
+  (with-temp-store runner-loop-exit-clears-stale-next-step-ids-case))
 
 (fn runner-joins-after-all-inbound-steps-succeed-case [store]
       (local definition (define-workflow store [{:id "start" :code-entity-id "code-start"}
@@ -220,7 +268,9 @@
 (table.insert tests {:name "runner-retries-with-attempt-state" :fn runner-retries-with-attempt-state})
 (table.insert tests {:name "runner-cancels-run" :fn runner-cancels-run})
 (table.insert tests {:name "runner-branches-from-next-step-ids" :fn runner-branches-from-next-step-ids})
+(table.insert tests {:name "runner-skips-unselected-branch-descendants" :fn runner-skips-unselected-branch-descendants})
 (table.insert tests {:name "runner-loops-with-one-step-per-tick" :fn runner-loops-with-one-step-per-tick})
+(table.insert tests {:name "runner-loop-exit-clears-stale-next-step-ids" :fn runner-loop-exit-clears-stale-next-step-ids})
 (table.insert tests {:name "runner-joins-after-all-inbound-steps-succeed" :fn runner-joins-after-all-inbound-steps-succeed})
 
 (local main

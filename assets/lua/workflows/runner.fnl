@@ -66,9 +66,16 @@
 (fn nonterminal? [run-step]
   (not (terminal? run-step)))
 
-(fn selected-target? [source-run-step target-step-id]
-  (if (= source-run-step.next-step-ids nil)
-      true
+(fn unselected-skip? [run-step]
+  (and run-step (= run-step.status :skipped) (= run-step.skip-reason :unselected)))
+
+(fn selected-target? [source-run-step target-step-id source-step-id]
+  (if (unselected-skip? source-run-step)
+      false
+      (= source-run-step.next-step-ids nil)
+      (not (= source-step-id target-step-id))
+      (= source-run-step.next-step-ids :all)
+      (not (= source-step-id target-step-id))
       (contains? source-run-step.next-step-ids target-step-id)))
 
 (fn append-event [self run-id kind data]
@@ -133,7 +140,7 @@
           (local source-step (. run.steps source-step-id))
           (when source-step
             (if (terminal-success? source-step)
-                (when (selected-target? source-step step-id)
+                (when (selected-target? source-step step-id source-step-id)
                   (set selected-count (+ selected-count 1)))
                 (nonterminal? source-step)
                 (set pending-selected true)
@@ -154,20 +161,52 @@
       (table.insert ready step.id)))
   ready)
 
+(fn unselected-reachable? [run edge]
+  (local source-step (. run.steps edge.source-step-id))
+  (if (unselected-skip? source-step)
+      true
+      (terminal-success? source-step)
+      (not (selected-target? source-step edge.target-step-id edge.source-step-id))
+      false))
+
+(fn can-skip-as-unselected? [definition run step-id]
+  (local inbound (inbound-control-edges definition step-id))
+  (if (= (length inbound) 0)
+      false
+      (do
+        (var skippable true)
+        (each [_ edge (ipairs inbound)]
+          (when (not (unselected-reachable? run edge))
+            (set skippable false)))
+        skippable)))
+
+(fn skip-unselected-subgraph [self definition run step-id source-step-id]
+  (local target (. run.steps step-id))
+  (when (and target (= target.status :pending) (can-skip-as-unselected? definition run step-id))
+    (step-update self run step-id {:status :skipped :finished-at (now) :skip-reason :unselected})
+    (append-event self run.id :step-skipped {:step-id step-id :source-step-id source-step-id})
+    (local fresh (self.store:get-run run.id))
+    (each [_ edge (ipairs (outgoing-control-edges definition step-id))]
+      (skip-unselected-subgraph self definition fresh edge.target-step-id step-id))))
+
+(fn explicit-selection? [selected]
+  (and selected (not (= selected :all))))
+
+(fn target-selected? [selected target-step-id source-step-id]
+  (if (= selected :all)
+      (not (= source-step-id target-step-id))
+      (contains? selected target-step-id)))
+
 (fn skip-unselected-targets [self definition run source-step-id selected]
-  (when selected
+  (when (explicit-selection? selected)
     (each [_ edge (ipairs (outgoing-control-edges definition source-step-id))]
       (when (not (contains? selected edge.target-step-id))
-        (local target-step-id edge.target-step-id)
-        (local target (. run.steps target-step-id))
-        (when (and target (= target.status :pending))
-          (step-update self run edge.target-step-id {:status :skipped :finished-at (now) :skip-reason :unselected})
-          (append-event self run.id :step-skipped {:step-id edge.target-step-id :source-step-id source-step-id}))))))
+        (skip-unselected-subgraph self definition run edge.target-step-id source-step-id)))))
 
 (fn reset-selected-terminal-targets [self definition run source-step-id selected]
   (when selected
     (each [_ edge (ipairs (outgoing-control-edges definition source-step-id))]
-      (when (contains? selected edge.target-step-id)
+      (when (target-selected? selected edge.target-step-id source-step-id)
         (local target-step-id edge.target-step-id)
         (local target (. run.steps target-step-id))
         (when (and target (terminal-success? target))
@@ -227,30 +266,67 @@
       outcome.error
       {:message "workflow step failed"}))
 
+(fn valid-outcome-status? [status]
+  (if (= status :succeeded)
+      true
+      (= status :skipped)
+      true
+      (= status :waiting)
+      true
+      (= status :retry)
+      true
+      (= status :cancelled)
+      true
+      (= status :failed)
+      true
+      false))
+
+(fn invalid-outcome [outcome]
+  {:status :failed
+   :error {:message "invalid outcome returned by workflow step"
+           :data {:kind :invalid-outcome
+                  :returned-type (type outcome)
+                  :returned-status (if (= (type outcome) "table") outcome.status nil)}}})
+
+(fn normalize-outcome [outcome]
+  (if (not (= (type outcome) "table"))
+      (invalid-outcome outcome)
+      (not (valid-outcome-status? outcome.status))
+      (invalid-outcome outcome)
+      outcome))
+
+(fn routing-selection [outcome]
+  (if (= outcome.next-step-ids nil)
+      :all
+      outcome.next-step-ids))
+
 (fn fail-step [self run step-id outcome]
   (step-update self run step-id {:status :failed :error (outcome-error outcome) :finished-at (now)})
   (append-event self run.id :step-failed {:step-id step-id :error (outcome-error outcome)}))
 
 (fn apply-outcome [self definition run step outcome]
-  (local status outcome.status)
+  (local normalized (normalize-outcome outcome))
+  (local status normalized.status)
   (local step-id step.id)
   (if (= status :succeeded)
       (do
-        (step-update self run step-id {:status :succeeded :output (table-or-empty outcome.output) :state (table-or-empty outcome.state) :next-step-ids outcome.next-step-ids :finished-at (now)})
+        (local selection (routing-selection normalized))
+        (step-update self run step-id {:status :succeeded :output (table-or-empty normalized.output) :state (table-or-empty normalized.state) :next-step-ids selection :finished-at (now)})
         (append-event self run.id :step-succeeded {:step-id step-id})
-        (skip-unselected-targets self definition run step-id outcome.next-step-ids)
-        (reset-selected-terminal-targets self definition run step-id outcome.next-step-ids))
+        (skip-unselected-targets self definition (self.store:get-run run.id) step-id selection)
+        (reset-selected-terminal-targets self definition (self.store:get-run run.id) step-id selection))
       (= status :skipped)
       (do
-        (step-update self run step-id {:status :skipped :reason outcome.reason :next-step-ids outcome.next-step-ids :finished-at (now)})
-        (append-event self run.id :step-skipped {:step-id step-id :reason outcome.reason})
-        (skip-unselected-targets self definition run step-id outcome.next-step-ids))
+        (local selection (routing-selection normalized))
+        (step-update self run step-id {:status :skipped :reason normalized.reason :next-step-ids selection :finished-at (now)})
+        (append-event self run.id :step-skipped {:step-id step-id :reason normalized.reason})
+        (skip-unselected-targets self definition (self.store:get-run run.id) step-id selection))
       (= status :waiting)
       (do
         (step-update self run step-id {:status :waiting
-                                       :wait {:kind outcome.wait-kind :request outcome.request}
-                                       :state (table-or-empty outcome.state)})
-        (append-event self run.id :step-waiting {:step-id step-id :wait-kind outcome.wait-kind}))
+                                       :wait {:kind normalized.wait-kind :request normalized.request}
+                                       :state (table-or-empty normalized.state)})
+        (append-event self run.id :step-waiting {:step-id step-id :wait-kind normalized.wait-kind}))
       (= status :retry)
       (do
         (local current (. run.steps step-id))
@@ -259,15 +335,15 @@
         (local max-attempts (if (and step.retry step.retry.max-attempts) step.retry.max-attempts 0))
         (if (<= next-attempt max-attempts)
             (do
-              (step-update self run step-id {:status :ready :attempt next-attempt :state (table-or-empty outcome.state) :retry-after-ms outcome.delay-ms})
-              (append-event self run.id :step-retried {:step-id step-id :attempt next-attempt :delay-ms outcome.delay-ms}))
+              (step-update self run step-id {:status :ready :attempt next-attempt :state (table-or-empty normalized.state) :retry-after-ms normalized.delay-ms})
+              (append-event self run.id :step-retried {:step-id step-id :attempt next-attempt :delay-ms normalized.delay-ms}))
             (fail-step self run step-id {:error {:message "workflow step retry attempts exhausted" :data {:attempt next-attempt :max-attempts max-attempts}}})))
       (= status :cancelled)
       (do
-        (step-update self run step-id {:status :cancelled :output (table-or-empty outcome.output) :finished-at (now)})
+        (step-update self run step-id {:status :cancelled :output (table-or-empty normalized.output) :finished-at (now)})
         (append-event self run.id :step-cancelled {:step-id step-id}))
       (= status :failed)
-      (fail-step self run step-id outcome)))
+      (fail-step self run step-id normalized)))
 
 (fn execute-ready-step [self definition run step-id]
   (local step (assert (find-step definition step-id) (.. "missing workflow step: " step-id)))
