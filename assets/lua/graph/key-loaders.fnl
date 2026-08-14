@@ -255,110 +255,6 @@
         (when terrain-kind
           (TerrainTools.create-tool-node {:world-id world-id :activity-id activity-id :world-manager world-manager :terrain-id terrain-id :terrain-kind terrain-kind :tool-id tool-id :key key}))))))
 
-(fn register-temporary-legacy-scene-detail-loaders [graph world-manager]
-  ;; Temporary hydration compatibility for persisted topology created before
-  ;; activity-aware scene detail keys. Task 5 replaces this with deterministic
-  ;; persisted-key migration; do not use these schemes for new graph exposure.
-  (local legacy-activity-id "sandbox")
-  (graph:register-key-loader "scene-panel"
-    (prefix-loader "scene-panel:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 2)
-          (local world-id (. parts 1))
-          (local panel-index (tonumber (. parts 2)))
-          (local scene (and panel-index (resolve-activity-scene world-manager world-id legacy-activity-id)))
-          (local panel-entry (and scene (WorldData.find-scene-panel world-manager world-id legacy-activity-id panel-index)))
-          (when panel-entry
-            (ScenePanelNode {:world-id world-id
-                             :activity-id legacy-activity-id
-                             :world-manager world-manager
-                             :panel-index panel-index
-                             :panel-entry panel-entry
-                             :key key}))))))
-  (graph:register-key-loader "terrain"
-    (prefix-loader "terrain:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 2)
-          (local world-id (. parts 1))
-          (local terrain-id (. parts 2))
-          (local scene (resolve-activity-scene world-manager world-id legacy-activity-id))
-          (local terrain-entry (and scene (WorldData.find-terrain world-manager world-id legacy-activity-id terrain-id)))
-          (when terrain-entry
-            (TerrainNode {:world-id world-id
-                          :activity-id legacy-activity-id
-                          :world-manager world-manager
-                          :terrain-id terrain-id
-                          :terrain-entry terrain-entry
-                          :key key}))))))
-  (graph:register-key-loader "terrain-editor"
-    (prefix-loader "terrain-editor:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 2)
-          (local world-id (. parts 1))
-          (local terrain-id (. parts 2))
-          (local scene (resolve-activity-scene world-manager world-id legacy-activity-id))
-          (local terrain-entry (and scene (WorldData.find-terrain world-manager world-id legacy-activity-id terrain-id)))
-          (when terrain-entry
-            (TerrainEditors.create-editor-node {:world-id world-id
-                                                :activity-id legacy-activity-id
-                                                :world-manager world-manager
-                                                :terrain-id terrain-id
-                                                :terrain-entry terrain-entry
-                                                :key key}))))))
-  (graph:register-key-loader "terrain-tool"
-    (prefix-loader "terrain-tool:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 3)
-          (local world-id (. parts 1))
-          (local terrain-id (. parts 2))
-          (local tool-id (. parts 3))
-          (local scene (resolve-activity-scene world-manager world-id legacy-activity-id))
-          (local terrain-entry (and scene (WorldData.find-terrain world-manager world-id legacy-activity-id terrain-id)))
-          (local terrain-kind (and terrain-entry terrain-entry.kind))
-          (when terrain-kind
-            (TerrainTools.create-tool-node {:world-id world-id
-                                            :activity-id legacy-activity-id
-                                            :world-manager world-manager
-                                            :terrain-id terrain-id
-                                            :terrain-kind terrain-kind
-                                            :tool-id tool-id
-                                            :key key}))))))
-  (graph:register-key-loader "light-type"
-    (prefix-loader "light-type:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 2)
-          (local world-id (. parts 1))
-          (local type-key (. parts 2))
-          (when (resolve-activity-scene world-manager world-id legacy-activity-id)
-            (LightTypeNode {:world-id world-id
-                            :activity-id legacy-activity-id
-                            :world-manager world-manager
-                            :type-key type-key
-                            :key key}))))))
-  (graph:register-key-loader "light"
-    (prefix-loader "light:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (= (length parts) 3)
-          (local world-id (. parts 1))
-          (local type-key (. parts 2))
-          (local light-id (. parts 3))
-          (local scene (resolve-activity-scene world-manager world-id legacy-activity-id))
-          (local light-entry (and scene (WorldData.find-light world-manager world-id legacy-activity-id type-key light-id)))
-          (when light-entry
-            (LightNode {:world-id world-id
-                        :activity-id legacy-activity-id
-                        :world-manager world-manager
-                        :type-key type-key
-                        :light-id light-id
-                        :light-entry light-entry
-                        :key key})))))))
-
 (fn register-activity-hierarchy-loaders [graph world-manager asset-path-resolver]
   (graph:register-key-loader "world-activities"
     (prefix-loader "world-activities:"
@@ -395,8 +291,7 @@
       (make-activity-surface-loader world-manager asset-path-resolver surface-key)))
   (register-activity-scene-category-loaders graph world-manager asset-path-resolver)
   (register-activity-scene-child-loaders graph world-manager)
-  (register-activity-terrain-action-loaders graph world-manager)
-  (register-temporary-legacy-scene-detail-loaders graph world-manager))
+  (register-activity-terrain-action-loaders graph world-manager))
 
 (fn M.register [graph opts]
   (assert graph "GraphKeyLoaders.register requires graph")

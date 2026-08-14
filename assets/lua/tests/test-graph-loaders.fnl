@@ -661,8 +661,8 @@
     (assert (= (graph:load-by-key key) nil) (.. "legacy scene category loader should be absent: " key)))
   (graph:drop))
 
-(fn legacy-scene-detail-loaders-remain-temporarily-compatible []
-  "Legacy persisted detail keys should still hydrate until map-key migration lands."
+(fn legacy-scene-detail-loaders-are-absent-after-map-key-migration []
+  "Legacy persisted detail keys migrate in GraphMapManager; loaders should not keep aliases."
   (local Graph (require :graph/init))
   (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
@@ -673,9 +673,8 @@
                         "terrain-tool:test-world:terrain-a:apply-perlin"
                         "light-type:test-world:point"
                         "light:test-world:point:point-1"])]
-    (local node (graph:load-by-key key))
-    (assert node (.. "temporary legacy detail loader should resolve " key))
-    (assert (= node.key key) (.. "temporary legacy detail loader should preserve restored key " key)))
+    (assert (= (graph:load-by-key key) nil)
+            (.. "legacy scene detail loader should be absent: " key)))
   (graph:drop))
 
 (table.insert tests {:name "graph has register-key-loader"
@@ -702,8 +701,8 @@
                       :fn world-backed-loaders-return-nil-for-missing-objects})
 (table.insert tests {:name "activity hierarchy loaders resolve existing session"
                       :fn activity-hierarchy-loaders-resolve-existing-session})
-(table.insert tests {:name "legacy scene detail loaders remain temporarily compatible"
-                     :fn legacy-scene-detail-loaders-remain-temporarily-compatible})
+(table.insert tests {:name "legacy scene detail loaders are absent after map-key migration"
+                     :fn legacy-scene-detail-loaders-are-absent-after-map-key-migration})
 (table.insert tests {:name "multiple loaders match by scheme"
                       :fn multiple-loaders-match-by-scheme})
 (table.insert tests {:name "load-by-key parses scheme before first colon"
