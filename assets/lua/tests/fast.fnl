@@ -72,6 +72,7 @@
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
       :tests.test-scene-activity-slots
+      :tests.test-scene-activity-slot-capture-boundary
       :tests.test-activity-retention
       :tests.test-home-world-scene-activity-state
      :tests.test-sandbox-activity

@@ -1084,8 +1084,6 @@
     (assert slot
             (.. "Scene.capture-activity-slot-state no slot for activity " activity-id))
     (local is-active (= self.active-activity-slot slot))
-    ;; Capture panels and terrains from the slot's own content,
-    ;; not from the current active slot's aliases.
     (local panels [])
     (local source-children
       (if is-active
@@ -1102,7 +1100,6 @@
             (set record.rotation capture-layout.rotation)
             (set record.size (or capture-layout.size record.size))
             (table.insert panels record)))))
-    ;; Preserve queued cube panels from slot's own queued list
     (local source-queued
       (if is-active
           self.queued-cube-panels
@@ -1120,8 +1117,6 @@
           (or (and (= (type slot.scene-state) :table)
                    slot.scene-state.terrains)
               [])))
-    ;; Capture service state: for active slot, read from live engine;
-    ;; for inactive slot, use stored scene-state services.
     (local services
       (if is-active
           (capture-active-service-state self)
