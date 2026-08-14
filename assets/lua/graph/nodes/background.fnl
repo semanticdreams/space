@@ -10,11 +10,12 @@
 (fn M.BackgroundNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "BackgroundNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "BackgroundNode requires :world-manager"))
   (local background-record
     (BackgroundState.normalize-complete-state
       (or options.background-record
-          (WorldData.get-background world-manager world-id))
+           (WorldData.get-background world-manager world-id activity-id))
       (.. "BackgroundNode[" world-id "]")))
   (local key (or options.key (.. "background:" world-id)))
   (local node (GraphNode {:key key
@@ -24,6 +25,7 @@
                           :size 8.0
                           :view BackgroundNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.background-record (BackgroundState.clone-state background-record))
   (set node.changed (Signal))
@@ -33,7 +35,7 @@
   (set node.apply-values
        (fn [self next-background]
          (local updated
-           (WorldData.update-background self.world-manager self.world-id next-background))
+            (WorldData.update-background self.world-manager self.world-id self.activity-id next-background))
          (when updated
            (set self.background-record (BackgroundState.clone-state updated)))
          updated))
@@ -46,7 +48,7 @@
                (do
                  (set node.background-record
                       (BackgroundState.clone-state
-                        (WorldData.get-background world-manager world-id)))
+                         (WorldData.get-background world-manager world-id activity-id)))
                  (node.changed:emit node.background-record))
                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))

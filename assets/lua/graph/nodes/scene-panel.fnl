@@ -9,10 +9,11 @@
 (fn M.ScenePanelNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "ScenePanelNode requires :world-manager"))
   (local panel-index (assert options.panel-index "ScenePanelNode requires :panel-index"))
   (local resolved (or options.panel-entry
-                      (WorldData.find-scene-panel world-manager world-id panel-index)
+                       (WorldData.find-scene-panel world-manager world-id activity-id panel-index)
                       {}))
   (local panel (or options.panel resolved.metadata {}))
   (local panel-record (or options.panel-record resolved.panel {}))
@@ -27,6 +28,7 @@
                            :size 7.0
                            :view ScenePanelNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.panel-index panel-index)
   (set node.panel-kind panel-kind)
@@ -35,7 +37,7 @@
   (set node.changed (Signal))
   (set node.remove-panel
        (fn [self]
-         (WorldData.remove-scene-panel self.world-manager self.world-id self.panel-index)))
+          (WorldData.remove-scene-panel self.world-manager self.world-id self.activity-id self.panel-index)))
   (set node.actions
         [{:name "Delete Scene Panel"
          :icon "delete"
@@ -47,7 +49,7 @@
   (set changed-handler
        (world-manager.changed:connect
          (fn [_payload]
-            (local current (WorldData.find-scene-panel world-manager world-id panel-index))
+             (local current (WorldData.find-scene-panel world-manager world-id activity-id panel-index))
             (local stale?
               (or (not current)
                   (and node.panel current.metadata (not (= current.metadata node.panel)))

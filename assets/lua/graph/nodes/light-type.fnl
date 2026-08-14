@@ -12,6 +12,7 @@
 (fn M.LightTypeNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightTypeNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "LightTypeNode requires :world-manager"))
   (local type-key (assert options.type-key "LightTypeNode requires :type-key"))
   (local spec (assert (LightSystemModule.type-spec type-key)
@@ -24,13 +25,14 @@
                           :size 7.5
                           :view LightTypeNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.type-key type-key)
   (set node.light-spec spec)
   (set node.items-changed (Signal))
   (set node.collect-items
        (fn [self]
-         (WorldData.list-lights self.world-manager self.world-id self.type-key)))
+          (WorldData.list-lights self.world-manager self.world-id self.activity-id self.type-key)))
   (set node.emit-items
        (fn [self]
          (local items (self:collect-items))
@@ -58,8 +60,9 @@
          (local graph self.graph)
          (when (and graph entry entry.light-id)
            (local light-node
-             (LightNode {:world-id self.world-id
-                         :world-manager self.world-manager
+              (LightNode {:world-id self.world-id
+                          :activity-id self.activity-id
+                          :world-manager self.world-manager
                          :type-key self.type-key
                          :light-id entry.light-id
                          :light-record entry.record}))
@@ -71,7 +74,7 @@
                  "Ambient light is a required singleton and cannot be added")
          (assert (self:can-add-light?)
                  (self:limit-error-text))
-         (WorldData.add-light self.world-manager self.world-id self.type-key)))
+          (WorldData.add-light self.world-manager self.world-id self.activity-id self.type-key)))
   (set node.actions
        [{:name "Refresh"
          :icon "refresh"

@@ -157,7 +157,7 @@
      :make-run (fn [app]
                  (fn [args]
                    (assert app.scene "space_scene_add_terrain requires app.scene")
-                   (local record (WorldData.add-terrain app.world-manager (active-world-id app) (or args.kind "flat-terrain")))
+                    (local record (WorldData.add-terrain app.world-manager (active-world-id app) "sandbox" (or args.kind "flat-terrain")))
                    (assert record "space_scene_add_terrain failed to add terrain")
                    (tostring record.id)))})
 
@@ -181,7 +181,7 @@
      :make-run (fn [app]
                  (fn [args]
                    (assert app.scene "space_scene_remove_terrain requires app.scene")
-                   (WorldData.remove-terrain app.world-manager (active-world-id app) args.id)
+                    (WorldData.remove-terrain app.world-manager (active-world-id app) "sandbox" args.id)
                    "removed"))})
 
   (adapters:register
@@ -197,7 +197,7 @@
      :make-run (fn [app]
                  (fn [args]
                    (assert app.scene "space_scene_add_light requires app.scene")
-                   (local record (WorldData.add-light app.world-manager (active-world-id app) args.kind))
+                    (local record (WorldData.add-light app.world-manager (active-world-id app) "sandbox" args.kind))
                    (tostring record.id)))})
 
   (adapters:register
@@ -213,9 +213,10 @@
                  (fn [args]
                    (assert app.world-manager "space_scene_set_light_state requires app.world-manager")
                    (WorldData.update-light-record
-                     app.world-manager
-                     (active-world-id app)
-                     args.kind
+                      app.world-manager
+                      (active-world-id app)
+                      "sandbox"
+                      args.kind
                      args.id
                      (fn [record]
                        (set record.enabled? args.enabled)))
@@ -233,9 +234,10 @@
                  (fn [args]
                    (assert app.scene "space_scene_set_skybox requires app.scene")
                    (WorldData.update-skybox
-                     app.world-manager
-                     (active-world-id app)
-                     {:enabled? true
+                      app.world-manager
+                      (active-world-id app)
+                      "sandbox"
+                      {:enabled? true
                       :default {:name args.asset
                                 :brightness (or args.brightness 0.1)
                                 :tint-color [1.0 1.0 1.0]}
@@ -250,7 +252,7 @@
      :make-run (fn [app]
                  (fn [args]
                    (assert app.scene "space_scene_set_background requires app.scene")
-                   (WorldData.update-background app.world-manager (active-world-id app) {:color (rgb-from-hex args.color)})
+                    (WorldData.update-background app.world-manager (active-world-id app) "sandbox" {:color (rgb-from-hex args.color)})
                    "set"))})
 
   (adapters:register

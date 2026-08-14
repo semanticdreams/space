@@ -11,6 +11,7 @@
 (fn M.ScenePanelsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelsNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "ScenePanelsNode requires :world-manager"))
   (local key (or options.key (.. "scene-panels:" world-id)))
   (local node (GraphNode {:key key
@@ -20,10 +21,11 @@
                            :size 8.0
                            :view ScenePanelsNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.items-changed (Signal))
   (fn collect-items [self]
-    (WorldData.list-scene-panels self.world-manager self.world-id))
+    (WorldData.list-scene-panels self.world-manager self.world-id self.activity-id))
   (fn emit-items [self]
     (local items (collect-items self))
     (self.items-changed:emit items)
@@ -34,8 +36,9 @@
        (fn [self entry]
          (local graph self.graph)
          (when (and graph entry entry.index)
-           (local panel-node (ScenePanelNode {:world-id self.world-id
-                                              :world-manager self.world-manager
+            (local panel-node (ScenePanelNode {:world-id self.world-id
+                                               :activity-id self.activity-id
+                                               :world-manager self.world-manager
                                               :panel-index entry.index
                                               :panel entry.metadata
                                               :panel-record entry.panel

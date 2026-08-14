@@ -35,6 +35,7 @@
 (fn M.HeightfieldResizeToolNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldResizeToolNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "HeightfieldResizeToolNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldResizeToolNode requires :terrain-id"))
   (local key (or options.key (.. "terrain-tool:" world-id ":" terrain-id ":resize-terrain")))
@@ -45,13 +46,14 @@
                           :size 7.5
                           :view HeightfieldResizeToolNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.terrain-id terrain-id)
   (set node.terrain-kind "heightfield-terrain")
   (set node.changed (Signal))
   (set node.get-record
        (fn [self]
-         (local resolved (WorldData.find-terrain self.world-manager self.world-id self.terrain-id))
+          (local resolved (WorldData.find-terrain self.world-manager self.world-id self.activity-id self.terrain-id))
          (or (and resolved resolved.record) {})))
   (set node.apply-values
        (fn [self validated]
@@ -66,7 +68,7 @@
              validated.max-chunk-z
              (tostring validated.fill-height)))
          (local updated
-           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
+            (WorldData.update-terrain-record self.world-manager self.world-id self.activity-id self.terrain-id
              (fn [record]
                (TerrainIssueLog.info
                  (string.format
@@ -95,7 +97,7 @@
              validated.max-chunk-z
              (tostring validated.fill-height)))
          (local updated
-           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
+            (WorldData.update-terrain-record self.world-manager self.world-id self.activity-id self.terrain-id
              (fn [record]
                (TerrainIssueLog.info
                  (string.format

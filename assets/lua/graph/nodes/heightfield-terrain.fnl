@@ -18,10 +18,11 @@
 (fn M.HeightfieldTerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldTerrainNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "HeightfieldTerrainNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldTerrainNode requires :terrain-id"))
   (local resolved (or options.terrain-entry
-                      (WorldData.find-terrain world-manager world-id terrain-id)
+                       (WorldData.find-terrain world-manager world-id activity-id terrain-id)
                       {}))
   (local terrain-record (or options.terrain-record resolved.record {}))
   (assert (= (or terrain-record.kind resolved.kind) "heightfield-terrain")
@@ -34,6 +35,7 @@
                           :size 8.0
                           :view HeightfieldTerrainNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.terrain-id terrain-id)
   (set node.terrain-kind "heightfield-terrain")
@@ -45,7 +47,7 @@
   (set node.update-record
        (fn [self updater]
          (local updated
-           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id updater))
+            (WorldData.update-terrain-record self.world-manager self.world-id self.activity-id self.terrain-id updater))
          (when updated
            (set self.terrain-record updated)
            (self.changed:emit updated))
@@ -64,7 +66,7 @@
              (set record.options.sample-spacing validated.sample-spacing)))))
   (set node.remove-terrain
        (fn [self]
-         (WorldData.remove-terrain self.world-manager self.world-id self.terrain-id)))
+          (WorldData.remove-terrain self.world-manager self.world-id self.activity-id self.terrain-id)))
   (set node.actions
         [{:name "Delete Terrain"
          :fn (fn [_button _event]
@@ -75,7 +77,7 @@
   (set changed-handler
        (world-manager.changed:connect
          (fn [_payload]
-           (local current (WorldData.find-terrain world-manager world-id terrain-id))
+            (local current (WorldData.find-terrain world-manager world-id activity-id terrain-id))
            (if (and current (= current.kind "heightfield-terrain"))
                (do
                  (set node.terrain-record (clone-table (or current.record {})))

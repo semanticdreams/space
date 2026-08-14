@@ -77,7 +77,31 @@
              :default-height default-height}
    :chunks (or options.chunks [{:coord [0 0]
                                 :size chunk-samples
-                                :heights heights}])})
+                                 :heights heights}])})
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (tset out k (clone-table v)))
+        out)
+      value))
+
+(fn same-table? [left right]
+  (if (not (= (type left) (type right)))
+      false
+      (if (not (= (type left) :table))
+          (= left right)
+          (do
+            (var same? true)
+            (each [k v (pairs left)]
+              (when (not (same-table? v (. right k)))
+                (set same? false)))
+            (each [k _ (pairs right)]
+              (when (= (. left k) nil)
+                (set same? false)))
+            same?))))
 
 (fn make-world-entry [opts]
   (local options (or opts {}))
@@ -154,8 +178,30 @@
     {:active_id "sandbox"
      :sessions {:sandbox {:scene scene-state}}})
   {:scene {:panels [] :terrains []}
+    :hud {:panels []}
+    :activity activity-state})
+
+(fn make-activity-aware-state []
+  (local sandbox-scene {:panels [{:kind "sandbox-panel"}]
+                        :terrains [(make-flat-terrain-record {:id "sandbox-terrain" :width 30})]
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "sandbox-light"})]})
+                        :skybox (make-skybox-state {:name "sandbox-sky"})
+                        :background (make-background-state {:color [0.1 0.2 0.3]})
+                        :containment {:enabled? false}})
+  (local graph-scene {:panels [{:kind "graph-panel"}]
+                      :terrains [(make-flat-terrain-record {:id "graph-terrain" :width 60})]
+                      :lights (make-light-state {:point [(make-light-record "point" {:id "graph-light"})]})
+                      :skybox (make-skybox-state {:name "graph-sky"})
+                      :background (make-background-state {:color [0.4 0.5 0.6]})
+                      :containment {:enabled? false}})
+  {:scene {:panels [] :terrains []}
    :hud {:panels []}
-   :activity activity-state})
+   :activity {:active_id "sandbox"
+              :sessions {:sandbox {:scene sandbox-scene
+                                    :hud {:panels [{:kind "sandbox-hud"}]}}
+                         :graph {:scene graph-scene
+                                 :hud {:panels [{:kind "graph-hud"}]}
+                                 :canvas {:layers [{:id "graph-canvas"}]}}}}})
 
 ;; ── Canonical-owner tests ───────────────────────────────────────────
 
@@ -233,6 +279,71 @@
           "light edit should persist to sandbox session")
   (node:drop))
 
+(fn test-explicit-graph-activity-scene-access []
+  "WorldData scene reads must use the requested activity session, not sandbox."
+  (local WorldData (require :graph/world-data))
+  (local state (make-activity-aware-state))
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local scene-panels (WorldData.list-scene-panels manager "test-world" "graph"))
+  (assert (= (length scene-panels) 1) "graph activity should expose one scene panel")
+  (assert (= (. (. scene-panels 1) 1 :kind) "graph-panel")
+          "scene panels should come from graph activity")
+  (local terrains (WorldData.list-terrains manager "test-world" "graph"))
+  (assert (= (length terrains) 1) "graph activity should expose one terrain")
+  (assert (= (. (. terrains 1) 1 :terrain-id) "graph-terrain")
+          "terrains should come from graph activity")
+  (local background (WorldData.get-background manager "test-world" "graph"))
+  (assert (= (. background.color 1) 0.4) "background red should come from graph activity")
+  (assert (= (. background.color 3) 0.6) "background blue should come from graph activity"))
+
+(fn test-explicit-graph-activity_mutations_are_isolated []
+  "Mutating one activity session must not rewrite sandbox session state."
+  (local WorldData (require :graph/world-data))
+  (local state (make-activity-aware-state))
+  (local sandbox-before (clone-table state.activity.sessions.sandbox.scene))
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (WorldData.update-background manager "test-world" "graph"
+    (make-background-state {:color [0.7 0.8 0.9]}))
+  (WorldData.update-terrain-record manager "test-world" "graph" "graph-terrain"
+    (fn [record]
+      (set record.name "graph terrain updated")
+      (set record.options.width 90)))
+  (WorldData.update-light-record manager "test-world" "graph" "point" "graph-light"
+    (fn [record]
+      (set record.linear 0.42)))
+  (local graph-scene state.activity.sessions.graph.scene)
+  (assert (= (. graph-scene.background.color 1) 0.7)
+          "graph background should be updated")
+  (assert (= (. graph-scene.terrains 1 :name) "graph terrain updated")
+          "graph terrain should be updated")
+  (assert (= (. graph-scene.lights.point 1 :linear) 0.42)
+          "graph light should be updated")
+  (assert (same-table? sandbox-before state.activity.sessions.sandbox.scene)
+          "sandbox scene state should remain byte-for-byte unchanged"))
+
+(fn test-activity-scene-access-fails-on-missing-requested-activity []
+  "Missing requested activity ids must fail instead of returning sandbox data."
+  (local WorldData (require :graph/world-data))
+  (local state (make-activity-aware-state))
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local (ok err) (pcall WorldData.list-terrains manager "test-world" "missing-activity"))
+  (assert (not ok) "missing requested activity should fail loudly")
+  (assert (string.find (tostring err) "missing-activity" 1 true)
+          "missing activity failure should include requested id")
+  (local (panel-ok panel-err)
+    (pcall WorldData.list-scene-panels manager "test-world" "missing-activity"))
+  (assert (not panel-ok) "scene panels must not fall back to sandbox")
+  (assert (string.find (tostring panel-err) "missing-activity" 1 true)
+          "scene panel failure should include requested id")
+  (local (background-ok background-err)
+    (pcall WorldData.get-background manager "test-world" "missing-activity"))
+  (assert (not background-ok) "background must not fall back to sandbox")
+  (assert (string.find (tostring background-err) "missing-activity" 1 true)
+          "background failure should include requested id"))
+
 (fn test-graph-activity-slot-scene-not-treated-as-sandbox-world-content []
   "WorldData must not treat another activity's scene state as sandbox world content."
   (local WorldData (require :graph/world-data))
@@ -255,17 +366,17 @@
                                       :graph {:scene graph-scene}}}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local scene-panels (WorldData.list-scene-panels manager "test-world"))
+  (local scene-panels (WorldData.list-scene-panels manager "test-world" "sandbox"))
   (assert (= (length scene-panels) 1) "should enumerate only sandbox scene panels")
   (assert (= (. (. scene-panels 1) 1 :kind) "sandbox-panel")
           "scene panels should be from sandbox session")
-  (local terrains (WorldData.list-terrains manager "test-world"))
+  (local terrains (WorldData.list-terrains manager "test-world" "sandbox"))
   (assert (= (length terrains) 1) "should enumerate only sandbox terrains")
   (assert (= (. (. terrains 1) 1 :terrain-id) "sandbox-terrain")
           "terrains should be from sandbox session")
-  (local skybox (WorldData.get-skybox manager "test-world"))
+  (local skybox (WorldData.get-skybox manager "test-world" "sandbox"))
   (assert skybox "should read skybox from sandbox session")
-  (local background (WorldData.get-background manager "test-world"))
+  (local background (WorldData.get-background manager "test-world" "sandbox"))
   (assert background "should read background from sandbox session"))
 
 (fn test-sandbox-skybox-reads-from-sandbox-session []
@@ -285,7 +396,7 @@
                                                :containment {:enabled? false}}}}}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local skybox (WorldData.get-skybox manager "test-world"))
+  (local skybox (WorldData.get-skybox manager "test-world" "sandbox"))
   (assert skybox "should read skybox from sandbox session")
   (assert (= skybox.enabled? false) "sandbox skybox should report disabled")
   (assert (= skybox.default.name "night") "sandbox skybox should use custom name"))
@@ -338,7 +449,7 @@
                                                :containment {:enabled? false}}}}}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local background (WorldData.get-background manager "test-world"))
+  (local background (WorldData.get-background manager "test-world" "sandbox"))
   (assert background "should read background from sandbox session")
   (assert (= (. background.color 1) 0.1) "sandbox background should use custom red")
   (assert (= (. background.color 2) 0.2) "sandbox background should use custom green"))
@@ -414,24 +525,24 @@
                         :save-state (fn [_self] true)}})
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   ;; Mutate terrain: should NOT call runtime scene methods when graph is active.
-  (WorldData.add-terrain manager "test-world" "heightfield-terrain")
+  (WorldData.add-terrain manager "test-world" "sandbox" "heightfield-terrain")
   (assert (= (length call-log) 0)
           "add-terrain should not touch runtime scene when sandbox is inactive")
-  (WorldData.update-terrain-record manager "test-world" "t1"
+  (WorldData.update-terrain-record manager "test-world" "sandbox" "t1"
     (fn [record] (set record.name "updated")))
   (assert (= (length call-log) 0)
           "update-terrain should not touch runtime scene when sandbox is inactive")
   ;; Mutate light: should NOT call runtime scene.
-  (WorldData.add-light manager "test-world" "point")
+  (WorldData.add-light manager "test-world" "sandbox" "point")
   (assert (= (length call-log) 0)
           "add-light should not touch runtime scene when sandbox is inactive")
   ;; Mutate skybox: should NOT call runtime scene.
-  (WorldData.update-skybox manager "test-world"
+  (WorldData.update-skybox manager "test-world" "sandbox"
     (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
   (assert (= (length call-log) 0)
           "update-skybox should not touch runtime scene when sandbox is inactive")
   ;; Mutate background: should NOT call runtime scene.
-  (WorldData.update-background manager "test-world"
+  (WorldData.update-background manager "test-world" "sandbox"
     (make-background-state {:color [0.1 0.2 0.3]}))
   (assert (= (length call-log) 0)
           "update-background should not touch runtime scene when sandbox is inactive"))
@@ -445,7 +556,13 @@
 (table.insert tests {:name "sandbox lights enumerate from sandbox session"
                      :fn test-sandbox-lights-enumerate-from-sandbox-session})
 (table.insert tests {:name "sandbox light edit persists to sandbox session"
-                     :fn test-sandbox-light-edit-persists-to-sandbox-session})
+                      :fn test-sandbox-light-edit-persists-to-sandbox-session})
+(table.insert tests {:name "explicit graph activity scene access"
+                     :fn test-explicit-graph-activity-scene-access})
+(table.insert tests {:name "explicit graph activity mutations are isolated"
+                     :fn test-explicit-graph-activity_mutations_are_isolated})
+(table.insert tests {:name "activity scene access fails on missing requested activity"
+                     :fn test-activity-scene-access-fails-on-missing-requested-activity})
 (table.insert tests {:name "graph activity slot scene not treated as sandbox world content"
                      :fn test-graph-activity-slot-scene-not-treated-as-sandbox-world-content})
 (table.insert tests {:name "sandbox skybox reads from sandbox session"
@@ -492,12 +609,12 @@
                         :save-state (fn [_self] true)}})
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   ;; list-scene-panels must NOT use runtime scene-children when graph is active.
-  (local panels (WorldData.list-scene-panels manager "test-world"))
+  (local panels (WorldData.list-scene-panels manager "test-world" "sandbox"))
   (assert (= (length panels) 1) "should list only sandbox session panels")
   (assert (= (. (. panels 1) 1 :kind) "sandbox-panel")
           "panel should come from sandbox session, not graph runtime")
   ;; list-terrains must NOT use runtime scene-terrains when graph is active.
-  (local terrains (WorldData.list-terrains manager "test-world"))
+  (local terrains (WorldData.list-terrains manager "test-world" "sandbox"))
   (assert (= (length terrains) 1) "should list only sandbox session terrains")
   (assert (= (. (. terrains 1) 1 :label) "lava")
           "terrain should come from sandbox session, not graph runtime")
@@ -505,7 +622,7 @@
   ;; it should fall through to canonical state path and remove from session.
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
           "sandbox session should start with one panel")
-  (WorldData.remove-scene-panel manager "test-world" 1)
+  (WorldData.remove-scene-panel manager "test-world" "sandbox" 1)
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
           "remove-scene-panel should remove from sandbox session when graph is active"))
 
@@ -527,14 +644,14 @@
   ;; add-terrain should assert
   (local (ok-add err-add)
     (pcall (fn []
-             (WorldData.add-terrain manager "test-world" "heightfield-terrain"))))
+              (WorldData.add-terrain manager "test-world" "sandbox" "heightfield-terrain"))))
   (assert (not ok-add) "add-terrain should fail on missing sandbox session")
   (assert (string.find (tostring err-add) "requires world.state.activity" 1 true)
           "add-terrain failure should mention missing activity state")
   ;; update-terrain-record should assert
   (local (ok-upd err-upd)
     (pcall (fn []
-             (WorldData.update-terrain-record manager "test-world" "t1"
+              (WorldData.update-terrain-record manager "test-world" "sandbox" "t1"
                (fn [r] (set r.name "x"))))))
   (assert (not ok-upd) "update-terrain-record should fail on missing sandbox session")
   (assert (string.find (tostring err-upd) "requires world.state.activity" 1 true)
@@ -542,7 +659,7 @@
   ;; remove-terrain should assert
   (local (ok-rem err-rem)
     (pcall (fn []
-             (WorldData.remove-terrain manager "test-world" "t1"))))
+              (WorldData.remove-terrain manager "test-world" "sandbox" "t1"))))
   (assert (not ok-rem) "remove-terrain should fail on missing sandbox session")
   (assert (string.find (tostring err-rem) "requires world.state.activity" 1 true)
           "remove-terrain failure should mention missing activity state"))
@@ -625,7 +742,7 @@
   ;; activity-session-state so the stale panel does not come back on save.
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
           "canonical sandbox scene should start with one panel")
-  (WorldData.remove-scene-panel manager "test-world" 1)
+  (WorldData.remove-scene-panel manager "test-world" "sandbox" 1)
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
           "remove-scene-panel should remove from canonical session")
   ;; R5-1: The runtime's activity-session-state sandbox scene must be refreshed
@@ -637,7 +754,7 @@
   (assert (= (length (or pending-scene.panels [])) 0)
           "pending sandbox scene panels must be empty after removal and refresh")
   ;; Mutate skybox via WorldData.update-skybox
-  (WorldData.update-skybox manager "test-world"
+  (WorldData.update-skybox manager "test-world" "sandbox"
     (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
   (assert (= (length call-log) 0)
           "update-skybox should not touch runtime scene when sandbox is inactive")
@@ -649,17 +766,17 @@
   (assert (= pending-scene.skybox.default.brightness 0.5)
           "pending sandbox scene skybox.brightness must reflect mutation")
   ;; Mutate background
-  (WorldData.update-background manager "test-world"
+  (WorldData.update-background manager "test-world" "sandbox"
     (make-background-state {:color [0.4 0.5 0.6]}))
   (assert (= (. pending-scene.background.color 1) 0.4)
           "pending sandbox scene background must reflect mutation")
   ;; Mutate terrain
-  (WorldData.update-terrain-record manager "test-world" "r5-1-terrain"
+  (WorldData.update-terrain-record manager "test-world" "sandbox" "r5-1-terrain"
     (fn [record] (set record.name "mutated-terrain")))
   (assert (= (. pending-scene.terrains 1 :name) "mutated-terrain")
           "pending sandbox scene terrain must reflect mutation")
   ;; Mutate lights
-  (WorldData.add-light manager "test-world" "point")
+  (WorldData.add-light manager "test-world" "sandbox" "point")
   (assert (= (length pending-scene.lights.point) 1)
           "pending sandbox scene lights must reflect added point light"))
 
@@ -712,7 +829,7 @@
                         :save-state (fn [_self] true)}})
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   ;; update-skybox with a complete-by-theme-policy skybox
-  (WorldData.update-skybox manager "test-world"
+  (WorldData.update-skybox manager "test-world" "sandbox"
     (SkyboxState.normalize-complete-state
       {:enabled? true
        :default {:name "desert"
@@ -791,7 +908,7 @@
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
           "canonical sandbox session should start with one panel")
   ;; Remove panel through WorldData (Sandbox active)
-  (WorldData.remove-scene-panel manager "test-world" 1)
+  (WorldData.remove-scene-panel manager "test-world" "sandbox" 1)
   ;; R6-3: The canonical session panels must be empty
   (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
           "remove-scene-panel with active sandbox must remove from canonical session")
@@ -810,7 +927,7 @@
 ;; ── R6-3 duplicate-panel regression ──────────────────────────────────
 
 ;; Helper: shallow clone a table
-(fn clone-table [tbl]
+(fn shallow-clone-table [tbl]
   (local out {})
   (each [k v (pairs tbl)]
     (tset out k v))
@@ -834,12 +951,12 @@
                            :label "Test Panel"})
   (local mock-scene
     {:active-activity-slot-id "sandbox"
-     :scene-children [{:element runtime-panel-1-element
-                        :persistence (doto (clone-table base-persistence)
-                                       (tset :position [0 0 0]))}
-                       {:element runtime-panel-2-element
-                        :persistence (doto (clone-table base-persistence)
-                                       (tset :position [5 5 5]))}]
+      :scene-children [{:element runtime-panel-1-element
+                         :persistence (doto (shallow-clone-table base-persistence)
+                                        (tset :position [0 0 0]))}
+                        {:element runtime-panel-2-element
+                         :persistence (doto (shallow-clone-table base-persistence)
+                                        (tset :position [5 5 5]))}]
      :remove-panel-child (fn [_self element]
                            (set removed-element element)
                            true)})
@@ -879,7 +996,7 @@
   (assert (= (length canonical-panels) 2)
           "canonical sandbox session should start with two panels")
   ;; Remove the FIRST panel (index 1)
-  (WorldData.remove-scene-panel manager "test-world" 1)
+  (WorldData.remove-scene-panel manager "test-world" "sandbox" 1)
   ;; R6-3: Canonical should have ONE panel remaining — the second one
   (assert (= (length canonical-panels) 1)
           "canonical panels should have one remaining after removal")

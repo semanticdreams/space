@@ -461,7 +461,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   ;; Call update-skybox with the complete state containing a by-theme override.
   (local result
-    (WorldData.update-skybox manager "test-world" skybox-with-override))
+    (WorldData.update-skybox manager "test-world" "sandbox" skybox-with-override))
   (assert result "update-skybox should return normalized skybox state")
   ;; Verify the canonical session state now contains the complete policy.
   (local sandbox-scene

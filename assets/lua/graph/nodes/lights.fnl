@@ -11,6 +11,7 @@
 (fn M.LightsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightsNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "LightsNode requires :world-manager"))
   (local key (or options.key (.. "lights:" world-id)))
   (local node (GraphNode {:key key
@@ -20,11 +21,12 @@
                           :size 8.0
                           :view LightsNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.items-changed (Signal))
   (set node.collect-items
        (fn [self]
-         (WorldData.list-light-types self.world-manager self.world-id)))
+          (WorldData.list-light-types self.world-manager self.world-id self.activity-id)))
   (set node.emit-items
        (fn [self]
          (local items (self:collect-items))
@@ -34,9 +36,10 @@
        (fn [self entry]
          (local graph self.graph)
          (when (and graph entry entry.type-key)
-           (local light-type-node
-             (LightTypeNode {:world-id self.world-id
-                             :world-manager self.world-manager
+            (local light-type-node
+              (LightTypeNode {:world-id self.world-id
+                              :activity-id self.activity-id
+                              :world-manager self.world-manager
                              :type-key entry.type-key}))
            (graph:add-edge (GraphEdge {:source self
                                        :target light-type-node})))))

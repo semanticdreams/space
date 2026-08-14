@@ -10,6 +10,7 @@
 (fn M.SkyboxNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "SkyboxNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "SkyboxNode requires :world-manager"))
   (local asset-path-resolver
     (assert options.asset-path-resolver
@@ -31,7 +32,7 @@
   (local skybox-record
     (SkyboxState.normalize-complete-state
       (or options.skybox-record
-          (WorldData.get-skybox world-manager world-id))
+           (WorldData.get-skybox world-manager world-id activity-id))
       (.. "SkyboxNode[" world-id "]")))
   (local key (or options.key (.. "skybox:" world-id)))
   (local node (GraphNode {:key key
@@ -41,6 +42,7 @@
                           :size 8.0
                           :view SkyboxNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.asset-path-resolver asset-path-resolver)
   (set node.skybox-record (SkyboxState.clone-state skybox-record))
@@ -57,7 +59,7 @@
   (set node.apply-values
        (fn [self next-skybox]
          (local updated
-           (WorldData.update-skybox self.world-manager self.world-id next-skybox))
+            (WorldData.update-skybox self.world-manager self.world-id self.activity-id next-skybox))
          (when updated
            (set self.skybox-record (SkyboxState.clone-state updated)))
          updated))
@@ -70,7 +72,7 @@
                (do
                  (set node.skybox-record
                       (SkyboxState.clone-state
-                        (WorldData.get-skybox world-manager world-id)))
+                         (WorldData.get-skybox world-manager world-id activity-id)))
                  (node.changed:emit node.skybox-record))
                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))

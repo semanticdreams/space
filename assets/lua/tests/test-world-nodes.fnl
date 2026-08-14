@@ -1442,9 +1442,9 @@
    (local manager (make-world-manager {:id "test-world" :entry entry}))
    (local (ok err)
      (pcall (fn []
-              (WorldData.list-light-types manager "test-world"))))
+               (WorldData.list-light-types manager "test-world" "sandbox"))))
    (assert (not ok) "light reads should fail loudly when sandbox scene lights are missing")
-   (assert (string.find (tostring err) "requires sandbox scene.lights" 1 true)
+    (assert (string.find (tostring err) "requires activity sandbox scene.lights" 1 true)
            "missing sandbox scene lights should be reported directly"))
 
 (fn test-light-node-updates-world-state-and-active-scene []
@@ -1522,7 +1522,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.update-light-record manager "test-world" "point" "point-1"
+              (WorldData.update-light-record manager "test-world" "sandbox" "point" "point-1"
                (fn [record]
                  (set record.linear "bad"))))))
   (assert (not ok) "world-data light updates should fail loudly for invalid light values")
@@ -1539,7 +1539,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.update-light-record manager "test-world" "point" "point-9"
+              (WorldData.update-light-record manager "test-world" "sandbox" "point" "point-9"
                (fn [_record] nil)))))
   (assert (not ok) "world-data should fail loudly when updating a missing light")
   (assert (string.find (tostring err) "Cannot update missing point light point-9" 1 true)
@@ -1572,7 +1572,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local (ok err)
     (pcall (fn []
-             (WorldData.remove-light manager "test-world" "point" "point-9"))))
+              (WorldData.remove-light manager "test-world" "sandbox" "point" "point-9"))))
   (assert (not ok) "world-data should fail loudly when removing a missing light")
   (assert (string.find (tostring err) "Cannot remove missing point light point-9" 1 true)
           "missing light removal should identify the absent light"))
@@ -1586,21 +1586,21 @@
                   :active-world-id (fn [_self] nil)})
   (local (ok-add err-add)
     (pcall (fn []
-             (WorldData.add-light manager "missing-world" "point"))))
+              (WorldData.add-light manager "missing-world" "sandbox" "point"))))
   (assert (not ok-add) "add-light should fail loudly when the world is missing")
   (assert (string.find (tostring err-add) "missing world missing-world" 1 true)
           "add-light should identify the missing world")
   (local (ok-update err-update)
     (pcall
       (fn []
-        (WorldData.update-light-record manager "missing-world" "point" "point-1"
+        (WorldData.update-light-record manager "missing-world" "sandbox" "point" "point-1"
           (fn [_record] nil)))))
   (assert (not ok-update) "update-light-record should fail loudly when the world is missing")
   (assert (string.find (tostring err-update) "missing world missing-world" 1 true)
           "update-light-record should identify the missing world")
   (local (ok-remove err-remove)
     (pcall (fn []
-             (WorldData.remove-light manager "missing-world" "point" "point-1"))))
+              (WorldData.remove-light manager "missing-world" "sandbox" "point" "point-1"))))
   (assert (not ok-remove) "remove-light should fail loudly when the world is missing")
   (assert (string.find (tostring err-remove) "missing world missing-world" 1 true)
           "remove-light should identify the missing world"))

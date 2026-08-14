@@ -17,10 +17,11 @@
 (fn M.TerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "TerrainNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "TerrainNode requires :terrain-id"))
   (local resolved (or options.terrain-entry
-                      (WorldData.find-terrain world-manager world-id terrain-id)
+                       (WorldData.find-terrain world-manager world-id activity-id terrain-id)
                       {}))
   (local terrain (or options.terrain resolved.entry resolved.record {}))
   (local terrain-record (or options.terrain-record resolved.record {}))
@@ -34,6 +35,7 @@
                            :size 7.0
                            :view TerrainNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.terrain-id terrain-id)
   (set node.terrain-kind terrain-kind)
@@ -47,8 +49,9 @@
          (local graph self.graph)
          (local editor
            (and graph
-                (TerrainEditors.create-editor-node {:world-id self.world-id
-                                                    :terrain-id self.terrain-id
+                 (TerrainEditors.create-editor-node {:world-id self.world-id
+                                                     :activity-id self.activity-id
+                                                     :terrain-id self.terrain-id
                                                     :world-manager self.world-manager})))
          (when (and graph editor)
            (graph:add-edge (GraphEdge {:source self :target editor})))
@@ -58,8 +61,9 @@
          (local graph self.graph)
          (local tool-node
            (and graph
-                (TerrainTools.create-tool-node {:world-id self.world-id
-                                                :terrain-id self.terrain-id
+                 (TerrainTools.create-tool-node {:world-id self.world-id
+                                                 :activity-id self.activity-id
+                                                 :terrain-id self.terrain-id
                                                 :terrain-kind self.terrain-kind
                                                 :world-manager self.world-manager
                                                 :tool-id tool-id})))
@@ -68,7 +72,7 @@
          tool-node))
   (set node.remove-terrain
        (fn [self]
-         (WorldData.remove-terrain self.world-manager self.world-id self.terrain-id)))
+          (WorldData.remove-terrain self.world-manager self.world-id self.activity-id self.terrain-id)))
   (set node.actions
        [{:name "Open Editor"
          :fn (fn [_button _event]
@@ -82,7 +86,7 @@
   (set changed-handler
        (world-manager.changed:connect
          (fn [_payload]
-           (local current (WorldData.find-terrain world-manager world-id terrain-id))
+            (local current (WorldData.find-terrain world-manager world-id activity-id terrain-id))
            (if current
                (do
                   (set node.terrain-kind (or current.kind "unknown"))

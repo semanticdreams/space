@@ -417,10 +417,12 @@
           (local world-id (. parts 1))
           (local type-key (. parts 2))
           (local light-id (. parts 3))
+          (local activity-id "sandbox")
           (local light-entry (and world-manager
-                                  (WorldData.find-light world-manager world-id type-key light-id)))
+                                   (WorldData.find-light world-manager world-id activity-id type-key light-id)))
           (when light-entry
             (LightNode {:world-id world-id
+                        :activity-id activity-id
                         :world-manager world-manager
                         :type-key type-key
                         :light-id light-id
@@ -434,10 +436,12 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local panel-index (tonumber (. parts 2)))
+          (local activity-id "sandbox")
           (local panel-entry (and world-manager panel-index
-                                  (WorldData.find-scene-panel world-manager world-id panel-index)))
+                                   (WorldData.find-scene-panel world-manager world-id activity-id panel-index)))
           (when panel-entry
             (ScenePanelNode {:world-id world-id
+                             :activity-id activity-id
                              :world-manager world-manager
                              :panel-index panel-index
                              :panel-entry panel-entry
@@ -468,10 +472,12 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
+          (local activity-id "sandbox")
           (local terrain-entry (and world-manager
-                                    (WorldData.find-terrain world-manager world-id terrain-id)))
+                                     (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
           (when terrain-entry
             (TerrainNode {:world-id world-id
+                          :activity-id activity-id
                           :world-manager world-manager
                           :terrain-id terrain-id
                           :terrain-entry terrain-entry
@@ -484,10 +490,12 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
+          (local activity-id "sandbox")
           (local terrain-entry (and world-manager
-                                    (WorldData.find-terrain world-manager world-id terrain-id)))
+                                     (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
           (when terrain-entry
 	            (TerrainEditors.create-editor-node {:world-id world-id
+	                                                :activity-id activity-id
 	                                                :world-manager world-manager
 	                                                :terrain-id terrain-id
                                                     :terrain-entry terrain-entry
@@ -501,11 +509,13 @@
 	          (local terrain-id (. parts 2))
 	          (local tool-id (. parts 3))
 	          (when world-manager
+	            (local activity-id "sandbox")
 	            (local terrain-entry
-	              (WorldData.find-terrain world-manager world-id terrain-id))
+	              (WorldData.find-terrain world-manager world-id activity-id terrain-id))
 	            (local terrain-kind (and terrain-entry terrain-entry.kind))
 	            (when terrain-kind
 	              (TerrainTools.create-tool-node {:world-id world-id
+	                                              :activity-id activity-id
 	                                              :world-manager world-manager
 	                                              :terrain-id terrain-id
 	                                              :terrain-kind terrain-kind

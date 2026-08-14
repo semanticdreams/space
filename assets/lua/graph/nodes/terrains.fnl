@@ -12,6 +12,7 @@
 (fn M.TerrainsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainsNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "TerrainsNode requires :world-manager"))
   (local key (or options.key (.. "terrains:" world-id)))
   (local node (GraphNode {:key key
@@ -21,12 +22,13 @@
                            :size 8.0
                            :view TerrainsNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.items-changed (Signal))
   (set node.supported-terrain-kinds (TerrainRecords.supported-kinds))
   (set node.known-terrain-ids {})
   (fn collect-items [self]
-    (WorldData.list-terrains self.world-manager self.world-id))
+    (WorldData.list-terrains self.world-manager self.world-id self.activity-id))
   (fn update-known-terrain-ids [self items]
     (local known {})
     (each [_ item (ipairs (or items []))]
@@ -43,6 +45,7 @@
 	      (local terrain-node
 	        (or (graph:lookup terrain-key)
 	            (TerrainNode {:world-id self.world-id
+                              :activity-id self.activity-id
 	                          :world-manager self.world-manager
 	                          :terrain-id entry.terrain-id
 	                          :terrain entry.entry
@@ -63,7 +66,7 @@
          (attach-terrain-node self entry)))
   (set node.add-terrain
        (fn [self terrain-kind]
-         (WorldData.add-terrain self.world-manager self.world-id terrain-kind)))
+          (WorldData.add-terrain self.world-manager self.world-id self.activity-id terrain-kind)))
   (update-known-terrain-ids node (collect-items node))
   (set node.actions
        [{:name "Refresh"

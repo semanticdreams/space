@@ -19,6 +19,7 @@
 (fn M.HeightfieldFlatToolNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldFlatToolNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "HeightfieldFlatToolNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldFlatToolNode requires :terrain-id"))
   (local key (or options.key (.. "terrain-tool:" world-id ":" terrain-id ":initialize-flat")))
@@ -29,13 +30,14 @@
                           :size 7.5
                           :view HeightfieldFlatToolNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.terrain-id terrain-id)
   (set node.terrain-kind "heightfield-terrain")
   (set node.changed (Signal))
   (set node.get-record
        (fn [self]
-         (local resolved (WorldData.find-terrain self.world-manager self.world-id self.terrain-id))
+          (local resolved (WorldData.find-terrain self.world-manager self.world-id self.activity-id self.terrain-id))
          (or (and resolved resolved.record) {})))
   (set node.get-live-scene
        (fn [self]
@@ -52,7 +54,7 @@
   (set node.apply-values
        (fn [self validated]
          (local updated
-           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
+            (WorldData.update-terrain-record self.world-manager self.world-id self.activity-id self.terrain-id
              (fn [record]
                (HeightfieldTerrainData.fill-record! record validated.height validated.target))))
         (when updated

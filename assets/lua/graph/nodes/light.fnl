@@ -23,11 +23,12 @@
 (fn M.LightNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightNode requires :world-id"))
+  (local activity-id (or options.activity-id "sandbox"))
   (local world-manager (assert options.world-manager "LightNode requires :world-manager"))
   (local type-key (assert options.type-key "LightNode requires :type-key"))
   (local light-id (assert options.light-id "LightNode requires :light-id"))
   (local resolved (or options.light-entry
-                      (WorldData.find-light world-manager world-id type-key light-id)
+                       (WorldData.find-light world-manager world-id activity-id type-key light-id)
                       {}))
   (local light-record (or options.light-record resolved.record {}))
   (local key (or options.key (.. "light:" world-id ":" type-key ":" light-id)))
@@ -38,6 +39,7 @@
                           :size 7.0
                           :view LightNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.type-key type-key)
   (set node.light-id light-id)
@@ -50,8 +52,9 @@
        (fn [self updater]
          (local updated
            (WorldData.update-light-record self.world-manager
-                                          self.world-id
-                                          self.type-key
+                                           self.world-id
+                                           self.activity-id
+                                           self.type-key
                                           self.light-id
                                           updater))
          (when updated
@@ -90,7 +93,7 @@
        apply-light-values)
   (set node.remove-light
        (fn [self]
-         (WorldData.remove-light self.world-manager self.world-id self.type-key self.light-id)))
+          (WorldData.remove-light self.world-manager self.world-id self.activity-id self.type-key self.light-id)))
   (set node.removable?
        (fn [self]
          (not (= self.type-key "ambient"))))
@@ -107,7 +110,7 @@
   (set changed-handler
        (world-manager.changed:connect
          (fn [_payload]
-           (local current (WorldData.find-light world-manager world-id type-key light-id))
+            (local current (WorldData.find-light world-manager world-id activity-id type-key light-id))
            (if current
                (do
                  (set node.light-record (clone-table (or current.record {})))
