@@ -657,7 +657,7 @@
 (table.insert tests {:name "activity-aware detail node mutations are isolated"
                      :fn test-activity-aware-detail-node-mutations-are-isolated})
 (table.insert tests {:name "activity scene access fails on missing requested activity"
-                     :fn test-activity-scene-access-fails-on-missing-requested-activity})
+                      :fn test-activity-scene-access-fails-on-missing-requested-activity})
 (table.insert tests {:name "active runtime missing activity fails before runtime use"
                      :fn test-active-runtime-missing-activity-fails-before-runtime-use})
 (table.insert tests {:name "public scene APIs require activity id before world lookup"
@@ -1114,6 +1114,56 @@
   (assert (= removed-element runtime-panel-1-element)
           "remove-panel-child must receive the first panel's element, not the second"))
 
+(fn test-activity-detail-nodes-remove-when-activity-scene-disappears []
+  "Activity detail nodes should remove themselves when backing scene disappears."
+  (local Graph (require :graph/init))
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local graph (Graph {:with-start false}))
+  (local state (make-activity-aware-state))
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local terrain-node (TerrainNode {:world-id "test-world"
+                                    :activity-id "graph"
+                                    :world-manager manager
+                                    :terrain-id "graph-terrain"}))
+  (local light-node (LightNode {:world-id "test-world"
+                                :activity-id "graph"
+                                :world-manager manager
+                                :type-key "point"
+                                :light-id "graph-light"}))
+  (local light-type-node (LightTypeNode {:world-id "test-world"
+                                         :activity-id "graph"
+                                         :world-manager manager
+                                         :type-key "point"}))
+  (local panel-node (ScenePanelNode {:world-id "test-world"
+                                     :activity-id "graph"
+                                     :world-manager manager
+                                     :panel-index 1}))
+  (local terrain-editor-node (FlatTerrainNode {:world-id "test-world"
+                                               :activity-id "graph"
+                                               :world-manager manager
+                                               :terrain-id "graph-terrain"}))
+  (graph:add-node terrain-node {})
+  (graph:add-node light-node {})
+  (graph:add-node light-type-node {})
+  (graph:add-node panel-node {})
+  (graph:add-node terrain-editor-node {})
+  (set state.activity.sessions.graph nil)
+  (local (ok err) (pcall (fn [] (manager.changed:emit {:cause :test-remove-activity}))))
+  (assert ok (.. "activity detail refresh should not throw when scene disappears: " (tostring err)))
+  (assert (= (graph:lookup terrain-node.key) nil) "stale terrain detail node should be removed")
+  (assert (= (graph:lookup light-node.key) nil) "stale light detail node should be removed")
+  (assert (= (graph:lookup light-type-node.key) nil) "stale light type node should be removed")
+  (assert (= (graph:lookup panel-node.key) nil) "stale scene panel node should be removed")
+  (assert (= (graph:lookup terrain-editor-node.key) nil) "stale terrain editor detail node should be removed")
+  (graph:drop))
+
+(table.insert tests {:name "activity detail nodes remove when activity scene disappears"
+                     :fn test-activity-detail-nodes-remove-when-activity-scene-disappears})
 (table.insert tests {:name "R6-3 duplicate panels use index-based removal not persistence matching"
                       :fn test-active-sandbox-remove-panel-duplicates-uses-index-not-persistence})
 

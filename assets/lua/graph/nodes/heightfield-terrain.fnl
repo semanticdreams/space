@@ -15,6 +15,21 @@
         out)
       value))
 
+(fn remove-from-graph [node]
+  (when (and node.graph node.graph.remove-nodes)
+    (node.graph:remove-nodes [node] {:cause "shared-delete"})))
+
+(fn refresh-terrain-editor-node [node]
+  (if (not (WorldData.resolve-activity-surface-state node.world-manager node.world-id node.activity-id "scene"))
+      (remove-from-graph node)
+      (do
+        (local current (WorldData.find-terrain node.world-manager node.world-id node.activity-id node.terrain-id))
+        (if (and current (= current.kind "heightfield-terrain"))
+            (do
+              (set node.terrain-record (clone-table current.record))
+              (node.changed:emit node.terrain-record))
+            (remove-from-graph node)))))
+
 (fn M.HeightfieldTerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldTerrainNode requires :world-id"))
@@ -76,14 +91,8 @@
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
-         (fn [_payload]
-            (local current (WorldData.find-terrain world-manager world-id activity-id terrain-id))
-           (if (and current (= current.kind "heightfield-terrain"))
-               (do
-                 (set node.terrain-record (clone-table (or current.record {})))
-                 (node.changed:emit node.terrain-record))
-                (when (and node.graph node.graph.remove-nodes)
-                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
+          (fn [_payload]
+            (refresh-terrain-editor-node node))))
   (set node.drop
        (fn [self]
          (when changed-handler

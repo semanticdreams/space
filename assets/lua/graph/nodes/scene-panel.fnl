@@ -49,7 +49,7 @@
     (when (and node.graph node.graph.remove-nodes)
       (node.graph:remove-nodes [node] {:cause "shared-delete"})))
   (fn refresh-or-remove []
-    (if (not (WorldData.resolve-world-entry world-manager world-id))
+    (if (not (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene"))
         (remove-self)
         (do
           (local current (WorldData.find-scene-panel world-manager world-id activity-id panel-index))

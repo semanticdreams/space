@@ -20,6 +20,22 @@
       "ambient"
       (.. type-key " [" light-id "]")))
 
+(fn remove-from-graph [node]
+  (when (and node.graph node.graph.remove-nodes)
+    (node.graph:remove-nodes [node] {:cause "shared-delete"})))
+
+(fn refresh-light-node [node]
+  (if (not (WorldData.resolve-activity-surface-state node.world-manager node.world-id node.activity-id "scene"))
+      (remove-from-graph node)
+      (do
+        (local current (WorldData.find-light node.world-manager node.world-id node.activity-id node.type-key node.light-id))
+        (if current
+            (do
+              (set node.light-record (clone-table current.record))
+              (set node.label (light-label node.type-key node.light-id))
+              (node.changed:emit node.light-record))
+            (remove-from-graph node)))))
+
 (fn M.LightNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightNode requires :world-id"))
@@ -109,15 +125,8 @@
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
-         (fn [_payload]
-            (local current (WorldData.find-light world-manager world-id activity-id type-key light-id))
-           (if current
-               (do
-                 (set node.light-record (clone-table (or current.record {})))
-                 (set node.label (light-label type-key light-id))
-                 (node.changed:emit node.light-record))
-                (when (and node.graph node.graph.remove-nodes)
-                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
+          (fn [_payload]
+            (refresh-light-node node))))
   (set node.drop
        (fn [self]
          (when changed-handler

@@ -86,13 +86,13 @@
                (node:emit-items))}])
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [payload]
-           (if (WorldData.resolve-world-entry world-manager world-id)
-               (do
-                 (local items (node:collect-items))
-                 (node.items-changed:emit items))
-               (when (and node.graph node.graph.remove-nodes)
+        (world-manager.changed:connect
+          (fn [payload]
+            (if (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene")
+                (do
+                  (local items (node:collect-items))
+                  (node.items-changed:emit items))
+                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
