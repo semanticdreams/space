@@ -9,7 +9,7 @@
 (fn M.ScenePanelNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "ScenePanelNode requires :activity-id"))
   (local world-manager (assert options.world-manager "ScenePanelNode requires :world-manager"))
   (local panel-index (assert options.panel-index "ScenePanelNode requires :panel-index"))
   (local resolved (or options.panel-entry
@@ -19,10 +19,7 @@
   (local panel-record (or options.panel-record resolved.panel {}))
   (local persistence (or panel.persistence panel-record {}))
   (local panel-kind (or persistence.kind resolved.kind "unknown"))
-  (local key (or options.key
-                 (if options.activity-id
-                     (.. "activity-scene-panel:" world-id ":" activity-id ":" panel-index)
-                     (.. "scene-panel:" world-id ":" panel-index))))
+  (local key (or options.key (.. "activity-scene-panel:" world-id ":" activity-id ":" panel-index)))
   (local label (or options.label panel-kind))
   (local node (GraphNode {:key key
                            :label label

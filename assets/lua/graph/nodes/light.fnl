@@ -23,7 +23,7 @@
 (fn M.LightNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "LightNode requires :activity-id"))
   (local world-manager (assert options.world-manager "LightNode requires :world-manager"))
   (local type-key (assert options.type-key "LightNode requires :type-key"))
   (local light-id (assert options.light-id "LightNode requires :light-id"))
@@ -31,10 +31,7 @@
                        (WorldData.find-light world-manager world-id activity-id type-key light-id)
                       {}))
   (local light-record (or options.light-record resolved.record {}))
-  (local key (or options.key
-                 (if options.activity-id
-                     (.. "activity-light:" world-id ":" activity-id ":" type-key ":" light-id)
-                     (.. "light:" world-id ":" type-key ":" light-id))))
+  (local key (or options.key (.. "activity-light:" world-id ":" activity-id ":" type-key ":" light-id)))
   (local node (GraphNode {:key key
                           :label (light-label type-key light-id)
                           :color (glm.vec4 0.82 0.7 0.26 1)

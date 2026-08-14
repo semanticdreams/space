@@ -237,6 +237,7 @@
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (FlatTerrainNode {:world-id "test-world"
+                                :activity-id "sandbox"
                                 :world-manager manager
                                 :terrain-id "terrain-a"}))
   (node:apply-values {:width 64 :length 50 :scale [20 1 20]
@@ -268,7 +269,7 @@
   (local state (make-canonical-sandbox-state {:lights lights-state}))
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (LightNode {:world-id "test-world" :world-manager manager
+  (local node (LightNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager
                           :type-key "point" :light-id "point-1"}))
   (node:apply-values {:enabled true :position [1 2 3]
                       :ambient [0.1 0.1 0.1] :diffuse [0.9 0.8 0.7]
@@ -322,6 +323,40 @@
           "graph light should be updated")
   (assert (same-table? sandbox-before state.activity.sessions.sandbox.scene)
           "sandbox scene state should remain byte-for-byte unchanged"))
+
+(fn test-activity-aware-detail-node-mutations-are-isolated []
+  "Detail graph nodes must mutate the requested activity scene, not sandbox."
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local state (make-activity-aware-state))
+  (local sandbox-before (clone-table state.activity.sessions.sandbox.scene))
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local terrain-node (FlatTerrainNode {:world-id "test-world"
+                                        :activity-id "graph"
+                                        :world-manager manager
+                                        :terrain-id "graph-terrain"}))
+  (terrain-node:apply-values {:width 77 :length 50 :scale [20 1 20]
+                              :position [-500 -100 -500] :rotation [1 0 0 0]
+                              :opacity 1.0 :physics-thickness 2.0})
+  (local light-node (LightNode {:world-id "test-world"
+                                :activity-id "graph"
+                                :world-manager manager
+                                :type-key "point"
+                                :light-id "graph-light"}))
+  (light-node:apply-values {:enabled true :position [1 2 3]
+                            :ambient [0.1 0.1 0.1] :diffuse [0.8 0.7 0.6]
+                            :specular [1 1 1] :specular-power 12
+                            :constant 1.0 :linear 0.33 :quadratic 0.02})
+  (local graph-scene state.activity.sessions.graph.scene)
+  (assert (= (. graph-scene.terrains 1 :options :width) 77)
+          "graph detail terrain edit should update graph session")
+  (assert (= (. graph-scene.lights.point 1 :linear) 0.33)
+          "graph detail light edit should update graph session")
+  (assert (same-table? sandbox-before state.activity.sessions.sandbox.scene)
+          "sandbox scene state should remain unchanged after detail node edits")
+  (terrain-node:drop)
+  (light-node:drop))
 
 (fn test-activity-scene-access-fails-on-missing-requested-activity []
   "Missing requested activity ids must fail instead of returning sandbox data."
@@ -618,7 +653,9 @@
 (table.insert tests {:name "explicit graph activity scene access"
                      :fn test-explicit-graph-activity-scene-access})
 (table.insert tests {:name "explicit graph activity mutations are isolated"
-                     :fn test-explicit-graph-activity_mutations_are_isolated})
+                      :fn test-explicit-graph-activity_mutations_are_isolated})
+(table.insert tests {:name "activity-aware detail node mutations are isolated"
+                     :fn test-activity-aware-detail-node-mutations-are-isolated})
 (table.insert tests {:name "activity scene access fails on missing requested activity"
                      :fn test-activity-scene-access-fails-on-missing-requested-activity})
 (table.insert tests {:name "active runtime missing activity fails before runtime use"

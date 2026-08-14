@@ -116,11 +116,12 @@
                         :list-tabs (fn [_self] [])})
   (GraphKeyLoaders.register graph {:world-manager world-manager})
   (local keys ["world:missing"
-               "terrain:missing:t1"
-               "terrain-editor:missing:t1"
-               "terrain-tool:missing:t1:resize-terrain"
-               "light:missing:point:p1"
-               "scene-panel:missing:1"
+               "activity-terrain:missing:sandbox:t1"
+               "activity-terrain-editor:missing:sandbox:t1"
+               "activity-terrain-tool:missing:sandbox:t1:resize-terrain"
+               "activity-light-type:missing:sandbox:point"
+               "activity-light:missing:sandbox:point:p1"
+               "activity-scene-panel:missing:sandbox:1"
                "hud-panel:missing:tiles:1"])
   (each [_ key (ipairs keys)]
     (local (ok result) (pcall (fn [] (graph:create-node-by-key key))))
@@ -650,7 +651,7 @@
   (local GraphKeyLoaders (require :graph/key-loaders))
   (local graph (Graph {:with-start false}))
   (GraphKeyLoaders.register graph {:world-manager (make-activity-world-manager) :asset-path-resolver (fn [_name] nil)})
-  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
+  (each [_ key (ipairs ["world-activities:test-world" "world-activity:test-world:sandbox" "activity-surfaces:test-world:sandbox" "activity-scene:test-world:sandbox" "activity-scene-panels:test-world:sandbox" "activity-terrains:test-world:sandbox" "activity-skybox:test-world:sandbox" "activity-background:test-world:sandbox" "activity-lights:test-world:sandbox" "activity-scene-panel:test-world:sandbox:1" "activity-terrain:test-world:sandbox:terrain-a" "activity-terrain-editor:test-world:sandbox:terrain-a" "activity-terrain-tool:test-world:sandbox:terrain-a:apply-perlin" "activity-light-type:test-world:sandbox:point" "activity-light:test-world:sandbox:point:point-1"])]
     (local node (graph:load-by-key key))
     (assert node (.. "loader should resolve " key))
     (assert (= node.key key) (.. "loader should preserve key " key)))

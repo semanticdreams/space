@@ -523,59 +523,6 @@
                           :world-manager world-manager
                           :key key})))))
 
-  (graph:register-key-loader "light-type"
-    (prefix-loader "light-type:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 2)
-          (local world-id (. parts 1))
-          (local type-key (. parts 2))
-          (when world-manager
-            (LightTypeNode {:world-id world-id
-                            :world-manager world-manager
-                            :type-key type-key
-                            :key key}))))))
-
-  (graph:register-key-loader "light"
-    (prefix-loader "light:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 3)
-          (local world-id (. parts 1))
-          (local type-key (. parts 2))
-          (local light-id (. parts 3))
-          (local activity-id "sandbox")
-          (local light-entry (and world-manager
-                                    (WorldData.resolve-world-entry world-manager world-id)
-                                    (WorldData.find-light world-manager world-id activity-id type-key light-id)))
-          (when light-entry
-            (LightNode {:world-id world-id
-                        :activity-id activity-id
-                        :world-manager world-manager
-                        :type-key type-key
-                        :light-id light-id
-                        :light-entry light-entry
-                        :key key}))))))
-
-  (graph:register-key-loader "scene-panel"
-    (prefix-loader "scene-panel:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 2)
-          (local world-id (. parts 1))
-          (local panel-index (tonumber (. parts 2)))
-          (local activity-id "sandbox")
-          (local panel-entry (and world-manager panel-index
-                                    (WorldData.resolve-world-entry world-manager world-id)
-                                    (WorldData.find-scene-panel world-manager world-id activity-id panel-index)))
-          (when panel-entry
-            (ScenePanelNode {:world-id world-id
-                             :activity-id activity-id
-                             :world-manager world-manager
-                             :panel-index panel-index
-                             :panel-entry panel-entry
-                             :key key}))))))
-
   (graph:register-key-loader "hud-panel"
     (prefix-loader "hud-panel:"
       (fn [rest key]
@@ -594,64 +541,6 @@
                            :panel-entry panel-entry
                            :key key}))))))
 
-  (graph:register-key-loader "terrain"
-    (prefix-loader "terrain:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 2)
-          (local world-id (. parts 1))
-          (local terrain-id (. parts 2))
-          (local activity-id "sandbox")
-          (local terrain-entry (and world-manager
-                                      (WorldData.resolve-world-entry world-manager world-id)
-                                      (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
-          (when terrain-entry
-            (TerrainNode {:world-id world-id
-                          :activity-id activity-id
-                          :world-manager world-manager
-                          :terrain-id terrain-id
-                          :terrain-entry terrain-entry
-                          :key key}))))))
-
-	  (graph:register-key-loader "terrain-editor"
-	    (prefix-loader "terrain-editor:"
-	      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 2)
-          (local world-id (. parts 1))
-          (local terrain-id (. parts 2))
-          (local activity-id "sandbox")
-          (local terrain-entry (and world-manager
-                                     (WorldData.resolve-world-entry world-manager world-id)
-                                     (WorldData.find-terrain world-manager world-id activity-id terrain-id)))
-          (when terrain-entry
-	            (TerrainEditors.create-editor-node {:world-id world-id
-	                                                :activity-id activity-id
-	                                                :world-manager world-manager
-	                                                :terrain-id terrain-id
-                                                    :terrain-entry terrain-entry
-	                                                :key key}))))))
-	  (graph:register-key-loader "terrain-tool"
-	    (prefix-loader "terrain-tool:"
-	      (fn [rest key]
-	        (local parts (split-key-parts rest))
-	        (when (>= (length parts) 3)
-	          (local world-id (. parts 1))
-	          (local terrain-id (. parts 2))
-	          (local tool-id (. parts 3))
-          (when (and world-manager (WorldData.resolve-world-entry world-manager world-id))
-            (local activity-id "sandbox")
-            (local terrain-entry
-              (WorldData.find-terrain world-manager world-id activity-id terrain-id))
-	            (local terrain-kind (and terrain-entry terrain-entry.kind))
-	            (when terrain-kind
-	              (TerrainTools.create-tool-node {:world-id world-id
-	                                              :activity-id activity-id
-	                                              :world-manager world-manager
-	                                              :terrain-id terrain-id
-	                                              :terrain-kind terrain-kind
-	                                              :tool-id tool-id
-	                                              :key key})))))))
 	  true)
 
 M

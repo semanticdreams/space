@@ -35,10 +35,10 @@
 (fn M.HeightfieldResizeToolNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldResizeToolNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "HeightfieldResizeToolNode requires :activity-id"))
   (local world-manager (assert options.world-manager "HeightfieldResizeToolNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldResizeToolNode requires :terrain-id"))
-  (local key (or options.key (.. "terrain-tool:" world-id ":" terrain-id ":resize-terrain")))
+  (local key (or options.key (.. "activity-terrain-tool:" world-id ":" activity-id ":" terrain-id ":resize-terrain")))
   (local node (GraphNode {:key key
                           :label "resize terrain"
                           :color (glm.vec4 0.37 0.48 0.58 1)

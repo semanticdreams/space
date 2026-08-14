@@ -19,10 +19,10 @@
 (fn M.HeightfieldPerlinToolNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldPerlinToolNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "HeightfieldPerlinToolNode requires :activity-id"))
   (local world-manager (assert options.world-manager "HeightfieldPerlinToolNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldPerlinToolNode requires :terrain-id"))
-  (local key (or options.key (.. "terrain-tool:" world-id ":" terrain-id ":apply-perlin")))
+  (local key (or options.key (.. "activity-terrain-tool:" world-id ":" activity-id ":" terrain-id ":apply-perlin")))
   (local node (GraphNode {:key key
                           :label "apply perlin"
                           :color (glm.vec4 0.33 0.49 0.37 1)

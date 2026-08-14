@@ -6,8 +6,8 @@
 (local editor-specs
   {"heightfield-terrain" {:node-kind HeightfieldTerrainNode}})
 
-(fn editor-key [world-id terrain-id]
-  (.. "terrain-editor:" world-id ":" terrain-id))
+(fn editor-key [world-id activity-id terrain-id]
+  (.. "activity-terrain-editor:" world-id ":" activity-id ":" terrain-id))
 
 (fn editor-spec [terrain-kind]
   (. editor-specs terrain-kind))
@@ -18,7 +18,7 @@
 (fn create-editor-node [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainEditors.create-editor-node requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "TerrainEditors.create-editor-node requires :activity-id"))
   (local terrain-id (assert options.terrain-id "TerrainEditors.create-editor-node requires :terrain-id"))
   (local world-manager (assert options.world-manager "TerrainEditors.create-editor-node requires :world-manager"))
   (local resolved (or options.terrain-entry
@@ -32,7 +32,7 @@
                         :terrain-id terrain-id
                        :world-manager world-manager
                        :terrain-entry resolved
-                       :key (or options.key (editor-key world-id terrain-id))})
+                       :key (or options.key (editor-key world-id activity-id terrain-id))})
       nil))
 
 {:editor-key editor-key

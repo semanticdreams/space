@@ -10,10 +10,10 @@
 (fn M.HeightfieldAdjustToolNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "HeightfieldAdjustToolNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "HeightfieldAdjustToolNode requires :activity-id"))
   (local world-manager (assert options.world-manager "HeightfieldAdjustToolNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "HeightfieldAdjustToolNode requires :terrain-id"))
-  (local key (or options.key (.. "terrain-tool:" world-id ":" terrain-id ":adjust-height")))
+  (local key (or options.key (.. "activity-terrain-tool:" world-id ":" activity-id ":" terrain-id ":adjust-height")))
   (local node (GraphNode {:key key
                           :label "raise/lower"
                           :color (glm.vec4 0.52 0.44 0.29 1)

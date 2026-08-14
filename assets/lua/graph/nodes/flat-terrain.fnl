@@ -18,7 +18,7 @@
 (fn M.FlatTerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "FlatTerrainNode requires :world-id"))
-  (local activity-id (or options.activity-id "sandbox"))
+  (local activity-id (assert options.activity-id "FlatTerrainNode requires :activity-id"))
   (local world-manager (assert options.world-manager "FlatTerrainNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "FlatTerrainNode requires :terrain-id"))
   (local resolved (or options.terrain-entry
@@ -27,7 +27,7 @@
   (local terrain-record (or options.terrain-record resolved.record {}))
   (assert (= (or terrain-record.kind resolved.kind) "flat-terrain")
           "FlatTerrainNode requires a flat-terrain record")
-  (local key (or options.key (.. "terrain-editor:" world-id ":" terrain-id)))
+  (local key (or options.key (.. "activity-terrain-editor:" world-id ":" activity-id ":" terrain-id)))
   (local node (GraphNode {:key key
                            :label "flat terrain"
                            :color (glm.vec4 0.35 0.65 0.45 1)
