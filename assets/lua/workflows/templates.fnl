@@ -8,6 +8,16 @@
 (fn starter-source []
   "(fn [opts]\n  {:run\n   (fn [self ctx input state]\n     (ctx:succeed {:message \"workflow step completed\"\n                   :input input}))})")
 
+(fn definition-has-step-code? [workflow-store definition-id code-entity-id]
+  (var found? false)
+  (when (and workflow-store.get-definition definition-id code-entity-id)
+    (local (ok definition) (pcall workflow-store.get-definition workflow-store definition-id))
+    (when (and ok definition)
+      (each [_ step (ipairs (assert definition.steps "workflow definition requires steps"))]
+        (when (= step.code-entity-id code-entity-id)
+          (set found? true)))))
+  found?)
+
 (fn create-template-code-entity [code-store opts]
   (local options (or opts {}))
   (assert code-store "create-template-code-entity requires code-store")
@@ -30,8 +40,9 @@
   (if ok
       {:step step-or-err :code-entity code-entity}
       (do
-        (assert code-store.delete-entity "create-template-step rollback requires code-store:delete-entity")
-        (code-store:delete-entity code-entity.id)
+        (when (not (definition-has-step-code? workflow-store definition-id code-entity.id))
+          (assert code-store.delete-entity "create-template-step rollback requires code-store:delete-entity")
+          (code-store:delete-entity code-entity.id))
         (error step-or-err))))
 
 (fn create-template-workflow [workflow-store code-store opts]

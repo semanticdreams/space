@@ -495,6 +495,32 @@
 (fn template-helper-creates-durable-workflow-step-and-code []
   (with-temp-dir template-helper-creates-durable-workflow-step-and-code-case))
 
+(fn template-helper-keeps-code-entity-when-add-step-fails-after-commit-case [dir]
+  (local {:WorkflowStore WorkflowStore} (require :workflows/store))
+  (local CodeEntityStore (require :entities/code))
+  (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-template-post-commit-fail")}))
+  (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-template-post-commit-fail")}))
+  (local definition (workflow-store:create-definition {:name "Post commit failure" :steps [] :edges []}))
+  (local failing-handler
+    (workflow-store.definition-updated:connect
+      (fn [_definition]
+        (error "simulated definition-updated failure"))))
+  (local (ok err) (pcall Templates.create-template-step workflow-store code-store definition.id {:name "After commit"}))
+  (workflow-store.definition-updated:disconnect failing-handler true)
+  (assert (not ok) "simulated post-commit add-step failure should be surfaced")
+  (assert (string.find (tostring err) "simulated definition-updated failure" 1 true)
+          "create-template-step should rethrow the add-step failure")
+  (local reloaded-definition (workflow-store:get-definition definition.id))
+  (assert (= (length reloaded-definition.steps) 1)
+          "test setup should leave the add-step mutation committed before the signal failure")
+  (local committed-step (. reloaded-definition.steps 1))
+  (assert committed-step.code-entity-id "committed step should reference template code")
+  (assert (code-store:get-entity committed-step.code-entity-id)
+          "committed workflow step must not point at a deleted template code entity"))
+
+(fn template-helper-keeps-code-entity-when-add-step-fails-after-commit []
+  (with-temp-dir template-helper-keeps-code-entity-when-add-step-fails-after-commit-case))
+
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -530,7 +556,9 @@
 (table.insert tests {:name "graph code entity edits feed cached workflow executor"
                      :fn graph-code-entity-edits-feed-cached-workflow-executor})
 (table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code"
-                     :fn template-helper-creates-durable-workflow-step-and-code})
+                      :fn template-helper-creates-durable-workflow-step-and-code})
+(table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit"
+                     :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
 
 (local main
   (fn []
