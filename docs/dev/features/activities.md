@@ -132,6 +132,13 @@ The first implementation does not need a broad generic compositor. It only needs
 - Physics containment managers are owned by activity Scene slots.
 - Empty Scene slots are inert and expose no render target.
 
+## Activity Camera Boundary
+
+- Retained Scene and Canvas surfaces are containers, not presentation fallbacks: no activity may inherit a retained-surface camera fallback such as `canvas.camera` or `scene.camera`.
+- Camera input must come from the active activity presentation provider or the activity's explicit controls; global controls such as app canvas controls, active pointer controls, or runtime canvas controls are not authoritative fallbacks when a presentation provider exists.
+- Direct Scene/Canvas screen rays require explicit view/projection matrices or an authorized activity slot/presentation target context. Bare direct surface rays are unsafe/failing in active activity contexts: `app.canvas:screen-pos-ray` and `app.scene:screen-pos-ray` must not be used as recommendations for activity pointer math.
+- Dynamic/generated activities follow the same contract as built-ins. A generated `bubbles` activity must register through `Activities.register-activity`, create or restore its own canvas activity slot with the `bubbles` activity id, install its own camera/controls, expose its own render target, and use `app.presentation-screen-pos-ray`, provider rays, slot pointer-target rays, or explicit matrices.
+
 ## Current Seams
 
 ### Canvas Modes Are Already App Behavior Controllers

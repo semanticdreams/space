@@ -22,7 +22,7 @@
 (local TerrainLayoutRecord (require :terrain-layout-record))
 (local LightingViewState (require :lighting-view-state))
 (local SkyboxState (require :skybox-state))
-(local BackgroundState (require :background-state))
+(local BackgroundState (require :background-state)) (local B (require :activity-surface-boundary))
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
 (local default-depth-scale 0.35)
@@ -533,7 +533,7 @@
     {:interaction-surface :scene
      :activity-slot slot
      :screen-pos-ray (fn [_target pos opts]
-                       (self:screen-pos-ray pos opts))})
+                        (self:screen-pos-ray pos (B.authorized-ray-opts opts slot)))})
 
   (fn make-slot-build-context [slot slot-layout-root slot-focus-scope]
     (local slot-ctx
@@ -643,24 +643,24 @@
                (set slot-self.focus-scope nil))
              true))
     (set slot.set-camera
-         (fn [slot-self camera]
-           (set slot-self.camera camera)
-           slot-self))
+          (fn [slot-self camera]
+            (B.assert-slot-owner! :scene "set-camera" slot-self.activity-id {}) (set slot-self.camera camera)
+            slot-self))
     (set slot.set-controls
-         (fn [slot-self controls]
-           (set slot-self.controls controls)
-           slot-self))
+          (fn [slot-self controls]
+            (B.assert-slot-owner! :scene "set-controls" slot-self.activity-id {}) (set slot-self.controls controls)
+            slot-self))
     (set slot.expose-render-target!
-         (fn [slot-self opts]
-           (assert slot-self.camera
-                   "Scene slot expose-render-target! requires a camera on the slot")
+          (fn [slot-self opts]
+            (B.assert-slot-owner! :scene "expose-render-target!" slot-self.activity-id opts) (assert slot-self.camera
+                    "Scene slot expose-render-target! requires a camera on the slot")
            (local options (or opts {}))
            (set slot-self.render-target-spec options)
            slot-self))
     (set slot.clear-render-target!
-          (fn [slot-self]
-            (set slot-self.render-target-spec nil)
-            slot-self))
+           (fn [slot-self]
+             (B.assert-slot-owner! :scene "clear-render-target!" slot-self.activity-id {}) (set slot-self.render-target-spec nil)
+             slot-self))
     (set slot.ensure-containment-manager
           (fn [slot-self]
             (if slot-self.physics-containment-manager
@@ -714,7 +714,7 @@
             "Scene.ensure-activity-slot requires string activity id")
     (assert (> (# activity-id) 0)
             "Scene.ensure-activity-slot requires non-empty activity id")
-    (local existing (. self.activity-slots activity-id))
+    (B.assert-slot-owner! :scene "ensure-activity-slot" activity-id opts) (local existing (. self.activity-slots activity-id))
     (if existing
         (do
           (local options (or opts {}))
@@ -835,8 +835,8 @@
     (assert self.active-activity-slot
             "Scene content mutation requires an active activity scene slot"))
 
-  (fn activate-activity-slot [scene activity-id]
-    (local slot (activity-slot self activity-id))
+  (fn activate-activity-slot [scene activity-id opts]
+    (B.assert-slot-owner! :scene "activate-activity-slot" activity-id opts) (local slot (activity-slot self activity-id))
     (assert slot (.. "Scene.activate-activity-slot: no slot for activity " (tostring activity-id) " — call ensure-activity-slot first"))
     (local was-different-slot
       (and self.active-activity-slot
@@ -1078,10 +1078,12 @@
     slot)
 
   (fn capture-activity-slot-state [scene activity-id]
-    (local slot (ensure-activity-slot scene activity-id))
+    (assert (= (type activity-id) :string)
+            "Scene.capture-activity-slot-state requires string activity id")
+    (local slot (. self.activity-slots activity-id))
+    (assert slot
+            (.. "Scene.capture-activity-slot-state no slot for activity " activity-id))
     (local is-active (= self.active-activity-slot slot))
-    ;; Capture panels and terrains from the slot's own content,
-    ;; not from the current active slot's aliases.
     (local panels [])
     (local source-children
       (if is-active
@@ -1098,7 +1100,6 @@
             (set record.rotation capture-layout.rotation)
             (set record.size (or capture-layout.size record.size))
             (table.insert panels record)))))
-    ;; Preserve queued cube panels from slot's own queued list
     (local source-queued
       (if is-active
           self.queued-cube-panels
@@ -1116,8 +1117,6 @@
           (or (and (= (type slot.scene-state) :table)
                    slot.scene-state.terrains)
               [])))
-    ;; Capture service state: for active slot, read from live engine;
-    ;; for inactive slot, use stored scene-state services.
     (local services
       (if is-active
           (capture-active-service-state self)
@@ -1233,8 +1232,8 @@
       (set slot.physics-body-count self.physics-body-count))
     true)
 
-  (fn deactivate-activity-slot [_scene activity-id]
-    (local slot (activity-slot self activity-id))
+  (fn deactivate-activity-slot [_scene activity-id opts]
+    (B.assert-slot-owner! :scene "deactivate-activity-slot" activity-id opts) (local slot (activity-slot self activity-id))
     (when slot
       (slot:deactivate)
       (when (= self.active-activity-slot slot)
@@ -1265,8 +1264,8 @@
         (reset-services-to-empty self)))
     slot)
 
-  (fn drop-activity-slot [_scene activity-id]
-    (local slot (activity-slot self activity-id))
+  (fn drop-activity-slot [_scene activity-id opts]
+    (B.assert-slot-owner! :scene "drop-activity-slot" activity-id opts) (local slot (activity-slot self activity-id))
     (when slot
       (when slot.physics-containment-manager
         (slot.physics-containment-manager:drop)
@@ -2118,7 +2117,7 @@
   (each [id _ (pairs self.activity-slots)]
     (table.insert slot-ids id))
   (each [_ id (ipairs slot-ids)]
-    (drop-activity-slot self id))
+    (drop-activity-slot self id {:boundary-internal? true}))
   (when self.entity
     (self:unregister-entity self.entity)
     (self.entity:drop)
@@ -2166,7 +2165,15 @@
 
 (fn presentation-target [self]
   (local slot self.active-activity-slot)
-  (when (and slot slot.visible? slot.render-target-spec slot.camera)
+  (when (and slot slot.visible? slot.render-target-spec slot.camera
+             (B.target-owned-by-active? {:kind :scene :surface self :slot slot}))
+    (fn target-screen-pos-ray [_target pos opts]
+      (local ray-options (B.authorized-ray-opts opts slot))
+      (when (not ray-options.view)
+        (set ray-options.view (slot.camera:get-view-matrix)))
+      (when (not ray-options.projection)
+        (set ray-options.projection self.projection))
+      (self:screen-pos-ray pos ray-options))
     {:kind :scene
      :surface self
      :slot slot
@@ -2175,13 +2182,7 @@
      :get-view-matrix (fn [] (slot.camera:get-view-matrix))
      :get-lighting-view-state (fn [] (LightingViewState.perspective slot.camera.position))
      :get-render-contexts (fn [] [slot.ctx])
-     :screen-pos-ray (fn [_target pos opts]
-                       (local options (or opts {}))
-                       (when (not options.view)
-                         (set options.view (slot.camera:get-view-matrix)))
-                       (when (not options.projection)
-                         (set options.projection self.projection))
-                       (self:screen-pos-ray pos options))}))
+     :screen-pos-ray target-screen-pos-ray}))
 
 (fn get-triangle-vector [self]
   (. (active-render-context) :triangle-vector))
@@ -2233,7 +2234,7 @@
 
 (fn screen-pos-ray [self pos opts]
   (local options (or opts {}))
-  (local viewport (viewport-utils.to-table (or options.viewport self.viewport app.viewport)))
+  (B.assert-screen-ray-authorized! :scene "screen-pos-ray" options nil) (local viewport (viewport-utils.to-table (or options.viewport self.viewport app.viewport)))
   (local view (or options.view (self:get-view-matrix)))
   (local projection (or options.projection self.projection))
   (fn finite-number? [value]

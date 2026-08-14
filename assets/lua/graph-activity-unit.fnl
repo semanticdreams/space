@@ -255,7 +255,7 @@
   (local world-runtime app.active-world-runtime)
   (local canvas (and world-runtime world-runtime.canvas))
   (when canvas
-    (canvas:deactivate-activity-slot "graph"))
+    (canvas:deactivate-activity-slot "graph" {:boundary-internal? true}))
   (set app.graph-view nil)
   true)
 
@@ -272,7 +272,7 @@
   (when graph-view
     (graph-view:drop))
   (when canvas
-    (canvas:deactivate-activity-slot "graph"))
+    (canvas:deactivate-activity-slot "graph" {:boundary-internal? true}))
   (when world-runtime
     (set world-runtime.graph-view nil)
     (set world-runtime.graph-view-map-id nil))
@@ -386,7 +386,7 @@
                          "Graph activity deactivation requires app.active-world-runtime")
         scene (assert runtime.scene
                        "Graph activity deactivation requires runtime.scene")]
-    (scene:deactivate-activity-slot "graph")))
+    (scene:deactivate-activity-slot "graph" {:boundary-internal? true})))
 
 (fn snapshot-graph-activity! []
   (let [runtime (assert app.active-world-runtime

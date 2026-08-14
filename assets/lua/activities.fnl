@@ -29,14 +29,15 @@
 (fn ensure-registry []
   (when (not app.activity-registry)
     (set app.activity-registry
-          {:activities {}
-           :ordered-ids []
-            :global-sessions {}
-            :sessions {}
-            :active-activity-id nil
-            :active-activity-spec nil
-            :active-activity-session nil
-            :suppress-workspace-shell-change? false}))
+         {:activities {}
+          :ordered-ids []
+          :global-sessions {}
+          :sessions {}
+          :active-activity-id nil
+          :activating-activity-id nil
+          :active-activity-spec nil
+          :active-activity-session nil
+          :suppress-workspace-shell-change? false}))
   (set app.activity-registry.global-sessions
        (or app.activity-registry.global-sessions app.activity-registry.sessions {}))
   (if app.active-world-runtime
@@ -48,6 +49,23 @@
         (set app.activity-registry.sessions app.active-world-runtime.activity-sessions))
       (set app.activity-registry.sessions app.activity-registry.global-sessions))
   app.activity-registry)
+
+(fn set-activating-activity! [registry activity-id]
+  (set registry.activating-activity-id activity-id)
+  (when app.active-world-runtime
+    (set app.active-world-runtime.activating-activity-id activity-id))
+  true)
+
+(fn with-activating-activity [registry activity-id f]
+  (local previous-registry-id registry.activating-activity-id)
+  (local runtime app.active-world-runtime)
+  (local previous-runtime-id (and runtime runtime.activating-activity-id))
+  (set-activating-activity! registry activity-id)
+  (local (ok result) (pcall f))
+  (set registry.activating-activity-id previous-registry-id)
+  (when runtime
+    (set runtime.activating-activity-id previous-runtime-id))
+  (if ok result (error result)))
 
 (fn pending-session-state [activity-id]
   (and app.active-world-runtime
@@ -412,6 +430,24 @@
    (active-user-session activity-session)
    state))
 
+(fn activate-activity-session! [registry activity-id activity-spec staged-hooks staged-cleanup retained-session]
+  (with-activating-activity
+    registry
+    activity-id
+    (fn []
+      ((or (. activity-spec :activate) (fn [_ctx] nil))
+       (activity-context activity-spec
+                         {:staged-hooks staged-hooks
+                          :staged-cleanup staged-cleanup})
+       (active-user-session retained-session)))))
+
+(fn restore-activity-session-state-with-owner! [registry activity-id activity-spec retained-session state]
+  (with-activating-activity
+    registry
+    activity-id
+    (fn []
+      (restore-activity-session-state! activity-spec retained-session state))))
+
 (fn restore-previous-activity! [registry previous-id previous-spec previous-state]
   (if previous-spec
       (do
@@ -419,11 +455,7 @@
         (local staged-cleanup [])
         (var retained-session (. registry.sessions previous-id))
         (local previous-session
-          ((or (. previous-spec :activate) (fn [_ctx] nil))
-           (activity-context previous-spec
-                             {:staged-hooks staged-hooks
-                              :staged-cleanup staged-cleanup})
-           (active-user-session retained-session)))
+          (activate-activity-session! registry previous-id previous-spec staged-hooks staged-cleanup retained-session))
         (apply-activity-hooks! staged-hooks)
         (set registry.active-activity-id previous-id)
         (set registry.active-activity-spec previous-spec)
@@ -508,13 +540,7 @@
                                        rollback-ok
                                        rollback-err))
         (local (ok activity-session-or-err)
-          (pcall
-            (fn []
-              ((or (. next-spec :activate) (fn [_ctx] nil))
-               (activity-context next-spec
-                                 {:staged-hooks staged-hooks
-                                  :staged-cleanup staged-cleanup})
-               (active-user-session retained-session)))))
+          (pcall activate-activity-session! registry resolved-id next-spec staged-hooks staged-cleanup retained-session))
         (if ok
             (do
               (var failure-prefix (.. "Activity activation failed for " resolved-id ": "))
@@ -531,10 +557,19 @@
                     (set (. registry.sessions resolved-id) retained-session)
                     (set registry.active-activity-session retained-session)
                     (sync-app-active-activity! resolved-id)
+                    (do
+                      (local Boundary (require :activity-surface-boundary))
+                      (Boundary.deactivate-foreign-slots! (and app.active-world-runtime app.active-world-runtime.canvas) resolved-id)
+                      (Boundary.deactivate-foreign-slots! (and app.active-world-runtime app.active-world-runtime.scene) resolved-id))
                     (local restored-state (pending-session-state resolved-id))
                     (when restored-state
                       (local (restore-ok restore-err)
-                        (pcall restore-activity-session-state! next-spec retained-session restored-state))
+                        (pcall restore-activity-session-state-with-owner!
+                               registry
+                               resolved-id
+                               next-spec
+                               retained-session
+                               restored-state))
                       (if restore-ok
                           (clear-pending-session-state! resolved-id)
                           (do

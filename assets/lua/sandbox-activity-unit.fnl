@@ -190,7 +190,7 @@
   background, and containment to empty when the slot is deactivated."
   (when (and app.active-world-runtime app.active-world-runtime.scene)
     (local scene app.active-world-runtime.scene)
-    (scene:deactivate-activity-slot "sandbox"))
+    (scene:deactivate-activity-slot "sandbox" {:boundary-internal? true}))
   (set app.sandbox-toolbar-state nil)
   (when (and app.active-world-runtime app.active-world-runtime.activity-controls)
     ;; Clean up the flight controls wrapper reference; the scene slot

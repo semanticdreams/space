@@ -207,6 +207,138 @@
   (set app.first-person-controls saved-fpc)
   (set app.active-pointer-controls saved-ptr))
 
+(fn owned-target-presentation-target [self]
+  self.target)
+
+(fn no-presentation-input-controls []
+  nil)
+
+(fn provider-render-targets-excludes-foreign-active-targets []
+  (local saved-registry app.activity-registry)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (local scene-target {:kind :scene :slot {:activity-id "sandbox"}})
+  (local canvas-target {:kind :canvas :slot {:activity-id "bubbles"}})
+  (local runtime {:scene {:target scene-target
+                          :presentation-target owned-target-presentation-target}
+                  :canvas {:target canvas-target
+                           :presentation-target owned-target-presentation-target}})
+  (local provider (Presentation.for-runtime runtime))
+  (local targets (provider:render-targets))
+  (assert (= (length targets) 1)
+          (.. "render-targets should exclude foreign scene/canvas targets, got " (length targets)))
+  (assert (= (. targets 1) canvas-target)
+          "Active canvas target should remain in render targets")
+  (assert (= (provider:default-screen-ray-target {:surface :scene}) nil)
+          "Foreign scene target should not be the default ray target")
+  (set app.activity-registry saved-registry))
+
+(fn provider-input-controls-uses-active-slot-only []
+  (local saved-registry app.activity-registry)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (set app.canvas-interactive? true)
+  (local active-controls {:id :active-canvas-slot})
+  (local runtime-controls {:id :runtime-canvas-controls})
+  (local runtime {:canvas {:active-activity-slot-id "bubbles"}
+                  :activity-controls {:canvas {:bubbles active-controls}
+                                      :scene {}}
+                  :canvas-controls runtime-controls})
+  (local provider (Presentation.for-runtime runtime))
+  (assert (= (provider:input-controls) active-controls)
+          "Active canvas slot controls should be returned")
+  (set runtime.activity-controls.canvas.bubbles nil)
+  (assert (= (provider:input-controls) nil)
+          "Active canvas slot without controls must not fall back to runtime.canvas-controls")
+  (set app.activity-registry saved-registry)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+(fn provider-input-controls-rejects-retained-controls-without-active-slot []
+  (local saved-registry app.activity-registry)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (set app.canvas-interactive? true)
+  (local runtime {:canvas {}
+                  :activity-controls {:canvas {}
+                                      :scene {}}
+                  :canvas-controls {:id :retained-canvas-controls}})
+  (local provider (Presentation.for-runtime runtime))
+  (assert (= (provider:input-controls) nil)
+          "Active activity without canvas slot controls must not use retained canvas controls")
+  (set app.activity-registry saved-registry)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+(fn provider-input-controls-rejects-retained-scene-controls-without-slot-controls []
+  (local saved-registry app.activity-registry)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (set app.canvas-interactive? false)
+  (local runtime {:scene {:active-activity-slot-id "bubbles"}
+                  :activity-controls {:canvas {}
+                                      :scene {}}
+                  :first-person-controls {:id :retained-scene-controls}})
+  (local provider (Presentation.for-runtime runtime))
+  (assert (= (provider:input-controls) nil)
+          "Active activity scene slot without controls must not use retained first-person controls")
+  (set app.activity-registry saved-registry)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+(fn provider-rejects-foreign-explicit-scene-canvas-target []
+  (local saved-registry app.activity-registry)
+  (set app.activity-registry {:active-activity-id "bubbles"})
+  (var foreign-called? false)
+  (local foreign-target {:kind :scene
+                         :slot {:activity-id "sandbox"}
+                         :camera {:id :foreign-camera}
+                         :screen-pos-ray (fn [_self _pos _opts]
+                                           (set foreign-called? true)
+                                           :foreign-ray)})
+  (local hud-target {:kind :hud
+                     :screen-pos-ray (fn [_self _pos _opts]
+                                       :hud-ray)})
+  (local provider (Presentation.for-runtime {}))
+  (assert (= (provider:default-screen-ray-target {:target foreign-target}) nil)
+          "Foreign explicit scene/canvas targets must be rejected in active activity context")
+  (assert (= (provider:camera {:target foreign-target}) nil)
+          "Foreign explicit scene/canvas target camera must be filtered out")
+  (local (ok err) (pcall (fn [] (provider:screen-pos-ray {:x 1 :y 2} {:target foreign-target}))))
+  (assert (not ok)
+          "screen-pos-ray with foreign explicit target must fail instead of using it")
+  (assert (not foreign-called?)
+          "Foreign target screen-pos-ray must not be called")
+  (assert (= (provider:default-screen-ray-target {:target hud-target}) hud-target)
+          "Non-scene/canvas explicit targets should remain supported")
+  (assert (= (provider:screen-pos-ray {:x 3 :y 4} {:target hud-target}) :hud-ray)
+          "Non-scene/canvas explicit target rays should remain supported")
+  (set app.activity-registry saved-registry))
+
+(fn sync-interaction-state-ignores-retained-canvas-controls []
+  (local Main (require :main))
+  (local saved-canvas app.canvas)
+  (local saved-visible app.canvas-visible?)
+  (local saved-surface-interactive app.canvas-surface-interactive?)
+  (local saved-preferred app.preferred-interaction-surface)
+  (local saved-controls app.canvas-controls)
+  (local saved-pointer app.active-pointer-controls)
+  (local saved-input app.presentation-input-controls)
+  (Main.install-app-shell!)
+  (set app.canvas {:build-context {}})
+  (set app.canvas-visible? true)
+  (set app.canvas-surface-interactive? true)
+  (set app.preferred-interaction-surface :canvas)
+  (set app.canvas-controls {:id :retained-canvas-controls})
+  (set app.presentation-input-controls no-presentation-input-controls)
+  (app.sync-interaction-surface-state "test" nil)
+  (assert (= app.canvas-interactive? true) "Canvas should be active for this sync path")
+  (assert (= app.active-pointer-controls nil)
+          "sync-interaction-surface-state must not assign retained canvas controls")
+  (set app.canvas saved-canvas)
+  (set app.canvas-visible? saved-visible)
+  (set app.canvas-surface-interactive? saved-surface-interactive)
+  (set app.preferred-interaction-surface saved-preferred)
+  (set app.canvas-controls saved-controls)
+  (set app.active-pointer-controls saved-pointer)
+  (set app.presentation-input-controls saved-input))
+
 (table.insert tests {:name "Provider returns only explicit targets"
                      :fn provider-returns-only-explicit-targets})
 (table.insert tests {:name "Provider screen ray requires target"
@@ -219,23 +351,23 @@
 ;; explicit target is supplied.  It must not silently fall back to
 ;; app.scene or app.canvas.
 (fn app-screen-pos-ray-fails-without-provider-or-explicit-target []
-  (let [saved-runtime app.active-world-runtime
-        Main (require :main)]
-    (Main.install-app-shell!)
-    ;; No active runtime and no explicit target => must fail
-    (set app.active-world-runtime nil)
-    (let [(ok err) (pcall (fn [] (app.screen-pos-ray {:x 10 :y 20} {})))]
-      (assert (not ok)
-              "screen-pos-ray without provider must fail")
-      (assert (string.find (tostring err) "presentation provider")
-              (.. "error must mention presentation provider, got: " (tostring err))))
-    ;; Explicit target must still work even without provider
-    (let [explicit-ray "explicit-ray-result"
-          fake-target {:screen-pos-ray (fn [_self _pos _opts] explicit-ray)}
-          ray (app.screen-pos-ray {:x 1 :y 2} {:target fake-target})]
-      (assert (= ray explicit-ray)
-              "screen-pos-ray with explicit opts.target must work even without provider"))
-    (set app.active-world-runtime saved-runtime)))
+  (local saved-runtime app.active-world-runtime)
+  (local Main (require :main))
+  (Main.install-app-shell!)
+  ;; No active runtime and no explicit target => must fail
+  (set app.active-world-runtime nil)
+  (local (ok err) (pcall (fn [] (app.screen-pos-ray {:x 10 :y 20} {}))))
+  (assert (not ok)
+          "screen-pos-ray without provider must fail")
+  (assert (string.find (tostring err) "presentation provider")
+          (.. "error must mention presentation provider, got: " (tostring err)))
+  ;; Explicit target must still work even without provider
+  (local explicit-ray "explicit-ray-result")
+  (local fake-target {:screen-pos-ray (fn [_self _pos _opts] explicit-ray)})
+  (local ray (app.screen-pos-ray {:x 1 :y 2} {:target fake-target}))
+  (assert (= ray explicit-ray)
+          "screen-pos-ray with explicit opts.target must work even without provider")
+  (set app.active-world-runtime saved-runtime))
 
 (table.insert tests {:name "Provider render-targets includes HUD in scene/canvas/hud order"
                        :fn provider-render-targets-includes-hud-in-order})
@@ -250,7 +382,19 @@
 (table.insert tests {:name "provider input-controls has no cross-surface fallback"
                      :fn provider-input-controls-no-cross-surface-fallback})
 (table.insert tests {:name "common controls-from rejects legacy app globals"
-                     :fn common-controls-from-rejects-legacy-app-globals})
+                      :fn common-controls-from-rejects-legacy-app-globals})
+(table.insert tests {:name "provider render-targets excludes foreign active targets"
+                     :fn provider-render-targets-excludes-foreign-active-targets})
+(table.insert tests {:name "provider input-controls uses active slot only"
+                     :fn provider-input-controls-uses-active-slot-only})
+(table.insert tests {:name "provider input-controls rejects retained controls without active slot"
+                     :fn provider-input-controls-rejects-retained-controls-without-active-slot})
+(table.insert tests {:name "provider input-controls rejects retained scene controls without slot controls"
+                     :fn provider-input-controls-rejects-retained-scene-controls-without-slot-controls})
+(table.insert tests {:name "provider rejects foreign explicit scene/canvas target"
+                     :fn provider-rejects-foreign-explicit-scene-canvas-target})
+(table.insert tests {:name "sync interaction state ignores retained canvas controls"
+                     :fn sync-interaction-state-ignores-retained-canvas-controls})
 
 (local main
   (fn []

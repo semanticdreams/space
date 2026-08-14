@@ -1056,9 +1056,9 @@
 (table.insert tests {:name "Scene containment enabled flag controls install"
                        :fn containment-enabled-flag-controls-install})
 (table.insert tests {:name "Scene content mutation asserts without active slot"
-                       :fn no-active-slot-mutation-asserts})
+                        :fn no-active-slot-mutation-asserts})
 (table.insert tests {:name "Scene restore terrain no duplicates on active slot"
-                        :fn restore-terrain-no-duplicates-on-active-slot})
+                         :fn restore-terrain-no-duplicates-on-active-slot})
 (table.insert tests {:name "Scene restore terrain idempotent on repeat"
                         :fn restore-terrain-idempotent-on-repeat})
 (table.insert tests {:name "Scene restore terrain adds missing while active"
@@ -1314,9 +1314,9 @@
       (drop-fixture fixture))))
 
 (table.insert tests {:name "inactive capture uses authoritative terrains"
-                     :fn inactive-capture-uses-authoritative-terrains})
+                      :fn inactive-capture-uses-authoritative-terrains})
 (table.insert tests {:name "sandbox activation reconciles terrains"
-                     :fn sandbox-activation-reconciles-terrains})
+                      :fn sandbox-activation-reconciles-terrains})
 
 ;; ── R2-1 empty canonical terrain list ──────────────────────────────────
 
