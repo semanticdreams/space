@@ -156,7 +156,7 @@
   (register-string-entity-loader graph {:store string-store})
   (register-code-entity-loader graph {:store code-store})
   (when workflow-store
-    (register-workflows-loader graph {:store workflow-store :runner workflow-runner})
+    (register-workflows-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
     (when workflow-runner
       (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner})
       (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))

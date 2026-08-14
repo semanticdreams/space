@@ -87,6 +87,13 @@
       (set found true)))
   found)
 
+(fn action-named [actions name]
+  (var found nil)
+  (each [_ action (ipairs (if actions actions []))]
+    (when (= action.name name)
+      (set found action)))
+  found)
+
 (fn assert-edge-target [edges key message]
   (local keys (edge-target-key-set edges))
   (assert (. keys key) message))
@@ -118,6 +125,89 @@
   (assert (not ok) message)
   (assert (string.find (tostring result) "requires a build context")
           "missing build context failure should mention build context"))
+
+(fn target-node-by-key [targets key]
+  (var found nil)
+  (each [_ target (ipairs (assert targets "target-node-by-key requires targets"))]
+    (local node (. target 1))
+    (when (and node (= node.key key))
+      (set found node)))
+  found)
+
+(fn with-app-workflow-runtime [runtime f]
+  (local previous-workflow-store (and app app.workflow-store))
+  (local previous-workflow-runner (and app app.workflow-runner))
+  (local previous-code-store (and app app.code-store))
+  (set app.workflow-store runtime.store)
+  (set app.workflow-runner runtime.runner)
+  (set app.code-store runtime.code-store)
+  (local (ok result) (pcall f))
+  (set app.workflow-store previous-workflow-store)
+  (set app.workflow-runner previous-workflow-runner)
+  (set app.code-store previous-code-store)
+  (if ok result (error result)))
+
+(fn start-node-includes-workflows-when-workflow-store-exists-case [runtime]
+  (with-app-workflow-runtime runtime
+    (fn []
+      (local StartNode (require :graph/nodes/start))
+      (local node (StartNode))
+      (local targets (node:collect-targets))
+      (local workflows-node (target-node-by-key targets "workflows"))
+      (assert workflows-node "Start node should include Workflows target when workflow store exists")
+      (assert (= workflows-node.label "Workflows") "Workflows target should use Workflows label"))))
+
+(fn start-node-includes-workflows-when-workflow-store-exists []
+  (with-runtime start-node-includes-workflows-when-workflow-store-exists-case))
+
+(fn workflows-root-new-workflow-creates-and-loads-graph-nodes-case [runtime]
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-workflow-map"}))
+  (local root (map:load-by-key "workflows"))
+  (assert root "workflows root should load through key loader")
+  (local action (action-named root.actions "New Workflow"))
+  (assert action "workflows root should expose New Workflow action")
+  (local result (root:create-workflow-from-graph {:name "Graph Created Workflow"}))
+  (assert result.definition "New Workflow should create a workflow definition")
+  (assert result.step "New Workflow should create a starter step")
+  (assert result.code-entity "New Workflow should create a code entity")
+  (assert (runtime.store:get-definition result.definition.id) "created workflow definition should be durable")
+  (assert (runtime.code-store:get-entity result.code-entity.id) "created step code should be durable")
+  (local definition-key (.. "workflow-definition:" result.definition.id))
+  (local step-key (.. "workflow-step:" result.definition.id ":" result.step.id))
+  (local code-key (.. "code-entity:" result.code-entity.id))
+  (assert (map:lookup definition-key) "New Workflow should load definition node into graph map")
+  (assert (map:lookup step-key) "New Workflow should load starter step node into graph map")
+  (assert (map:lookup code-key) "New Workflow should load code entity node into graph map")
+  (assert-edge-target map.edges definition-key "New Workflow should add definition edge")
+  (assert-edge-target map.edges step-key "New Workflow should add starter step edge")
+  (assert-edge-target map.edges code-key "New Workflow should add code edge")
+  (map:drop))
+
+(fn workflows-root-new-workflow-creates-and-loads-graph-nodes []
+  (with-runtime workflows-root-new-workflow-creates-and-loads-graph-nodes-case))
+
+(fn workflows-preview-builds-with-new-workflow-action-case [runtime]
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "workflow-preview-map"}))
+  (local node (map:load-by-key "workflows"))
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflows))
+  (assert loaded? "workflows preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "workflows preview should not fall back to opts.ctx or graph.ctx")
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "workflows preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget "workflows preview should build a widget")
+  (assert widget.new-workflow-button "workflows preview should expose a New Workflow button")
+  (local before (length (runtime.store:list-definitions)))
+  (widget.new-workflow-button:on-click {:source :test})
+  (assert (= (length (runtime.store:list-definitions)) (+ before 1))
+          "New Workflow preview button should create a definition")
+  (widget:drop)
+  (map:drop))
+
+(fn workflows-preview-builds-with-new-workflow-action []
+  (with-runtime workflows-preview-builds-with-new-workflow-action-case))
 
 (fn seed-definition-with-run [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
@@ -546,9 +636,15 @@
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
-                     :fn workflow-key-loaders-return-nil-for-missing-records})
+                      :fn workflow-key-loaders-return-nil-for-missing-records})
+(table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"
+                     :fn start-node-includes-workflows-when-workflow-store-exists})
+(table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
+                     :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
+(table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
+                     :fn workflows-preview-builds-with-new-workflow-action})
 (table.insert tests {:name "workflow definition node expands to step code and run edges"
-                     :fn workflow-definition-node-expands-to-step-code-and-run-edges})
+                      :fn workflow-definition-node-expands-to-step-code-and-run-edges})
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"
                      :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"
