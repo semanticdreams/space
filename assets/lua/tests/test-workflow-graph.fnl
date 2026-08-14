@@ -400,6 +400,46 @@
 (fn trigger-context-captures-graph-map-and-selected-node-keys []
   (with-runtime trigger-context-captures-graph-map-and-selected-node-keys-case))
 
+(fn workflow-step-source [value]
+  (.. "{:run (fn [_self _context _input _state] {:status :succeeded :output {:value " value "}})}"))
+
+(fn graph-code-entity-edits-feed-cached-workflow-executor-case [dir]
+  (local {:WorkflowStore WorkflowStore} (require :workflows/store))
+  (local {:WorkflowCodeExecutor WorkflowCodeExecutor} (require :workflows/code-executor))
+  (local {:WorkflowRunner WorkflowRunner} (require :workflows/runner))
+  (local CodeEntityStore (require :entities/code))
+  (local Graph (require :graph/init))
+  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local previous-code-store (and app app.code-store))
+  (local workflow-store (WorkflowStore {:base-dir (fs.join-path dir "workflow-shared-code")}))
+  (local code-store (CodeEntityStore.CodeEntityStore {:base-dir (fs.join-path dir "code-shared")}))
+  (set app.code-store code-store)
+  (local executor (WorkflowCodeExecutor {:code-store app.code-store :app app}))
+  (local runner (WorkflowRunner {:store workflow-store :executor executor :app app}))
+  (local graph (Graph {:with-start false}))
+  (GraphKeyLoaders.register graph {:workflow-store workflow-store :workflow-runner runner})
+  (local code (code-store:create-entity {:id "step-code" :name "Step" :source (workflow-step-source 1)}))
+  (local definition (workflow-store:create-definition {:id "wf-shared-code"
+                                                       :name "Shared code"
+                                                       :steps [{:id "step" :code-entity-id code.id}]
+                                                       :edges []}))
+  (local first-run (runner:start-run definition.id {} {}))
+  (runner:tick-run first-run.id {})
+  (assert (= (. (workflow-store:get-run first-run.id) :output :step :value) 1)
+          "first workflow run should use initial source")
+  (local code-node (graph:create-node-by-key "code-entity:step-code"))
+  (assert code-node "graph should resolve the app-scoped code entity")
+  (code-node:update-source (workflow-step-source 2))
+  (local second-run (runner:start-run definition.id {} {}))
+  (runner:tick-run second-run.id {})
+  (assert (= (. (workflow-store:get-run second-run.id) :output :step :value) 2)
+          "workflow execution should observe graph-authored code edits after executor cached the entity")
+  (graph:drop)
+  (set app.code-store previous-code-store))
+
+(fn graph-code-entity-edits-feed-cached-workflow-executor []
+  (with-temp-dir graph-code-entity-edits-feed-cached-workflow-executor-case))
+
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -429,7 +469,9 @@
 (table.insert tests {:name "trigger definition node creates visible run node and definition run edge"
                       :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
 (table.insert tests {:name "trigger context captures graph map and selected node keys"
-                     :fn trigger-context-captures-graph-map-and-selected-node-keys})
+                      :fn trigger-context-captures-graph-map-and-selected-node-keys})
+(table.insert tests {:name "graph code entity edits feed cached workflow executor"
+                     :fn graph-code-entity-edits-feed-cached-workflow-executor})
 
 (local main
   (fn []

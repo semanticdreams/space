@@ -992,10 +992,10 @@
     (GraphKeyLoaders.register graph
                               {:world-manager (assert world.graph-world-manager
                                                       (.. "HomeWorld " world.id " requires :graph-world-manager"))
-                               :asset-path-resolver (assert world.asset-path-resolver
-                                                           (.. "HomeWorld " world.id " requires :asset-path-resolver"))
-                               :workflow-store app.workflow-store
-                               :workflow-runner app.workflow-runner}))
+                                :asset-path-resolver (assert world.asset-path-resolver
+                                                            (.. "HomeWorld " world.id " requires :asset-path-resolver"))
+                                :code-store app.code-store :workflow-store app.workflow-store
+                                :workflow-runner app.workflow-runner}))
 
   (fn create-runtime [world ctx]
     ;; Create a default scene surface camera.  Activity slots (e.g. sandbox)

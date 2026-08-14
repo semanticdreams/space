@@ -159,9 +159,22 @@
    :created-at (tonumber (value-or data.created-at 0))
    :started-at data.started-at
    :finished-at data.finished-at
-   :error data.error
-   :steps (table-or-empty data.steps)
-   :events (array-or-empty data.events)})
+    :error data.error
+    :steps (table-or-empty data.steps)
+    :events (array-or-empty data.events)})
+
+(fn active-run-status? [status]
+  (if (= status :queued)
+      true
+      (= status :running)
+      true
+      false))
+
+(fn set-active-run! [self run]
+  (when (and self run run.id)
+    (if (active-run-status? run.status)
+        (set (. self._active-run-ids run.id) true)
+        (set (. self._active-run-ids run.id) nil))))
 
 (fn new-run-step [run-id step-id]
   {:run-id run-id
@@ -204,6 +217,18 @@
   (ensure-dir self.runs-dir)
   (JsonUtils.write-json! (run-path self run.id) run)
   run)
+
+(fn initialize-active-run-index! [self]
+  (when (and self (not self._active-run-indexed?))
+    (set self._active-run-ids {})
+    (when (fs.exists self.runs-dir)
+      (each [_ entry (ipairs (fs.list-dir self.runs-dir false))]
+        (when (and entry.is-file (string.match entry.name "%.json$"))
+          (local run (normalize-run (read-json-record entry.path)))
+          (set (. self._runs run.id) run)
+          (set-active-run! self run))))
+    (set self._active-run-indexed? true))
+  self._active-run-ids)
 
 (fn load-definition [self definition-id]
   (local id (tostring definition-id))
@@ -398,6 +423,7 @@
                              :steps {}
                              :events []}))
   (set (. self._runs run.id) run)
+  (set-active-run! self run)
   (write-run! self run)
   (self.run-created:emit run)
   run)
@@ -420,9 +446,25 @@
   (table.sort items (fn [a b] (< a.id b.id)))
   items)
 
+(fn list-active-runs [self opts]
+  (local options (table-or-empty opts))
+  (initialize-active-run-index! self)
+  (local items [])
+  (each [run-id _active (pairs self._active-run-ids)]
+    (local run (load-run self run-id))
+    (when (and run
+               (active-run-status? run.status)
+               (if (= options.definition-id nil)
+                   true
+                   (= run.definition-id options.definition-id)))
+      (table.insert items run)))
+  (table.sort items (fn [a b] (< a.id b.id)))
+  items)
+
 (fn update-run [self run-id updates]
   (local run (require-run self run-id))
   (apply-updates! run updates)
+  (set-active-run! self run)
   (write-run! self run)
   (self.run-updated:emit run)
   run)
@@ -475,39 +517,44 @@
   (local runs-dir (fs.join-path root-dir "runs"))
   (ensure-dir definitions-dir)
   (ensure-dir runs-dir)
-  {:base-dir options.base-dir
-   :root-dir root-dir
-   :definitions-dir definitions-dir
-   :runs-dir runs-dir
-   :_definitions {}
-   :_runs {}
-   :definition-created (Signal)
-   :definition-updated (Signal)
-   :definition-deleted (Signal)
-   :run-created (Signal)
-   :run-updated (Signal)
-   :run-step-updated (Signal)
-   :event-appended (Signal)
-   :create-definition create-definition
-   :get-definition get-definition
-   :list-definitions list-definitions
-   :update-definition update-definition
-   :delete-definition delete-definition
-   :add-step add-step
-   :update-step update-step
-   :delete-step delete-step
-   :add-edge add-edge
-   :update-edge update-edge
-   :delete-edge delete-edge
-   :create-run create-run
-   :get-run get-run
-   :list-runs list-runs
-   :update-run update-run
-   :upsert-run-step upsert-run-step
-   :get-run-step get-run-step
-   :list-run-steps list-run-steps
-   :append-event append-event
-   :list-events list-events})
+  (local self {:base-dir options.base-dir
+               :root-dir root-dir
+               :definitions-dir definitions-dir
+               :runs-dir runs-dir
+               :_definitions {}
+               :_runs {}
+               :_active-run-ids {}
+               :_active-run-indexed? false
+               :definition-created (Signal)
+               :definition-updated (Signal)
+               :definition-deleted (Signal)
+               :run-created (Signal)
+               :run-updated (Signal)
+               :run-step-updated (Signal)
+               :event-appended (Signal)
+               :create-definition create-definition
+               :get-definition get-definition
+               :list-definitions list-definitions
+               :update-definition update-definition
+               :delete-definition delete-definition
+               :add-step add-step
+               :update-step update-step
+               :delete-step delete-step
+               :add-edge add-edge
+               :update-edge update-edge
+               :delete-edge delete-edge
+               :create-run create-run
+               :get-run get-run
+               :list-runs list-runs
+               :list-active-runs list-active-runs
+               :update-run update-run
+               :upsert-run-step upsert-run-step
+               :get-run-step get-run-step
+               :list-run-steps list-run-steps
+               :append-event append-event
+               :list-events list-events})
+  (initialize-active-run-index! self)
+  self)
 
 (var default-store nil)
 

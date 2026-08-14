@@ -379,8 +379,6 @@
   (when (= run.status :queued)
     (append-event self run.id :run-started {})
     (set run (update-run-status self run :running {:started-at (now)})))
-  (when (= run.status :waiting)
-    (set run (update-run-status self run :running {})))
   (when (if (= run.status :running) true (= run.status :queued) true false)
     (local definition (assert (self.store:get-definition run.definition-id) (.. "missing workflow definition: " (tostring run.definition-id))))
     (var executed 0)
@@ -410,8 +408,11 @@
 
 (fn tick [self opts]
   (local runs [])
-  (each [_ run (ipairs (self.store:list-runs {}))]
-    (when (if (= run.status :queued) true (= run.status :running) true (= run.status :waiting) true false)
+  (local active-runs (if self.store.list-active-runs
+                         (self.store:list-active-runs {})
+                         (self.store:list-runs {})))
+  (each [_ run (ipairs active-runs)]
+    (when (if (= run.status :queued) true (= run.status :running) true false)
       (table.insert runs (self:tick-run run.id opts))))
   runs)
 

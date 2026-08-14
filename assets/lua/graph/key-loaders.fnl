@@ -140,7 +140,7 @@
   (local options (or opts {}))
 
   (local string-store (or options.string-store options.string_store (StringEntityStore.get-default)))
-  (local code-store (or options.code-store (CodeEntityStore.get-default)))
+  (local code-store (or options.code-store (and app app.code-store) (CodeEntityStore.get-default)))
   (local list-store (or options.list-store options.list_store (ListEntityStore.get-default)))
   (local link-store (or options.link-store options.link_store (LinkEntityStore.get-default)))
   (local identity-store (or options.identity-store (IdentityStore.get-default)))

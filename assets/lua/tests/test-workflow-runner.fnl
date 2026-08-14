@@ -273,6 +273,41 @@
 (fn runner-tick-advances-active-app-scoped-runs []
   (with-temp-store runner-tick-advances-active-app-scoped-runs-case))
 
+(fn runner-tick-does-not-scan-completed-run-history-case [store]
+      (local definition (define-workflow store [{:id "active" :code-entity-id "code-active"}]))
+      (local historical (store:create-run definition.id {} {:scope :history}))
+      (store:update-run historical.id {:status :succeeded :finished-at (os.time)})
+      (local (runner executor) (make-runner store {"active" {:status :succeeded :output {:ok true}}}))
+      (local active (runner:start-run definition.id {:prompt "tick"} {:scope :app}))
+      (local original-list-runs store.list-runs)
+      (set store.list-runs (fn [_self _opts]
+                             (error "runner.tick must not scan complete run history via list-runs")))
+      (local (ok result) (pcall (fn [] (runner:tick {:max-steps 1}))))
+      (set store.list-runs original-list-runs)
+      (assert ok result)
+      (assert (= (length result) 1) "runner tick should return only active runs")
+      (assert (= (. result 1 :id) active.id) "runner tick should advance the active run")
+      (assert (= (length executor.calls) 1) "runner tick should execute active run only"))
+
+(fn runner-tick-does-not-scan-completed-run-history []
+  (with-temp-store runner-tick-does-not-scan-completed-run-history-case))
+
+(fn runner-tick-leaves-waiting-runs-stable-case [store]
+      (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}]))
+      (local (runner _executor) (make-runner store {"ask" {:status :waiting :wait-kind :human-input :request {:prompt "continue?"}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (local event-count-before (length (store:list-events run.id)))
+      (local waiting-count-before (event-kind-count store run.id :run-waiting))
+      (runner:tick {:max-steps 1})
+      (runner:tick {:max-steps 1})
+      (assert (= (. (store:get-run run.id) :status) :waiting) "waiting run should remain waiting across app ticks")
+      (assert (= (length (store:list-events run.id)) event-count-before) "app ticks should not append duplicate events for waiting runs")
+      (assert (= (event-kind-count store run.id :run-waiting) waiting-count-before) "app ticks should not duplicate run-waiting events"))
+
+(fn runner-tick-leaves-waiting-runs-stable []
+  (with-temp-store runner-tick-leaves-waiting-runs-stable-case))
+
 (table.insert tests {:name "runner-start-run-creates-run-steps-and-events" :fn runner-start-run-creates-run-steps-and-events})
 (table.insert tests {:name "runner-succeeds-linear-workflow-and-data-edge" :fn runner-succeeds-linear-workflow-and-data-edge})
 (table.insert tests {:name "runner-fails-step-on-invalid-contract" :fn runner-fails-step-on-invalid-contract})
@@ -285,6 +320,8 @@
 (table.insert tests {:name "runner-loop-exit-clears-stale-next-step-ids" :fn runner-loop-exit-clears-stale-next-step-ids})
 (table.insert tests {:name "runner-joins-after-all-inbound-steps-succeed" :fn runner-joins-after-all-inbound-steps-succeed})
 (table.insert tests {:name "runner-tick-advances-active-app-scoped-runs" :fn runner-tick-advances-active-app-scoped-runs})
+(table.insert tests {:name "runner-tick-does-not-scan-completed-run-history" :fn runner-tick-does-not-scan-completed-run-history})
+(table.insert tests {:name "runner-tick-leaves-waiting-runs-stable" :fn runner-tick-leaves-waiting-runs-stable})
 
 (local main
   (fn []
