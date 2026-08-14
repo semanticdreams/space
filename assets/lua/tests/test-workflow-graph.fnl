@@ -360,6 +360,52 @@
 (fn definition-new-step-creates-template-backed-step-and-loads-nodes []
   (with-runtime definition-new-step-creates-template-backed-step-and-loads-nodes-case))
 
+(fn definition-new-step-without-graph-does-not-persist-step-or-code-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-step-missing-graph-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (set node.graph nil)
+  (local before-steps (length (. (runtime.store:get-definition definition.id) :steps)))
+  (local before-code (length (runtime.code-store:list-entities)))
+  (local (ok err) (pcall node.create-step-from-graph node {:step-name "Should Not Persist"}))
+  (assert (not ok) "New Step without a graph should fail loudly")
+  (assert (string.find (tostring err) "requires a graph map" 1 true)
+          "New Step missing graph failure should explain the missing graph map")
+  (assert (= (length (. (runtime.store:get-definition definition.id) :steps)) before-steps)
+          "failed New Step without graph should not persist a workflow step")
+  (assert (= (length (runtime.code-store:list-entities)) before-code)
+          "failed New Step without graph should not persist a code entity")
+  (map:drop))
+
+(fn definition-new-step-without-graph-does-not-persist-step-or-code []
+  (with-runtime definition-new-step-without-graph-does-not-persist-step-or-code-case))
+
+(fn definition-new-step-rolls-back-when-graph-load-fails-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-step-load-failure-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local original-load-by-key map.load-by-key)
+  (set map.load-by-key (fn [self key]
+                         (if (= (string.sub key 1 14) "workflow-step:")
+                             nil
+                             (original-load-by-key self key))))
+  (local before-steps (length (. (runtime.store:get-definition definition.id) :steps)))
+  (local before-code (length (runtime.code-store:list-entities)))
+  (local (ok err) (pcall node.create-step-from-graph node {:step-name "Should Roll Back"}))
+  (assert (not ok) "New Step should fail loudly when graph loading fails")
+  (assert (string.find (tostring err) "failed to load graph node" 1 true)
+          "graph load failure should be surfaced")
+  (assert (= (length (. (runtime.store:get-definition definition.id) :steps)) before-steps)
+          "graph load failure should roll back the workflow step")
+  (assert (= (length (runtime.code-store:list-entities)) before-code)
+          "graph load failure should roll back the code entity")
+  (map:drop))
+
+(fn definition-new-step-rolls-back-when-graph-load-fails []
+  (with-runtime definition-new-step-rolls-back-when-graph-load-fails-case))
+
 (fn workflow-definition-preview-builds-with-new-step-action-case [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local definition seeded.definition)
@@ -744,9 +790,13 @@
 (table.insert tests {:name "workflow definition preview builds with start action"
                       :fn workflow-definition-preview-builds-with-start-action})
 (table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes"
-                     :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
+                      :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
+(table.insert tests {:name "definition-new-step-without-graph-does-not-persist-step-or-code"
+                      :fn definition-new-step-without-graph-does-not-persist-step-or-code})
+(table.insert tests {:name "definition-new-step-rolls-back-when-graph-load-fails"
+                      :fn definition-new-step-rolls-back-when-graph-load-fails})
 (table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action"
-                     :fn workflow-definition-preview-builds-with-new-step-action})
+                      :fn workflow-definition-preview-builds-with-new-step-action})
 (table.insert tests {:name "workflow-step-show-code-loads-linked-code-node"
                      :fn workflow-step-show-code-loads-linked-code-node})
 (table.insert tests {:name "workflow-step-preview-builds-with-show-code-action"

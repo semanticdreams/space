@@ -44,6 +44,44 @@
   (assert graph.add-edge "WorkflowDefinitionNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn step-key [definition-id step-id]
+  (.. "workflow-step:" definition-id ":" step-id))
+
+(fn assert-create-step-graph-dependencies [self]
+  (assert self.graph "WorkflowDefinitionNode.create-step-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowDefinitionNode.create-step-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowDefinitionNode.create-step-from-graph requires graph:add-edge")
+  (assert self.workflow-store.delete-step
+          "WorkflowDefinitionNode.create-step-from-graph rollback requires workflow store:delete-step")
+  (assert self.code-store.delete-entity
+          "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:delete-entity"))
+
+(fn rollback-created-step! [self result cause]
+  (local rollback-errors [])
+  (when (and result result.step result.step.id)
+    (local (ok err) (pcall self.workflow-store.delete-step
+                           self.workflow-store
+                           self.workflow-definition-id
+                           result.step.id
+                           {:delete-dependent-edges? true}))
+    (when (not ok)
+      (table.insert rollback-errors (tostring err))))
+  (when (and result result.code-entity result.code-entity.id)
+    (local (ok err) (pcall self.code-store.delete-entity self.code-store result.code-entity.id))
+    (when (not ok)
+      (table.insert rollback-errors (tostring err))))
+  (if (> (length rollback-errors) 0)
+      (error (.. (tostring cause) " (rollback failed: " (table.concat rollback-errors "; ") ")"))
+      (error cause)))
+
+(fn load-created-step-into-graph! [self result]
+  (local step-key (step-key self.workflow-definition-id result.step.id))
+  (local code-key (.. "code-entity:" result.code-entity.id))
+  (local step-node (load-required-node self.graph step-key))
+  (local code-node (load-required-node self.graph code-key))
+  (add-visible-edge self.graph self step-node "step")
+  (add-visible-edge self.graph step-node code-node "code"))
+
 (fn copy-array [items]
   (local source (if (= items nil) [] items))
   (local out [])
@@ -70,9 +108,6 @@
   (if cached
       cached
       (resolve-node graph (step-key definition-id step-id))))
-
-(fn step-key [definition-id step-id]
-  (.. "workflow-step:" definition-id ":" step-id))
 
 (fn definition-label [definition definition-id]
   (if (and definition (> (string.len (if definition.name definition.name "")) 0))
@@ -108,20 +143,19 @@
             (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
           run))
   (set node.create-step-from-graph
-       (fn [self opts]
-         (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
-         (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
-         (local result (WorkflowTemplates.create-template-step self.workflow-store
-                                                               self.code-store
-                                                               self.workflow-definition-id
-                                                               (or opts {})))
-         (local step-key (step-key self.workflow-definition-id result.step.id))
-         (local code-key (.. "code-entity:" result.code-entity.id))
-         (local step-node (load-required-node self.graph step-key))
-         (local code-node (load-required-node self.graph code-key))
-         (add-visible-edge self.graph self step-node "step")
-         (add-visible-edge self.graph step-node code-node "code")
-         result))
+        (fn [self opts]
+          (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
+          (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
+          (assert-create-step-graph-dependencies self)
+          (local result (WorkflowTemplates.create-template-step self.workflow-store
+                                                                self.code-store
+                                                                self.workflow-definition-id
+                                                                (or opts {})))
+          (local (ok graph-err)
+            (pcall load-created-step-into-graph! self result))
+          (if ok
+              result
+              (rollback-created-step! self result graph-err))))
   (set node.actions [{:name "Start Run"
                         :icon "play_arrow"
                         :fn (fn [_button _event]
