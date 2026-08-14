@@ -158,7 +158,7 @@
   (when workflow-store
     (register-workflows-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
     (when workflow-runner
-      (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner})
+      (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
       (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
     (register-workflow-step-loader graph {:store workflow-store})
     (register-workflow-run-step-loader graph {:store workflow-store})

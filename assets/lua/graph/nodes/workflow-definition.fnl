@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local WorkflowTemplates (require :workflows/templates))
 (local WorkflowDefinitionNodePreview (require :graph/view/previews/workflow-definition))
 
 (local DEFINITION_BLUE (glm.vec4 0.22 0.4 0.82 1))
@@ -30,6 +31,18 @@
     (when opts
       (set edge._opts opts))
     (table.insert edges edge)))
+
+(fn load-required-node [graph key]
+  (assert graph "WorkflowDefinitionNode requires a graph map for node loading")
+  (assert graph.load-by-key "WorkflowDefinitionNode requires graph:load-by-key")
+  (local node (graph:load-by-key key))
+  (assert node (.. "WorkflowDefinitionNode failed to load graph node: " key))
+  node)
+
+(fn add-visible-edge [graph source target label]
+  (assert graph "WorkflowDefinitionNode requires a graph map for edge creation")
+  (assert graph.add-edge "WorkflowDefinitionNode requires graph:add-edge")
+  (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
 (fn copy-array [items]
   (local source (if (= items nil) [] items))
@@ -82,6 +95,7 @@
   (set node.workflow-definition-id definition-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)
+  (set node.code-store options.code-store)
   (set node.start-workflow-from-graph
        (fn [self input context-opts]
          (local run-input (if (= input nil) {} input))
@@ -90,13 +104,32 @@
                                                     (graph-context self.graph context-opts)))
          (local run-node (and self.graph self.graph.load-by-key
                               (self.graph:load-by-key (.. "workflow-run:" run.id))))
-         (when (and run-node self.graph self.graph.add-edge)
-           (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
-         run))
+          (when (and run-node self.graph self.graph.add-edge)
+            (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
+          run))
+  (set node.create-step-from-graph
+       (fn [self opts]
+         (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
+         (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
+         (local result (WorkflowTemplates.create-template-step self.workflow-store
+                                                               self.code-store
+                                                               self.workflow-definition-id
+                                                               (or opts {})))
+         (local step-key (step-key self.workflow-definition-id result.step.id))
+         (local code-key (.. "code-entity:" result.code-entity.id))
+         (local step-node (load-required-node self.graph step-key))
+         (local code-node (load-required-node self.graph code-key))
+         (add-visible-edge self.graph self step-node "step")
+         (add-visible-edge self.graph step-node code-node "code")
+         result))
   (set node.actions [{:name "Start Run"
-                       :icon "play_arrow"
-                       :fn (fn [_button _event]
-                             (node:start-workflow-from-graph {} {}))}])
+                        :icon "play_arrow"
+                        :fn (fn [_button _event]
+                              (node:start-workflow-from-graph {} {}))}
+                     {:name "New Step"
+                      :icon "add"
+                      :fn (fn [_button _event]
+                            (node:create-step-from-graph {}))}])
   (set node.get-edges
        (fn [self]
          (local current (self.workflow-store:get-definition self.workflow-definition-id))
@@ -130,9 +163,10 @@
         (local definition-id (string.sub key (+ 1 (string.len prefix))))
         (when (and (> (string.len definition-id) 0)
                    (store:get-definition definition-id))
-          (WorkflowDefinitionNode {:definition-id definition-id
-                                   :store store
-                                   :runner runner}))))))
+           (WorkflowDefinitionNode {:definition-id definition-id
+                                    :store store
+                                    :runner runner
+                                    :code-store options.code-store}))))))
 
 {:WorkflowDefinitionNode WorkflowDefinitionNode
  :find-step find-step

@@ -330,6 +330,98 @@
 (fn workflow-definition-preview-builds-with-start-action []
   (with-runtime workflow-definition-preview-builds-with-start-action-case))
 
+(fn definition-new-step-creates-template-backed-step-and-loads-nodes-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-step-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (assert node "workflow definition should load through graph map")
+  (assert (action-named node.actions "New Step") "workflow definition should expose New Step action")
+  (assert node.create-step-from-graph "workflow definition should expose create-step-from-graph")
+  (local result (node:create-step-from-graph {:step-name "Added Step"}))
+  (assert result.step "New Step should create a workflow step")
+  (assert result.code-entity "New Step should create a code entity")
+  (local reloaded (runtime.store:get-definition definition.id))
+  (local created-step (. reloaded.steps (length reloaded.steps)))
+  (assert (= created-step.id result.step.id) "created step should be durable in workflow definition")
+  (assert (= created-step.name "Added Step") "created step should use requested step name")
+  (assert (= created-step.code-entity-id result.code-entity.id)
+          "created step should reference created code entity")
+  (assert (= created-step.source nil) "created step should not embed source")
+  (assert (runtime.code-store:get-entity result.code-entity.id) "created code entity should be durable")
+  (local step-key (.. "workflow-step:" definition.id ":" result.step.id))
+  (local code-key (.. "code-entity:" result.code-entity.id))
+  (assert (map:lookup step-key) "New Step should load step node into graph map")
+  (assert (map:lookup code-key) "New Step should load code node into graph map")
+  (assert-edge-target map.edges step-key "New Step should add definition-to-step edge")
+  (assert-edge-target map.edges code-key "New Step should add step-to-code edge")
+  (map:drop))
+
+(fn definition-new-step-creates-template-backed-step-and-loads-nodes []
+  (with-runtime definition-new-step-creates-template-backed-step-and-loads-nodes-case))
+
+(fn workflow-definition-preview-builds-with-new-step-action-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "definition-new-step-preview-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local Preview (require :graph/view/previews/workflow-definition))
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "definition preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget.start-button "definition preview should expose a Start button")
+  (assert widget.new-step-button "definition preview should expose a New Step button")
+  (local before (length (. (runtime.store:get-definition definition.id) :steps)))
+  (widget.new-step-button:on-click {:source :test})
+  (local after (length (. (runtime.store:get-definition definition.id) :steps)))
+  (assert (= after (+ before 1)) "New Step preview button should add a workflow step")
+  (widget:drop)
+  (map:drop))
+
+(fn workflow-definition-preview-builds-with-new-step-action []
+  (with-runtime workflow-definition-preview-builds-with-new-step-action-case))
+
+(fn workflow-step-show-code-loads-linked-code-node-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "show-code-map"}))
+  (local step-node (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (assert step-node "workflow step should load through graph map")
+  (assert (action-named step-node.actions "Show Code") "workflow step should expose Show Code action")
+  (assert step-node.show-code-from-graph "workflow step should expose show-code-from-graph")
+  (local code-node (step-node:show-code-from-graph))
+  (assert code-node "Show Code should return the loaded code node")
+  (assert (= code-node.key "code-entity:code-a") "Show Code should load linked code entity node")
+  (assert (map:lookup "code-entity:code-a") "Show Code should make code node visible in graph map")
+  (assert-edge-target map.edges "code-entity:code-a" "Show Code should add a visible step-to-code edge")
+  (map:drop))
+
+(fn workflow-step-show-code-loads-linked-code-node []
+  (with-runtime workflow-step-show-code-loads-linked-code-node-case))
+
+(fn workflow-step-preview-builds-with-show-code-action-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local definition seeded.definition)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "step-preview-map"}))
+  (local node (map:load-by-key (.. "workflow-step:" definition.id ":step-a")))
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflow-step))
+  (assert loaded? "workflow step preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "workflow step preview should not fall back to opts.ctx or graph.ctx")
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "workflow step preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget "workflow step preview should build a widget")
+  (assert widget.show-code-button "workflow step preview should expose a Show Code button")
+  (widget.show-code-button:on-click {:source :test})
+  (assert (map:lookup "code-entity:code-a") "Show Code preview button should load linked code node")
+  (widget:drop)
+  (map:drop))
+
+(fn workflow-step-preview-builds-with-show-code-action []
+  (with-runtime workflow-step-preview-builds-with-show-code-action-case))
+
 (fn workflow-run-preview-builds-with-toggle-action-case [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local graph runtime.graph)
@@ -650,9 +742,17 @@
 (table.insert tests {:name "workflow status color mapping covers all statuses"
                        :fn workflow-status-color-mapping-covers-all-statuses})
 (table.insert tests {:name "workflow definition preview builds with start action"
-                     :fn workflow-definition-preview-builds-with-start-action})
+                      :fn workflow-definition-preview-builds-with-start-action})
+(table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes"
+                     :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
+(table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action"
+                     :fn workflow-definition-preview-builds-with-new-step-action})
+(table.insert tests {:name "workflow-step-show-code-loads-linked-code-node"
+                     :fn workflow-step-show-code-loads-linked-code-node})
+(table.insert tests {:name "workflow-step-preview-builds-with-show-code-action"
+                     :fn workflow-step-preview-builds-with-show-code-action})
 (table.insert tests {:name "workflow run preview builds with toggle action"
-                     :fn workflow-run-preview-builds-with-toggle-action})
+                      :fn workflow-run-preview-builds-with-toggle-action})
 (table.insert tests {:name "workflow run details toggle changes expanded edge projection"
                       :fn workflow-run-details-toggle-changes-expanded-edge-projection})
 (table.insert tests {:name "workflow run node omits cancel action for succeeded run"
