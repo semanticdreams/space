@@ -2232,6 +2232,7 @@
             (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :activity-id "sandbox"
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -2377,6 +2378,7 @@
             (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :activity-id "sandbox"
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -2525,6 +2527,7 @@
             (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :activity-id "sandbox"
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})

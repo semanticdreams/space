@@ -185,7 +185,8 @@ Activity surface slots must therefore provide slot-local build contexts or equiv
 
 `assets/lua/scene.fnl` currently has one attached root entity through `self.entity` and methods like `build-default`, `attach-entity`, `capture-state`, and `restore-state` are shaped around that one root.
 
-Scene also owns or exposes world-level concepts:
+Scene previously owned or exposed default-workspace concepts directly on the
+world scene surface:
 
 - terrain records
 - lights
@@ -195,9 +196,12 @@ Scene also owns or exposes world-level concepts:
 - physics bodies
 - scene object registration
 
-For activities, scene should remain a retained surface, but it needs per-activity scene slots so wildly different scene content can be retained and switched instantly.
-
-World-level scene state can remain world-level. Activity-owned scene content should live in activity slots and activity session state.
+For activities, scene remains a retained surface with per-activity scene slots so
+wildly different scene content can be retained and switched instantly. The
+implemented canonical owner for the former default 3D workspace is the Sandbox
+activity session. Surface-specific state such as scene panels, terrains, lights,
+skybox, and background is activity-owned state under the owning session rather
+than flattened onto the world root.
 
 ### Canvas Is Closer But Still Shared
 
@@ -538,27 +542,30 @@ Scene activity slots are needed for activities that want wildly different 3D sce
 
 The first graph/drawing/board migration may not need complex scene content, but the architecture should make scene slots real, not theoretical.
 
-Scene shared state should remain separate:
+Activity-owned scene slot state includes the surface-specific scene data owned by
+that activity. Graph exposure points at the owning activity surface with keys
+that include both world id and activity id, rather than exposing scene/HUD/canvas
+state as world-root scene categories.
 
-- lights
-- skybox
-- background
-- shared terrains, if they are considered HomeWorld world state
-
-Activity-owned scene slot state should include activity-specific roots and panels.
-
-Potential state split:
+Implemented canonical state shape:
 
 ```fennel
-:scene {:shared {:lights ...
-                 :skybox ...
-                 :background ...
-                 :terrains ...}
-        :activity-slots {"graph" {...}
-                         "drawing" {...}}}
+:activity {:active_id "sandbox"
+           :sessions {"sandbox" {:scene {:panels []
+                                          :terrains []
+                                          :lights ...
+                                          :skybox ...
+                                          :background ...}}
+                      "graph" {:scene {...}
+                               :canvas {...}}
+                      "drawing" {:scene {...}
+                                  :canvas {...}}}}
 ```
 
-If terrain/world editing is an activity, terrain presentation and editing widgets may belong to that activity while terrain records remain world data.
+Missing optional surfaces are absent from graph exposure unless the activity owns
+meaningful surface state. If terrain/world editing is an activity, terrain
+presentation, editing widgets, and graph adapters should belong to that
+activity's scene surface state.
 
 ## HUD Contributions
 

@@ -272,6 +272,41 @@ Current graph map view metadata lives under `graph/maps/<graph-map-id>/metadata.
 Legacy `graph-view/metadata.json` data is migration input only, not the current
 write location for graph map metadata.
 
+### Activity-aware world scene key migration
+
+Older graph map state could contain world-level scene topology keys for the
+former default 3D workspace. During `GraphMapManager` hydration and metadata
+pruning, those persisted topology references are migrated once to the canonical
+Sandbox activity surface keys. This is a topology migration only: graph maps keep
+node membership, explicit edges, selection/focus, panels, and view metadata; the
+owning activity session remains responsible for persisted scene data.
+
+Category keys migrate deterministically by inserting the `sandbox` activity id:
+
+| Legacy key | Canonical key |
+| --- | --- |
+| `background:<world-id>` | `activity-background:<world-id>:sandbox` |
+| `skybox:<world-id>` | `activity-skybox:<world-id>:sandbox` |
+| `lights:<world-id>` | `activity-lights:<world-id>:sandbox` |
+| `terrains:<world-id>` | `activity-terrains:<world-id>:sandbox` |
+| `scene-panels:<world-id>` | `activity-scene-panels:<world-id>:sandbox` |
+
+Scene detail descendants use the same parseable rule and preserve the original
+detail identifiers after the inserted activity id:
+
+| Legacy detail key | Canonical detail key |
+| --- | --- |
+| `light-type:<world-id>:<type-key>` | `activity-light-type:<world-id>:sandbox:<type-key>` |
+| `light:<world-id>:<type-key>:<light-id>` | `activity-light:<world-id>:sandbox:<type-key>:<light-id>` |
+| `terrain:<world-id>:<terrain-id>` | `activity-terrain:<world-id>:sandbox:<terrain-id>` |
+| `terrain-editor:<world-id>:<terrain-id>` | `activity-terrain-editor:<world-id>:sandbox:<terrain-id>` |
+| `terrain-tool:<world-id>:<terrain-id>:<tool-id>` | `activity-terrain-tool:<world-id>:sandbox:<terrain-id>:<tool-id>` |
+| `scene-panel:<world-id>:<panel-index>` | `activity-scene-panel:<world-id>:sandbox:<panel-index>` |
+
+Long-term legacy key loader aliases are intentionally not kept. After persisted
+map topology is normalized, live graph exposure should use the activity-aware
+world/activity/surface hierarchy.
+
 ## Panel Ownership
 
 Graph node panels are graph-map-specific.
