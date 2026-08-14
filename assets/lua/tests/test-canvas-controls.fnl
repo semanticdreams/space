@@ -27,6 +27,18 @@
   (canvas:on-viewport-changed app.viewport)
   canvas)
 
+(fn constructor-requires-explicit-camera []
+  (local retained-camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local canvas {:camera retained-camera})
+  (local (ok err)
+    (pcall (fn []
+             (CanvasControls {:canvas canvas}))))
+  (assert (not ok)
+          "CanvasControls must reject construction without an explicit camera")
+  (assert (string.find (tostring err) "CanvasControls requires camera" 1 true)
+          (.. "Expected CanvasControls requires camera, got: " (tostring err)))
+  (pcall (fn [] (retained-camera:drop))))
+
 (fn scroll-wheel-zooms-canvas-in []
   (local camera (Camera {:position (glm.vec3 0 0 0)}))
   (local canvas (make-canvas 1.0))
@@ -173,7 +185,9 @@
   (controls:drop))
 
 (table.insert tests {:name "Canvas controls zoom in on mouse wheel"
-                     :fn scroll-wheel-zooms-canvas-in})
+                      :fn scroll-wheel-zooms-canvas-in})
+(table.insert tests {:name "Canvas controls require an explicit camera"
+                     :fn constructor-requires-explicit-camera})
 (table.insert tests {:name "Canvas controls allow deeper zoom before clamping"
                      :fn scroll-wheel-allows-zooming-past-previous-near-clamp})
 (table.insert tests {:name "Canvas controls pan laterally on horizontal wheel input"

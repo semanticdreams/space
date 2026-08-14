@@ -7,6 +7,11 @@
 (local sandbox-unit (require :sandbox-activity-unit))
 (local _sandbox-actions (pcall require :sandbox-activity-actions))
 
+(fn activate-graph-test-activity [_ctx] {:activity-id "graph"})
+(fn activate-drawing-test-activity [_ctx] {:activity-id "drawing"})
+(fn activate-board-test-activity [_ctx] {:activity-id "board"})
+(fn deactivate-test-activity [_ctx _session] true)
+
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
   (when (not (. registry.activities "sandbox"))
@@ -18,8 +23,8 @@
        :icon "account_tree"
        :button-name "graph-activity"
        :show-in-switcher? true
-       :activate (fn [_ctx] {:activity-id "graph"})
-       :deactivate (fn [_ctx _session] true)}))
+       :activate activate-graph-test-activity
+       :deactivate deactivate-test-activity}))
   (when (not (. registry.activities "drawing"))
     (Activities.register-activity
       {:id "drawing"
@@ -27,8 +32,8 @@
        :icon "draw"
        :button-name "drawing-activity"
        :show-in-switcher? true
-       :activate (fn [_ctx] {:activity-id "drawing"})
-       :deactivate (fn [_ctx _session] true)}))
+       :activate activate-drawing-test-activity
+       :deactivate deactivate-test-activity}))
   (when (not (. registry.activities "board"))
     (Activities.register-activity
       {:id "board"
@@ -36,22 +41,68 @@
        :icon "grid_view"
        :button-name "board-activity"
        :show-in-switcher? true
-       :activate (fn [_ctx] {:activity-id "board"})
-       :deactivate (fn [_ctx _session] true)}))
-  true)
+       :activate activate-board-test-activity
+       :deactivate deactivate-test-activity}))
+   true)
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (set (. out k) (clone-table v)))
+        out)
+      value))
+
+(fn restore-table! [target snapshot]
+  (each [k _v (pairs target)]
+    (set (. target k) nil))
+  (each [k v (pairs snapshot)]
+    (set (. target k) (clone-table v)))
+  target)
 
 (fn with-restored-app [fields f]
   (local snapshot {})
+  (local registry-key :activity-registry)
+  (local registry-ref app.activity-registry)
+  (local registry-snapshot (clone-table registry-ref))
   (each [_ key (ipairs fields)]
     (set (. snapshot key) (. app key)))
   (local (ok result) (pcall f))
+  (if registry-ref
+      (do
+        (restore-table! registry-ref registry-snapshot)
+        (tset app registry-key registry-ref))
+      (tset app registry-key nil))
   (each [_ key (ipairs fields)]
     (set (. app key) (. snapshot key)))
+  (if ok result (error result)))
+
+(fn mutate-registry-owner-for-restore-test []
+  (local registry app.activity-registry)
+  (set registry.active-activity-id "sandbox")
+  true)
+
+(fn exercise-registry-owner-restore []
+  (with-restored-app [] mutate-registry-owner-for-restore-test)
+  (assert (= app.activity-registry.active-activity-id nil)
+          "with-restored-app must restore nested registry owner state"))
+
+(fn with-restored-app-restores-registry-owner []
+  (local original-registry app.activity-registry)
+  (set app.activity-registry {:active-activity-id nil})
+  (local (ok result)
+    (pcall exercise-registry-owner-restore))
+  (set app.activity-registry original-registry)
   (if ok result (error result)))
 
 (fn make-mock-scene []
   (local slots {})
   (var active-slot-id nil)
+  (fn set-slot-camera [self camera] (set self.camera camera) self)
+  (fn set-slot-controls [self controls] (set self.controls controls) self)
+  (fn expose-slot-render-target! [self opts] (set self.render-target-spec opts) self)
+  (fn clear-slot-render-target! [self] (set self.render-target-spec nil) self)
   (fn ensure-activity-slot [_self activity-id]
     (when (not (. slots activity-id))
       (set (. slots activity-id)
@@ -59,14 +110,14 @@
             :scene-state nil
             :visible? false
             :interactive? false
-            :camera nil
-            :controls nil
-            :render-target-spec nil
-            :physics-containment-manager nil
-            :set-camera (fn [self camera] (set self.camera camera) self)
-            :set-controls (fn [self controls] (set self.controls controls) self)
-            :expose-render-target! (fn [self opts] (set self.render-target-spec opts) self)
-            :clear-render-target! (fn [self] (set self.render-target-spec nil) self)}))
+             :camera nil
+             :controls nil
+             :render-target-spec nil
+             :physics-containment-manager nil
+             :set-camera set-slot-camera
+             :set-controls set-slot-controls
+             :expose-render-target! expose-slot-render-target!
+             :clear-render-target! clear-slot-render-target!}))
     (. slots activity-id))
   (fn activate-activity-slot [_self activity-id]
     (local slot (ensure-activity-slot _self activity-id))
@@ -92,6 +143,8 @@
     (and slot slot.scene-state))
   (fn activity-slot [_self activity-id]
     (. slots activity-id))
+  (fn active-slot-id-method [_]
+    active-slot-id)
   {:ensure-activity-slot ensure-activity-slot
    :activity-slot activity-slot
    :activate-activity-slot activate-activity-slot
@@ -99,11 +152,38 @@
    :restore-activity-slot-state restore-activity-slot-state
    :capture-activity-slot-state capture-activity-slot-state
    :slots slots
-   :active-slot-id (fn [_] active-slot-id)})
+   :active-slot-id active-slot-id-method})
 
-;; ---------------------------------------------------------------------------
-;; Test: sandbox activity spec is registered
-;; ---------------------------------------------------------------------------
+(fn make-captured-state-reader [captured-state]
+  (fn read-captured-state [_self _activity-id]
+    captured-state))
+
+(fn test-cuboid-added [_self] :cuboid-added)
+(fn test-browser-added [_self] :browser-added)
+(fn test-ball-added [_self _obj] :ball-added)
+(fn test-light-added [_self _opts] :light-added)
+(fn sync-scene-objects-noop [_self] nil)
+(fn noop-self [_self] nil)
+(fn noop-self-obj [_self _obj] nil)
+(fn noop-self-opts [_self _opts] nil)
+(fn noop-activity-slot [_self _id] {})
+(fn activate-sandbox-activity-for-pcall []
+  (Activities.activate-activity "sandbox"))
+(fn provide-move-mode [] :move)
+(fn provide-grab-mode [] :grab)
+(fn provide-nil-mode [] nil)
+(fn provide-invalid-mode [] :invalid)
+
+(fn make-panel-restore-recorder [restored-panels]
+  (fn record-panel-restore [_self panel index]
+    (table.insert restored-panels {:panel panel :index index})))
+
+(fn make-now-ms-counter []
+  (var now-ms 0)
+  (fn now-ms-counter [_self]
+    (set now-ms (+ now-ms 16))
+    now-ms))
+
 (fn sandbox-activity-unit-registers-spec []
   (ensure-built-in-activities!)
   (local spec (Activities.spec "sandbox"))
@@ -128,9 +208,6 @@
           "Sandbox activity must have restore function")
   true)
 
-;; ---------------------------------------------------------------------------
-;; Test: activation sets scene-preferred interaction surface
-;; ---------------------------------------------------------------------------
 (fn sandbox-activation-sets-scene-interaction-surface []
   (with-restored-app
     [:active-world-runtime
@@ -162,9 +239,6 @@
               "Sandbox activation must hide canvas")
       true)))
 
-;; ---------------------------------------------------------------------------
-;; Test: activation installs root actions
-;; ---------------------------------------------------------------------------
 (fn sandbox-activation-installs-root-actions []
   (with-restored-app
     [:active-world-runtime
@@ -256,9 +330,6 @@
               "Sandbox activation must install target predicate")
       true)))
 
-;; ---------------------------------------------------------------------------
-;; Test: panel hydration processes one panel per frame
-;; ---------------------------------------------------------------------------
 (fn sandbox-panel-hydration-one-per-frame []
   (with-restored-app
     [:active-world-runtime
@@ -275,18 +346,10 @@
     (fn []
       (ensure-built-in-activities!)
       (local mock-scene (make-mock-scene))
-      ;; Track panel restoration
       (var restored-panels [])
-      (set mock-scene.restore-panel-state
-           (fn [_self panel index]
-             (table.insert restored-panels {:panel panel :index index})))
-      (set mock-scene.sync-scene-objects (fn [_self] nil))
-      ;; Mock engine for timing
-      (var now-ms 0)
-      (set app.engine {:now-ms (fn [_self]
-                                 (set now-ms (+ now-ms 16))
-                                 now-ms)})
-      ;; Set up runtime with hydration queue
+      (set mock-scene.restore-panel-state (make-panel-restore-recorder restored-panels))
+      (set mock-scene.sync-scene-objects sync-scene-objects-noop)
+      (set app.engine {:now-ms (make-now-ms-counter)})
       (local session-state {:scene (ActivitySceneState.empty-state)})
       (set session-state.scene.panels
            [{:kind "test-panel-1" :position [1 2 3]}
@@ -312,28 +375,24 @@
               "Update hook must be installed")
       ;; Call update with world in payload (needed for physics pause sync)
       (local world {:id "test-world" :active? true})
-      ;; First update: should restore first panel
       (app.activity-update {:runtime app.active-world-runtime
-                            :world world
-                            :delta 0.016})
+                             :world world
+                             :delta 0.016})
       (assert (= (length restored-panels) 1) "First update should restore 1 panel")
       (assert (= (. restored-panels 1 :panel :kind) "test-panel-1") "First panel should be panel 1")
-      ;; Second update: should restore second panel
       (app.activity-update {:runtime app.active-world-runtime
-                            :world world
-                            :delta 0.016})
+                             :world world
+                             :delta 0.016})
       (assert (= (length restored-panels) 2) "Second update should restore 2 panels total")
       (assert (= (. restored-panels 2 :panel :kind) "test-panel-2") "Second panel should be panel 2")
-      ;; Third update: should restore third panel
       (app.activity-update {:runtime app.active-world-runtime
-                            :world world
-                            :delta 0.016})
+                             :world world
+                             :delta 0.016})
       (assert (= (length restored-panels) 3) "Third update should restore 3 panels total")
       (assert (= (. restored-panels 3 :panel :kind) "test-panel-3") "Third panel should be panel 3")
-      ;; Fourth update: all panels restored, should complete
       (app.activity-update {:runtime app.active-world-runtime
-                            :world world
-                            :delta 0.016})
+                             :world world
+                             :delta 0.016})
       (assert (= (length restored-panels) 3) "Fourth update should not add more panels")
       (assert (= app.active-world-runtime.hydration.completed? true)
               "Hydration should be marked complete after all panels")
@@ -366,12 +425,12 @@
                                      :activity-session-state
                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
       (set app.scene mock-scene)
-      (set app.canvas {:activate-activity-slot (fn [_self _id] {})})
+       (set app.canvas {:activate-activity-slot noop-activity-slot})
       ;; Ensure clean activity state before test
       (when (not (= (Activities.active-activity-id) nil))
         (Activities.deactivate-active-activity))
       ;; Activate sandbox and verify slot is active via mock-scene
-      (local (ok err) (pcall (fn [] (Activities.activate-activity "sandbox"))))
+      (local (ok err) (pcall activate-sandbox-activity-for-pcall))
       (assert ok (.. "Sandbox activation should not error: " (tostring err)))
       (local sandbox-slot-id (mock-scene:active-slot-id))
       ;; If sandbox-slot-id is not a string, show its type for debugging
@@ -405,10 +464,10 @@
   (assert (= (type SandboxActivityActions.sandbox-root-actions) :function)
           "sandbox-root-actions must be a function")
   ;; Call with a mock scene context
-  (local mock-scene {:add-demo-browser (fn [_self] nil)
-                     :add-physics-body (fn [_self] nil)
-                     :add-object (fn [_self _obj] nil)
-                     :add-light-ball (fn [_self _opts] nil)})
+  (local mock-scene {:add-demo-browser noop-self
+                     :add-physics-body noop-self
+                     :add-object noop-self-obj
+                     :add-light-ball noop-self-opts})
   (local context {:scene {:scene mock-scene}})
   (local actions (SandboxActivityActions.sandbox-root-actions context))
   (assert (= (type actions) :table)
@@ -454,10 +513,10 @@
       (set app.active-world-runtime {:scene mock-scene
                                      :activity-session-state
                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
-      (set app.scene {:add-physics-body (fn [_self] :cuboid-added)
-                      :add-demo-browser (fn [_self] :browser-added)
-                      :add-object (fn [_self _obj] :ball-added)
-                      :add-light-ball (fn [_self _opts] :light-added)})
+      (set app.scene {:add-physics-body test-cuboid-added
+                      :add-demo-browser test-browser-added
+                      :add-object test-ball-added
+                      :add-light-ball test-light-added})
       (set app.active-interaction-surface :scene)
       ;; Activate sandbox
       (when (not (= (Activities.active-activity-id) nil))
@@ -539,14 +598,8 @@
                            :background empty-svc.background
                            :containment empty-svc.containment
                            :terrains []})
-      (set mock-scene.capture-activity-slot-state
-           (fn [_self _activity-id]
-             captured-state))
-      ;; Mock engine for timing
-      (var now-ms 0)
-      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
-      ;; Set up runtime with partially-consumed hydration queue:
-      ;; 3 panels total, index 3 means panels 1-2 are hydrated, panel 3 is remaining
+      (set mock-scene.capture-activity-slot-state (make-captured-state-reader captured-state))
+      (set app.engine {:now-ms (make-now-ms-counter)})
       (set app.active-world-runtime
            {:scene mock-scene
             :hydration {:scene-panels [{:kind "queued-panel-1" :position [1 0 0]}
@@ -583,24 +636,32 @@
               "Snapshot must include remaining hydration panel at current index")
       true)))
 
-;; ---------------------------------------------------------------------------
-;; R1-2: sandbox deactivation resets services to empty when no successor slot
-;; ---------------------------------------------------------------------------
-(fn sandbox-deactivation-resets-services-when-no-successor []
-  "When sandbox deactivates and no successor Scene slot activates,
-  the global lights/skybox/background/containment must be reset to empty
-  so they don't leak sandbox state into other activities.
-  Exercises the real Scene:deactivate-activity-slot last-slot path."
-  ;; Collect the module names we will mock so we can restore them correctly
-  ;; regardless of whether they were originally in package.loaded or not.
-  (local mocked-modules [:physics-containment :layout-physics-bodies])
-  ;; Save originals, tracking nil vs non-nil
+(fn save-package-modules [names]
   (local originals {})
-  (each [_ name (ipairs mocked-modules)]
+  (each [_ name (ipairs names)]
     (set (. originals name) (. package.loaded name)))
-  ;; Install mock PhysicsContainment that records calls precisely while
-  ;; delegating all real module functionality.
-  (var containment-calls [])
+  originals)
+
+(fn restore-package-modules! [names originals]
+  (each [_ name (ipairs names)]
+    (set (. package.loaded name) (. originals name)))
+  true)
+
+(fn record-containment-manager! [real-manager containment-calls]
+  (local orig-ensure-installed real-manager.ensure-installed)
+  (local orig-clear real-manager.clear)
+  (set real-manager.ensure-installed
+       (fn [self install-opts]
+         (table.insert containment-calls {:ensure-installed install-opts})
+         (orig-ensure-installed self install-opts)))
+  (set real-manager.clear
+       (fn [self]
+         (table.insert containment-calls :clear)
+         (orig-clear self)))
+  real-manager)
+
+(fn install-physics-containment-mock! []
+  (local containment-calls [])
   (local real-physics-containment (require :physics-containment))
   (set (. package.loaded :physics-containment)
        {:available? real-physics-containment.available?
@@ -612,148 +673,202 @@
         :default-visualization real-physics-containment.default-visualization
         :default-config real-physics-containment.default-config
         :normalize-config real-physics-containment.normalize-config
-        :serialize-config real-physics-containment.serialize-config
-        :automatic-terrain-bounds real-physics-containment.automatic-terrain-bounds
-        :resolve-active-bounds real-physics-containment.resolve-active-bounds
-        :create-manager (fn [opts]
-                          (local real-manager (real-physics-containment.create-manager opts))
-                          ;; Wrap manager methods to record calls
-                          (local orig-ensure-installed real-manager.ensure-installed)
-                          (local orig-clear real-manager.clear)
-                          (set real-manager.ensure-installed
-                               (fn [self install-opts]
-                                 (table.insert containment-calls {:ensure-installed install-opts})
-                                 (orig-ensure-installed self install-opts)))
-                          (set real-manager.clear
-                               (fn [self]
-                                 (table.insert containment-calls :clear)
-                                 (orig-clear self)))
-                          real-manager)})
-  ;; Install mock LayoutPhysicsBodies that records deactivation calls
-  (var physics-deactivate-calls [])
+         :serialize-config real-physics-containment.serialize-config
+         :automatic-terrain-bounds real-physics-containment.automatic-terrain-bounds
+         :resolve-active-bounds real-physics-containment.resolve-active-bounds
+         :create-manager (fn [opts]
+                           (record-containment-manager!
+                             (real-physics-containment.create-manager opts)
+                             containment-calls))})
+  containment-calls)
+
+(fn install-layout-physics-bodies-mock! []
+  (local physics-deactivate-calls [])
   (set (. package.loaded :layout-physics-bodies)
        {:deactivate (fn [entity]
-                      (table.insert physics-deactivate-calls entity)
-                      true)})
+                       (table.insert physics-deactivate-calls entity)
+                       true)})
+  physics-deactivate-calls)
+
+(fn sandbox-deactivation-app-fields []
+  [:active-world-runtime
+   :scene
+   :activity-root-actions
+   :activity-target-enabled?
+   :activity-update
+   :activity-preferred-interaction-surface
+   :activity-surface-state
+   :canvas-surface-interactive?
+   :activity-context-enricher
+   :active-activity-id
+   :lights
+   :renderers
+   :physics-containment-config
+   :physics-containment-scene
+   :engine
+   :create-default-projection])
+
+(fn install-deactivation-reset-recorders! []
+  (local recorders {:lights []
+                    :skybox []
+                    :background []})
+  (local lights-key :lights)
+  (local renderers-key :renderers)
+  (fn record-lights [_self state]
+    (table.insert recorders.lights state))
+  (fn record-skybox [_self state]
+    (table.insert recorders.skybox state))
+  (fn record-background [_self state]
+    (table.insert recorders.background state))
+  (tset app lights-key {:set-state record-lights})
+  (tset app renderers-key
+        {:skybox {:set-state record-skybox}
+         :set-background-state record-background})
+  recorders)
+
+(fn latest-item [items]
+  (. items (length items)))
+
+(fn ensure-default-projection! []
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  true)
+
+(fn create-real-scene-fixture []
+  (local Camera (require :camera))
+  (local glm (require :glm))
+  (local Scene (require :scene))
+  (local engine-key :engine)
+  (ensure-default-projection!)
+  (fn ignore-physics-body [_phys _body])
+  (tset app engine-key
+        {:physics {:addRigidBody ignore-physics-body
+                   :removeRigidBody ignore-physics-body}})
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local real-scene (Scene {:camera camera}))
+  {:camera camera :scene real-scene})
+
+(fn drop-real-scene-fixture! [fixture]
+  (when fixture.scene
+    (fixture.scene:drop))
+  (when fixture.camera
+    (fixture.camera:drop))
+  true)
+
+(fn with-real-scene-fixture [f arg1 arg2]
+  (local fixture (create-real-scene-fixture))
+  (local (ok result) (pcall f fixture arg1 arg2))
+  (drop-real-scene-fixture! fixture)
+  (if ok result (error result)))
+
+(fn activate-real-sandbox-scene! [real-scene]
+  (ensure-built-in-activities!)
+  (set app.active-world-runtime
+       {:scene real-scene
+        :activity-session-state
+        {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+  (set app.scene real-scene)
+  (when (not (= (Activities.active-activity-id) nil))
+    (Activities.deactivate-active-activity))
+  (Activities.activate-activity "sandbox")
+  (assert (. real-scene.activity-slots "sandbox")
+          "Sandbox slot must exist on real Scene")
+  (assert real-scene.active-activity-slot
+          "Real Scene must have an active slot after sandbox activation")
+  true)
+
+(fn prepare-sandbox-slot-entity! [real-scene]
+  (set real-scene.entity {:id "sandbox-root"})
+  (set (. real-scene.activity-slots "sandbox" :entity) {:id "sandbox-root"})
+  true)
+
+(fn capture-deactivation-counts [recorders containment-calls physics-calls]
+  {:lights (length recorders.lights)
+   :skybox (length recorders.skybox)
+   :background (length recorders.background)
+   :containment (length containment-calls)
+   :physics (length physics-calls)})
+
+(fn assert-shared-services-reset [recorders before]
+  (assert (> (length recorders.lights) before.lights)
+          "Deactivation must reset lights to empty")
+  (assert (> (length recorders.skybox) before.skybox)
+          "Deactivation must reset skybox to empty")
+  (assert (> (length recorders.background) before.background)
+          "Deactivation must reset background to empty")
+  (local last-lights (latest-item recorders.lights))
+  (when last-lights
+    (assert (= last-lights.ambient.enabled? false)
+            "Reset lights must have ambient disabled"))
+  (local last-skybox (latest-item recorders.skybox))
+  (when last-skybox
+    (assert (= last-skybox.enabled? false)
+            "Reset skybox must be disabled"))
+  (local last-background (latest-item recorders.background))
+  (when last-background
+    (assert (= (type last-background.color) :table)
+            "Reset background must be valid"))
+  true)
+
+(fn last-ensure-installed-call [containment-calls]
+  (var ensure-call nil)
+  (each [_ call (ipairs containment-calls)]
+    (when (= (type call) :table)
+      (set ensure-call (. call :ensure-installed))))
+  ensure-call)
+
+(fn assert-containment-reset [containment-calls before real-scene]
+  (assert (> (length containment-calls) before.containment)
+          "Containment must be cleared on deactivation without successor")
+  (local ensure-call (last-ensure-installed-call containment-calls))
+  (assert ensure-call
+          "PhysicsContainment.ensure-installed must be called on deactivation")
+  (assert (and ensure-call.config (not ensure-call.config.enabled?))
+          "Containment config must have enabled? = false")
+  (assert (= ensure-call.scene real-scene)
+          "Containment must reference the deactivated scene")
+  true)
+
+(fn assert-layout-physics-deactivated [physics-calls before]
+  (assert (> (length physics-calls) before.physics)
+          "Real Scene deactivate-activity-slot must deactivate layout physics bodies")
+  true)
+
+(fn exercise-sandbox-deactivation-fixture [fixture containment-calls physics-calls]
+  (local real-scene fixture.scene)
+  (local recorders (install-deactivation-reset-recorders!))
+  (activate-real-sandbox-scene! real-scene)
+  (prepare-sandbox-slot-entity! real-scene)
+  (local before (capture-deactivation-counts recorders containment-calls physics-calls))
+  (Activities.deactivate-active-activity)
+  (assert-shared-services-reset recorders before)
+  (assert-containment-reset containment-calls before real-scene)
+  (assert-layout-physics-deactivated physics-calls before)
+  true)
+
+(fn exercise-sandbox-deactivation-reset [containment-calls physics-calls]
+  (with-real-scene-fixture
+    exercise-sandbox-deactivation-fixture
+    containment-calls
+    physics-calls))
+
+(fn run-sandbox-deactivation-reset [containment-calls physics-calls]
+  (with-restored-app
+    (sandbox-deactivation-app-fields)
+    (fn exercise-reset []
+      (exercise-sandbox-deactivation-reset containment-calls physics-calls))))
+
+(fn sandbox-deactivation-resets-services-when-no-successor []
+  (local mocked-modules [:physics-containment :layout-physics-bodies])
+  (local originals (save-package-modules mocked-modules))
+  (local containment-calls (install-physics-containment-mock!))
+  (local physics-calls (install-layout-physics-bodies-mock!))
+  (fn run-reset []
+    (run-sandbox-deactivation-reset containment-calls physics-calls))
   (local (ok result)
-    (pcall
-      (fn []
-        (local Camera (require :camera))
-        (local glm (require :glm))
-        (local Scene (require :scene))
-        (with-restored-app
-          [:active-world-runtime
-           :scene
-           :activity-root-actions
-           :activity-target-enabled?
-           :activity-update
-           :activity-preferred-interaction-surface
-           :activity-surface-state
-           :canvas-surface-interactive?
-           :activity-context-enricher
-           :active-activity-id
-           :lights
-           :renderers
-           :physics-containment-config
-           :physics-containment-scene
-           :engine
-           :create-default-projection]
-          (fn []
-            (ensure-built-in-activities!)
-            ;; Set up minimum app globals required by real Scene constructor
-            (local AppProjection (require :app-projection))
-            (when (not app.create-default-projection)
-              (set app.create-default-projection AppProjection.create-default-projection))
-            ;; Minimal physics mock required by slot containment manager creation
-            (set app.engine {:physics {:addRigidBody (fn [_phys _body])
-                                        :removeRigidBody (fn [_phys _body])}})
-            ;; Create a real Scene with a Camera so the real
-            ;; deactivate-activity-slot path is exercised.
-            (local camera (Camera {:position (glm.vec3 0 0 100)}))
-            (local real-scene (Scene {:camera camera}))
-            ;; Install mock global services
-            (var lights-reset-calls [])
-            (var skybox-reset-calls [])
-            (var background-reset-calls [])
-            (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
-            (set app.renderers
-                 {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
-                  :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
-            ;; Set up runtime with the real Scene
-            ;; Set up runtime with sandbox session
-            (set app.active-world-runtime
-                 {:scene real-scene
-                  :activity-session-state
-                  {:sandbox {:scene (ActivitySceneState.empty-state)}}})
-            (set app.scene real-scene)
-            (when (not (= (Activities.active-activity-id) nil))
-              (Activities.deactivate-active-activity))
-            ;; Activate sandbox (calls real Scene.activate-activity-slot)
-            (Activities.activate-activity "sandbox")
-            (assert (. real-scene.activity-slots "sandbox")
-                    "Sandbox slot must exist on real Scene")
-            (assert real-scene.active-activity-slot
-                    "Real Scene must have an active slot after sandbox activation")
-            ;; Manually set an entity on the slot so the real
-            ;; Scene:deactivate-activity-slot path exercises the
-            ;; LayoutPhysicsBodies.deactivate branch.
-            (set real-scene.entity {:id "sandbox-root"})
-            (set (. real-scene.activity-slots "sandbox" :entity) {:id "sandbox-root"})
-            ;; Track pre-deactivation call counts
-            (local pre-lights-count (length lights-reset-calls))
-            (local pre-skybox-count (length skybox-reset-calls))
-            (local pre-background-count (length background-reset-calls))
-            (local pre-containment-count (length containment-calls))
-            (local pre-physics-count (length physics-deactivate-calls))
-            ;; Deactivate sandbox — exercises the real Scene:deactivate-activity-slot
-            ;; path which now includes the LayoutPhysicsBodies.deactivate fix.
-            (Activities.deactivate-active-activity)
-            ;; No successor Scene slot activated — sandbox deactivation must
-            ;; reset shared services to empty.
-            (assert (> (length lights-reset-calls) pre-lights-count)
-                    "Deactivation must reset lights to empty")
-            (assert (> (length skybox-reset-calls) pre-skybox-count)
-                    "Deactivation must reset skybox to empty")
-            (assert (> (length background-reset-calls) pre-background-count)
-                    "Deactivation must reset background to empty")
-            ;; Verify reset state is empty (not sandbox)
-            (local last-lights (. lights-reset-calls (length lights-reset-calls)))
-            (when last-lights
-              (assert (= last-lights.ambient.enabled? false)
-                      "Reset lights must have ambient disabled"))
-            (local last-skybox (. skybox-reset-calls (length skybox-reset-calls)))
-            (when last-skybox
-              (assert (= last-skybox.enabled? false)
-                      "Reset skybox must be disabled"))
-            (local last-background (. background-reset-calls (length background-reset-calls)))
-            (when last-background
-              (assert (= (type last-background.color) :table)
-                      "Reset background must be valid"))
-            ;; R1-2: Containment must be cleared via PhysicsContainment.ensure-installed
-            ;; with enabled? false config.
-            (assert (> (length containment-calls) pre-containment-count)
-                    "Containment must be cleared on deactivation without successor")
-            ;; Verify the call was ensure-installed with the expected disabled config
-            (var ensure-call nil)
-            (each [_ call (ipairs containment-calls)]
-              (when (= (type call) :table)
-                (set ensure-call (. call :ensure-installed))))
-            (assert ensure-call
-                    "PhysicsContainment.ensure-installed must be called on deactivation")
-            (assert (and ensure-call.config (not ensure-call.config.enabled?))
-                    "Containment config must have enabled? = false")
-            (assert (= ensure-call.scene real-scene)
-                    "Containment must reference the deactivated scene")
-            ;; R1-2: Layout physics bodies must be deactivated via real Scene path
-            (assert (> (length physics-deactivate-calls) pre-physics-count)
-                    "Real Scene deactivate-activity-slot must deactivate layout physics bodies")
-            ;; Clean up real Scene
-            (real-scene:drop)
-            (camera:drop)
-            true)))))
-  ;; Restore package.loaded: handle both nil and non-nil originals
-  (each [_ name (ipairs mocked-modules)]
-    (set (. package.loaded name) (. originals name)))
+    (pcall run-reset))
+  (restore-package-modules! mocked-modules originals)
   (if ok result (error result)))
 
 ;; ---------------------------------------------------------------------------
@@ -872,16 +987,16 @@
       (set app.activity-object-drag-mode-provider nil)
       (assert (= (Runtime.activity-object-drag-mode) nil)
               "activity-object-drag-mode must return nil when no provider is installed")
-      (set app.activity-object-drag-mode-provider (fn [] :move))
+      (set app.activity-object-drag-mode-provider provide-move-mode)
       (assert (= (Runtime.activity-object-drag-mode) :move)
               "activity-object-drag-mode must return :move when provider returns :move")
-      (set app.activity-object-drag-mode-provider (fn [] :grab))
+      (set app.activity-object-drag-mode-provider provide-grab-mode)
       (assert (= (Runtime.activity-object-drag-mode) :grab)
               "activity-object-drag-mode must return :grab when provider returns :grab")
-      (set app.activity-object-drag-mode-provider (fn [] nil))
+      (set app.activity-object-drag-mode-provider provide-nil-mode)
       (assert (= (Runtime.activity-object-drag-mode) nil)
               "activity-object-drag-mode must return nil when provider returns nil")
-      (set app.activity-object-drag-mode-provider (fn [] :invalid))
+      (set app.activity-object-drag-mode-provider provide-invalid-mode)
       (local (ok err) (pcall Runtime.activity-object-drag-mode))
       (assert (not ok)
               "activity-object-drag-mode must fail loudly on invalid provider values")
@@ -909,8 +1024,7 @@
     (fn []
       (ensure-built-in-activities!)
       (local mock-scene (make-mock-scene))
-      (var now-ms 0)
-      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
+      (set app.engine {:now-ms (make-now-ms-counter)})
       (local empty-svc (ActivitySceneState.empty-state))
       (var captured-state {:panels []
                            :lights empty-svc.lights
@@ -918,8 +1032,7 @@
                            :background empty-svc.background
                            :containment empty-svc.containment
                            :terrains []})
-      (set mock-scene.capture-activity-slot-state
-           (fn [_self _activity-id] captured-state))
+      (set mock-scene.capture-activity-slot-state (make-captured-state-reader captured-state))
       (set app.active-world-runtime {:scene mock-scene
                                       :activity-session-state
                                       {:sandbox {:scene (ActivitySceneState.empty-state)}}})
@@ -957,8 +1070,7 @@
     (fn []
       (ensure-built-in-activities!)
       (local mock-scene (make-mock-scene))
-      (var now-ms 0)
-      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
+      (set app.engine {:now-ms (make-now-ms-counter)})
       (set app.active-world-runtime {:scene mock-scene
                                       :activity-session-state
                                       {:sandbox {:scene (ActivitySceneState.empty-state)}}})
@@ -1036,6 +1148,8 @@
 
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})
+(table.insert tests {:name "with-restored-app restores registry owner"
+                     :fn with-restored-app-restores-registry-owner})
 (table.insert tests {:name "sandbox activation sets scene interaction surface"
                      :fn sandbox-activation-sets-scene-interaction-surface})
 (table.insert tests {:name "sandbox activation installs root actions"

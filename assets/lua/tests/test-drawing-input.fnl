@@ -25,14 +25,14 @@
 (local SDL_BUTTON_LEFT 1)
 
 (fn with-app-bindings [bindings body]
-  (local previous {})
+  (local previous {:keys []})
   (each [key value (pairs bindings)]
-    (set (. previous key) (. app key))
+    (table.insert previous.keys key) (set (. previous key) (. app key))
     (set (. app key) value))
   (local (ok result) (pcall body))
   (InputState.reset)
-  (each [key value (pairs previous)]
-    (set (. app key) value))
+  (each [_ key (ipairs previous.keys)]
+    (set (. app key) (. previous key)))
   (when (not ok)
     (error result))
   result)
@@ -118,17 +118,26 @@
           (assert (= draw-calls.redo 0))
           (assert (= draw-calls.cancel 0)))))))
 
-(fn mock-canvas []
+(fn mock-canvas-ray [_payload]
   (local glm (require :glm))
-  {:screen-pos-ray (fn [_self _payload]
-                     {:origin (glm.vec3 0 0 0)
-                      :direction (glm.vec3 1 1 1)})})
+  {:origin (glm.vec3 0 0 0)
+   :direction (glm.vec3 1 1 1)})
+
+(fn mock-canvas []
+  {:screen-pos-ray (fn [_self payload]
+                     (mock-canvas-ray payload))})
+
+(fn mock-presentation-screen-pos-ray [payload opts]
+  (assert (= opts.surface :canvas)
+          "drawing input must request a canvas presentation ray")
+  (mock-canvas-ray payload))
 
 (fn draw-mode-input-bindings [controller-methods]
   {:active-activity-id "drawing"
    :canvas-interactive? true
    :activity-drawing-enabled? true
    :canvas (mock-canvas)
+   :presentation-screen-pos-ray mock-presentation-screen-pos-ray
    :drawing-controller controller-methods
    :activity-input-handlers {:mouse-button-down (. DrawingInput :DrawingMouseButtonDown)
                                 :mouse-motion (. DrawingInput :DrawingMouseMotion)

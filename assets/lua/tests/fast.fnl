@@ -67,10 +67,12 @@
     :tests.test-pointer-routing
     :tests.test-states
       :tests.test-activity-presentation
+      :tests.test-activity-surface-boundary
       :tests.test-activity-camera-state
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
       :tests.test-scene-activity-slots
+      :tests.test-scene-activity-slot-capture-boundary
       :tests.test-activity-retention
       :tests.test-home-world-scene-activity-state
      :tests.test-sandbox-activity
@@ -79,6 +81,7 @@
      :tests.test-camera-animation
      :tests.test-sandbox-camera-controls
       :tests.test-graph-activity-slots
+     :tests.test-drawing-hit-test
      :tests.test-drawing-activity-slots
      :tests.test-board
      :tests.test-board-activity-string-entities

@@ -93,7 +93,7 @@
   (local world-runtime app.active-world-runtime)
   (local canvas (and world-runtime world-runtime.canvas))
   (when canvas
-    (canvas:deactivate-activity-slot "drawing"))
+    (canvas:deactivate-activity-slot "drawing" {:boundary-internal? true}))
   (set app.drawing-render nil)
   true)
 
@@ -108,7 +108,7 @@
   (when render
     (render:drop))
   (when canvas
-    (canvas:deactivate-activity-slot "drawing"))
+    (canvas:deactivate-activity-slot "drawing" {:boundary-internal? true}))
   (when world-runtime
     (set world-runtime.drawing-render nil))
   (set app.drawing-render nil)
@@ -155,7 +155,7 @@
                          "Drawing activity deactivation requires app.active-world-runtime")
         scene (assert runtime.scene
                        "Drawing activity deactivation requires runtime.scene")]
-    (scene:deactivate-activity-slot "drawing")))
+    (scene:deactivate-activity-slot "drawing" {:boundary-internal? true})))
 
 (fn snapshot-drawing-activity! []
   (let [runtime (assert app.active-world-runtime

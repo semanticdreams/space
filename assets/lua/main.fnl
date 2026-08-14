@@ -1030,11 +1030,9 @@
   (set app.canvas-interactive? (and canvas-visible?
                                        canvas-surface-interactive?
                                        (= surface :canvas)))
-  (if app.canvas-interactive?
-      (set app.active-pointer-controls app.canvas-controls)
-      (set app.active-pointer-controls
-            (and app.presentation-input-controls
-                 (app.presentation-input-controls))))
+  (set app.active-pointer-controls
+       (and app.presentation-input-controls
+            (app.presentation-input-controls)))
   (emit-workspace-shell-changed (or reason "interaction-surface") previous)
   (mark-active-world-hud-dirty)
   surface)

@@ -130,7 +130,7 @@
   (local world-runtime app.active-world-runtime)
   (local canvas (and world-runtime world-runtime.canvas))
   (when canvas
-    (canvas:deactivate-activity-slot "board"))
+    (canvas:deactivate-activity-slot "board" {:boundary-internal? true}))
   (set app.board nil)
   (set app.board-view nil)
   true)
@@ -147,7 +147,7 @@
   (when view
     (view:drop))
   (when canvas
-    (canvas:deactivate-activity-slot "board"))
+    (canvas:deactivate-activity-slot "board" {:boundary-internal? true}))
   (when world-runtime
     (set world-runtime.board nil)
     (set world-runtime.board-view nil))
@@ -244,7 +244,7 @@
                          "Board activity deactivation requires app.active-world-runtime")
         scene (assert runtime.scene
                        "Board activity deactivation requires runtime.scene")]
-    (scene:deactivate-activity-slot "board")))
+    (scene:deactivate-activity-slot "board" {:boundary-internal? true})))
 
 (fn snapshot-board-activity! []
   (let [runtime (assert app.active-world-runtime
