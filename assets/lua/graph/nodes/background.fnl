@@ -41,14 +41,14 @@
          updated))
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [_payload]
-           (local entry (WorldData.resolve-world-entry world-manager world-id))
-           (if entry
-               (do
-                 (set node.background-record
-                      (BackgroundState.clone-state
-                         (WorldData.get-background world-manager world-id activity-id)))
+        (world-manager.changed:connect
+          (fn [_payload]
+            (local scene-state (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene"))
+            (if scene-state
+                (do
+                  (set node.background-record
+                       (BackgroundState.clone-state
+                          (WorldData.get-background world-manager world-id activity-id)))
                  (node.changed:emit node.background-record))
                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))

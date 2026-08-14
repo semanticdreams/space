@@ -2,6 +2,7 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local Signal (require :signal))
+(local ActivitySurfacesNodeView (require :graph/view/views/activity-surfaces))
 (local {:ActivitySurfaceNode ActivitySurfaceNode} (require :graph/nodes/activity-surface))
 (local WorldData (require :graph/world-data))
 
@@ -19,9 +20,10 @@
   (local key (or options.key (.. "activity-surfaces:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label "surfaces"
-                          :color (glm.vec4 0.5 0.45 0.72 1)
-                          :sub-color (glm.vec4 0.4 0.35 0.62 1)
-                          :size 8.0}))
+                           :color (glm.vec4 0.5 0.45 0.72 1)
+                           :sub-color (glm.vec4 0.4 0.35 0.62 1)
+                           :size 8.0
+                           :view ActivitySurfacesNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)
   (set node.world-manager world-manager)

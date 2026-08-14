@@ -65,13 +65,13 @@
          updated))
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [_payload]
-           (local entry (WorldData.resolve-world-entry world-manager world-id))
-           (if entry
-               (do
-                 (set node.skybox-record
-                      (SkyboxState.clone-state
+        (world-manager.changed:connect
+          (fn [_payload]
+            (local scene-state (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene"))
+            (if scene-state
+                (do
+                  (set node.skybox-record
+                       (SkyboxState.clone-state
                          (WorldData.get-skybox world-manager world-id activity-id)))
                  (node.changed:emit node.skybox-record))
                (when (and node.graph node.graph.remove-nodes)

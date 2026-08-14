@@ -2,6 +2,7 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local Signal (require :signal))
+(local ActivitySurfaceNodeView (require :graph/view/views/activity-surface))
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
 (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
@@ -25,9 +26,10 @@
   (local key (or options.key (.. (surface-key-prefix surface-key) ":" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label surface-key
-                          :color (glm.vec4 0.46 0.42 0.66 1)
-                          :sub-color (glm.vec4 0.36 0.32 0.56 1)
-                          :size 8.0}))
+                           :color (glm.vec4 0.46 0.42 0.66 1)
+                           :sub-color (glm.vec4 0.36 0.32 0.56 1)
+                           :size 8.0
+                           :view ActivitySurfaceNodeView}))
   (set node.world-id world-id)
   (set node.activity-id activity-id)
   (set node.surface-key surface-key)
