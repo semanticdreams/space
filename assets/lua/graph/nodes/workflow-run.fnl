@@ -78,12 +78,30 @@
   (assert graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn graph-map? [graph]
+  (and graph
+       graph.graph
+       (not (= graph.graph graph))
+       graph.nodes
+       graph.edges
+       graph.edge-map
+       graph.lookup
+       graph.load-by-key
+       graph.add-edge
+       graph.node-added
+       graph.edge-added
+       graph.node-removed
+       graph.edge-removed
+       graph.node-added.emit
+       graph.edge-added.emit
+       graph.graph.register-key-loader))
+
 (fn assert-detail-dependencies [self]
   (assert self.workflow-store "WorkflowRunNode.load-details-from-graph requires workflow store")
   (assert self.workflow-store.get-run "WorkflowRunNode.load-details-from-graph requires workflow store:get-run")
   (assert self.workflow-store.list-run-steps "WorkflowRunNode.load-details-from-graph requires workflow store:list-run-steps")
   (assert self.workflow-store.list-events "WorkflowRunNode.load-details-from-graph requires workflow store:list-events")
-  (assert self.graph "WorkflowRunNode.load-details-from-graph requires a graph map")
+  (assert (graph-map? self.graph) "WorkflowRunNode.load-details-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge"))
 

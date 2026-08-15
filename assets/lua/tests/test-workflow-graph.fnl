@@ -546,6 +546,8 @@
   (assert node.load-details-from-graph "run node should expose explicit detail loading")
   (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
           "run-step should not be visible before explicit detail loading")
+  (set node.get-edges (fn [_self] (error "load-details-from-graph must not call get-edges")))
+  (set map.trigger (fn [_self _node] (error "load-details-from-graph must not call GraphMap.trigger")))
   (local result (node:load-details-from-graph))
   (assert (= result.run-step-count 2) "detail loading should report loaded run steps")
   (assert (= result.event-count 1) "detail loading should report loaded run events")
@@ -567,6 +569,38 @@
 
 (fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges []
   (with-runtime workflow-run-node-load-details-from-graph-materializes-step-and-event-edges-case))
+
+(fn workflow-run-node-load-details-requires-graph-map-before-materializing-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local run-key (.. "workflow-run:" seeded.run.id))
+  (local step-key (.. "workflow-run-step:" seeded.run.id ":step-a"))
+  (local event-key (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+  (local shared-node (runtime.graph:load-by-key run-key))
+  (local before-graph-edges (runtime.graph:edge-count))
+  (local (shared-ok shared-err) (pcall shared-node.load-details-from-graph shared-node))
+  (assert (not shared-ok) "run details mounted on shared Graph should fail loudly")
+  (assert (string.find (tostring shared-err) "requires a graph map" 1 true)
+          "shared Graph failure should explain the missing graph map")
+  (assert (and (= (runtime.graph:lookup step-key) nil)
+               (= (runtime.graph:lookup event-key) nil)
+               (= (runtime.graph:edge-count) before-graph-edges))
+          "shared Graph failure should not materialize detail nodes or edges")
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-details-missing-map"}))
+  (local map-node (map:load-by-key run-key))
+  (set map-node.graph nil)
+  (local before-map-edges (map:edge-count))
+  (local (missing-ok missing-err) (pcall map-node.load-details-from-graph map-node))
+  (assert (not missing-ok) "run details without a graph map should fail loudly")
+  (assert (string.find (tostring missing-err) "requires a graph map" 1 true)
+          "missing graph failure should explain the missing graph map")
+  (assert (and (= (map:lookup step-key) nil)
+               (= (map:lookup event-key) nil)
+               (= (map:edge-count) before-map-edges))
+          "missing graph failure should not materialize detail nodes or edges")
+  (map:drop))
+
+(fn workflow-run-node-load-details-requires-graph-map-before-materializing []
+  (with-runtime workflow-run-node-load-details-requires-graph-map-before-materializing-case))
 
 (fn workflow-status-color-mapping-covers-all-statuses []
   (local WorkflowRunNode (require :graph/nodes/workflow-run))
@@ -753,6 +787,8 @@
   (assert (= widget.show-details-button-label "Show Details") "collapsed run preview should show Show Details")
   (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
           "run-step should not be visible before Show Details")
+  (set node.get-edges (fn [_self] (error "Show Details must not call get-edges")))
+  (set map.trigger (fn [_self _node] (error "Show Details must not call GraphMap.trigger")))
   (widget.show-details-button:on-click {:source :test})
   (assert node.details-expanded? "Show Details button should expand run detail UI state")
   (assert (= widget.show-details-button-label "Hide Details")
@@ -1112,79 +1148,45 @@
                      :fn agent-session-key-loads-workflow-backed-session})
 (table.insert tests {:name "agent-session-node-loads-backing-workflow-run"
                       :fn agent-session-node-loads-backing-workflow-run})
-(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events"
-                     :fn agent-session-node-loads-only-recent-workflow-events})
-(table.insert tests {:name "agent-session-preview-requires-direct-context"
-                      :fn agent-session-preview-requires-direct-context})
-(table.insert tests {:name "agent-session-preview-shows-status-and-item-count"
-                     :fn agent-session-preview-shows-status-and-item-count})
-(table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"
-                      :fn start-node-includes-workflows-when-workflow-store-exists})
-(table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
-                      :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
-(table.insert tests {:name "workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code"
-                     :fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code})
-(table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
-                       :fn workflows-preview-builds-with-new-workflow-action})
-(table.insert tests {:name "workflows-preview-search-selects-one-definition-only"
-                        :fn workflows-preview-search-selects-one-definition-only})
-(table.insert tests {:name "workflows-root-does-not-load-runs-directly"
-                         :fn workflows-root-does-not-load-runs-directly})
+(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events" :fn agent-session-node-loads-only-recent-workflow-events})
+(table.insert tests {:name "agent-session-preview-requires-direct-context" :fn agent-session-preview-requires-direct-context})
+(table.insert tests {:name "agent-session-preview-shows-status-and-item-count" :fn agent-session-preview-shows-status-and-item-count})
+(table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists" :fn start-node-includes-workflows-when-workflow-store-exists})
+(table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes" :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
+(table.insert tests {:name "workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code})
+(table.insert tests {:name "workflows-preview-builds-with-new-workflow-action" :fn workflows-preview-builds-with-new-workflow-action})
+(table.insert tests {:name "workflows-preview-search-selects-one-definition-only" :fn workflows-preview-search-selects-one-definition-only})
+(table.insert tests {:name "workflows-root-does-not-load-runs-directly" :fn workflows-root-does-not-load-runs-directly})
 (table.insert tests {:name "workflow-definition-preview-search-selects-one-run" :fn (fn [] (with-runtime workflow-definition-preview-search-selects-one-run-case))})
 (table.insert tests {:name "workflow-definition-run-search-filters-to-definition" :fn (fn [] (with-runtime workflow-definition-run-search-filters-to-definition-case))})
 (table.insert tests {:name "workflow-definition-load-run-rejects-foreign-definition" :fn (fn [] (with-runtime workflow-definition-load-run-rejects-foreign-definition-case))})
-(table.insert tests {:name "workflow definition node expands to step code and run edges"
-                         :fn workflow-definition-node-expands-to-step-code-and-run-edges})
-(table.insert tests {:name "workflow-run-node-load-details-from-graph-materializes-step-and-event-edges"
-                      :fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges})
-(table.insert tests {:name "workflow status color mapping covers all statuses"
-                       :fn workflow-status-color-mapping-covers-all-statuses})
-(table.insert tests {:name "workflow definition preview builds with start action"
-                      :fn workflow-definition-preview-builds-with-start-action})
-(table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes"
-                      :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
-(table.insert tests {:name "definition-new-step-without-graph-does-not-persist-step-or-code"
-                      :fn definition-new-step-without-graph-does-not-persist-step-or-code})
-(table.insert tests {:name "definition-new-step-rolls-back-when-graph-load-fails"
-                      :fn definition-new-step-rolls-back-when-graph-load-fails})
-(table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action"
-                      :fn workflow-definition-preview-builds-with-new-step-action})
-(table.insert tests {:name "workflow-step-show-code-loads-linked-code-node"
-                     :fn workflow-step-show-code-loads-linked-code-node})
-(table.insert tests {:name "workflow-step-preview-builds-with-show-code-action"
-                     :fn workflow-step-preview-builds-with-show-code-action})
-(table.insert tests {:name "workflow-run-preview-show-details-loads-step-and-event-nodes"
-                       :fn workflow-run-preview-show-details-loads-step-and-event-nodes})
-(table.insert tests {:name "workflow run node omits cancel action for succeeded run"
-                      :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
-(table.insert tests {:name "workflow run step status colors cover all run step statuses"
-                       :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
-(table.insert tests {:name "workflow-run-step-and-event-summaries-include-details"
-                       :fn workflow-run-step-and-event-summaries-include-details})
-(table.insert tests {:name "workflow-run-step-preview-builds-summary"
-                       :fn workflow-run-step-preview-builds-summary})
-(table.insert tests {:name "workflow-run-event-preview-builds-summary"
-                       :fn workflow-run-event-preview-builds-summary})
-(table.insert tests {:name "graph step connection creates canonical workflow control edge"
-                      :fn graph-step-connection-creates-canonical-workflow-control-edge})
-(table.insert tests {:name "graph map capture skips workflow derived edges"
-                     :fn graph-map-capture-skips-workflow-derived-edges})
-(table.insert tests {:name "graph remove edge deletes canonical workflow edge"
-                      :fn graph-remove-edge-deletes-canonical-workflow-edge})
-(table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes"
-                     :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
-(table.insert tests {:name "trigger definition node creates visible run node and definition run edge"
-                      :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
-(table.insert tests {:name "trigger context captures graph map and selected node keys"
-                      :fn trigger-context-captures-graph-map-and-selected-node-keys})
-(table.insert tests {:name "graph code entity edits feed cached workflow executor"
-                     :fn graph-code-entity-edits-feed-cached-workflow-executor})
-(table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code"
-                      :fn template-helper-creates-durable-workflow-step-and-code})
-(table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit"
-                      :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
-(table.insert tests {:name "template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit"
-                     :fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit})
+(table.insert tests {:name "workflow definition node expands to step code and run edges" :fn workflow-definition-node-expands-to-step-code-and-run-edges})
+(table.insert tests {:name "workflow-run-node-load-details-from-graph-materializes-step-and-event-edges" :fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges})
+(table.insert tests {:name "workflow-run-node-load-details-requires-graph-map-before-materializing" :fn workflow-run-node-load-details-requires-graph-map-before-materializing})
+(table.insert tests {:name "workflow status color mapping covers all statuses" :fn workflow-status-color-mapping-covers-all-statuses})
+(table.insert tests {:name "workflow definition preview builds with start action" :fn workflow-definition-preview-builds-with-start-action})
+(table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes" :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
+(table.insert tests {:name "definition-new-step-without-graph-does-not-persist-step-or-code" :fn definition-new-step-without-graph-does-not-persist-step-or-code})
+(table.insert tests {:name "definition-new-step-rolls-back-when-graph-load-fails" :fn definition-new-step-rolls-back-when-graph-load-fails})
+(table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action" :fn workflow-definition-preview-builds-with-new-step-action})
+(table.insert tests {:name "workflow-step-show-code-loads-linked-code-node" :fn workflow-step-show-code-loads-linked-code-node})
+(table.insert tests {:name "workflow-step-preview-builds-with-show-code-action" :fn workflow-step-preview-builds-with-show-code-action})
+(table.insert tests {:name "workflow-run-preview-show-details-loads-step-and-event-nodes" :fn workflow-run-preview-show-details-loads-step-and-event-nodes})
+(table.insert tests {:name "workflow run node omits cancel action for succeeded run" :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
+(table.insert tests {:name "workflow run step status colors cover all run step statuses" :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
+(table.insert tests {:name "workflow-run-step-and-event-summaries-include-details" :fn workflow-run-step-and-event-summaries-include-details})
+(table.insert tests {:name "workflow-run-step-preview-builds-summary" :fn workflow-run-step-preview-builds-summary})
+(table.insert tests {:name "workflow-run-event-preview-builds-summary" :fn workflow-run-event-preview-builds-summary})
+(table.insert tests {:name "graph step connection creates canonical workflow control edge" :fn graph-step-connection-creates-canonical-workflow-control-edge})
+(table.insert tests {:name "graph map capture skips workflow derived edges" :fn graph-map-capture-skips-workflow-derived-edges})
+(table.insert tests {:name "graph remove edge deletes canonical workflow edge" :fn graph-remove-edge-deletes-canonical-workflow-edge})
+(table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes" :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
+(table.insert tests {:name "trigger definition node creates visible run node and definition run edge" :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
+(table.insert tests {:name "trigger context captures graph map and selected node keys" :fn trigger-context-captures-graph-map-and-selected-node-keys})
+(table.insert tests {:name "graph code entity edits feed cached workflow executor" :fn graph-code-entity-edits-feed-cached-workflow-executor})
+(table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code" :fn template-helper-creates-durable-workflow-step-and-code})
+(table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit" :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
+(table.insert tests {:name "template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit" :fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit})
 
 (local main
   (fn []
