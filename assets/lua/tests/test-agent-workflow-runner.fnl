@@ -148,6 +148,22 @@
   (assert (= (. projected.items (length projected.items) :error) "boom") "error item should preserve message")
   (assert (= (length errors) 1) "error callback should fire"))
 
+(fn resume-step-failure-adds-error-item-and-sets-session-idle []
+  (local h (make-harness {:agents {"space-agent" (idle-agent)}}))
+  (local errors [])
+  (fn record-error [info]
+    (table.insert errors info))
+  (local session (h.runner:create-session "space-agent"))
+  (h.workflow-store:upsert-run-step session.id "step-agent-chat" {:status :succeeded})
+  (local handle (h.runner:run-turn session.id "not waiting" {:on-error record-error}))
+  (local projected (h.runner:get-session session.id))
+  (assert (= (handle:status) :failed) "resume failure should fail the turn handle")
+  (assert (= projected.status :idle) "resume failure should return session to idle")
+  (assert (= (. projected.items (length projected.items) :type) :error) "resume failure should append compatible error item")
+  (assert (string.find (. projected.items (length projected.items) :error) "workflow run step is not waiting" 1 true)
+          "error item should preserve resume-step failure message")
+  (assert (= (length errors) 1) "error callback should fire once"))
+
 (fn cancel-turn-cancels-active-turn-and-allows-next-input []
   (local record {})
   (local h (make-harness {:agents {"space-agent" (async-agent record)}}))
@@ -259,6 +275,7 @@
 (table.insert tests {:name "streaming-callbacks-persist-item-events" :fn streaming-callbacks-persist-item-events})
 (table.insert tests {:name "completion-sets-session-idle-and-preserves-items" :fn completion-sets-session-idle-and-preserves-items})
 (table.insert tests {:name "error-adds-error-item-and-sets-session-idle" :fn error-adds-error-item-and-sets-session-idle})
+(table.insert tests {:name "resume-step-failure-adds-error-item-and-sets-session-idle" :fn resume-step-failure-adds-error-item-and-sets-session-idle})
 (table.insert tests {:name "cancel-turn-cancels-active-turn-and-allows-next-input" :fn cancel-turn-cancels-active-turn-and-allows-next-input})
 (table.insert tests {:name "new-turn-cancels-existing-active-turn-for-same-session" :fn new-turn-cancels-existing-active-turn-for-same-session})
 (table.insert tests {:name "runtime-context-preserves-provider-continuity-fields" :fn runtime-context-preserves-provider-continuity-fields})

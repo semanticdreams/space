@@ -188,7 +188,7 @@
                    (user-callbacks.on-error error-info)))
       :persist (fn []
                  (local active (. self.active-turns session-id))
-                 (persist-session-data! self session-id (if active active.session session)))}))
+                 (persist-session-data! self session-id (if (and active active.session) active.session session)))}))
 
 (fn create-session [self agent-id]
   (assert (= (type agent-id) "string") "agent-id must be a string")
@@ -230,7 +230,7 @@
                                                              :created-at (now)})
   (local user-callbacks (table-or-empty callbacks))
   (local (handle controller) (make-turn-pair self session-id session user-callbacks))
-  (tset self.active-turns session-id {:handle handle :controller controller})
+  (tset self.active-turns session-id {:handle handle :controller controller :session session})
   (handle:start)
   (local runtime {:runner self
                   :session-id session-id
