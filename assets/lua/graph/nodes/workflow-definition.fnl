@@ -67,7 +67,12 @@
 (fn assert-start-graph-dependencies [self]
   (assert self.graph "WorkflowDefinitionNode.start-workflow-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.start-workflow-from-graph requires graph:load-by-key")
-  (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge"))
+  (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge")
+  (local loader-graph (or (and self.graph.graph self.graph.graph.has-key-loader-for-key self.graph.graph)
+                          (and self.graph.has-key-loader-for-key self.graph)))
+  (assert (and loader-graph
+               (loader-graph:has-key-loader-for-key "workflow-run:__preflight__"))
+          "WorkflowDefinitionNode.start-workflow-from-graph requires graph loader for workflow-run"))
 
 (fn rollback-created-step! [self result cause]
   (local rollback-errors [])
