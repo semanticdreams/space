@@ -2,6 +2,7 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:ActivitySurfacesNode ActivitySurfacesNode} (require :graph/nodes/activity-surfaces))
+(local WorldActivityNodeView (require :graph/view/views/world-activity))
 
 (local M {})
 
@@ -13,6 +14,7 @@
   (local key (or options.key (.. "world-activity:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label (.. activity-id " activity")
+                          :view WorldActivityNodeView
                           :color (glm.vec4 0.64 0.48 0.22 1)
                           :sub-color (glm.vec4 0.52 0.36 0.12 1)
                           :size 8.0}))
@@ -31,9 +33,17 @@
                                         :activity-id self.activity-id
                                         :world-manager self.world-manager
                                         :key surfaces-key})))
-           (when surfaces-node
-             (graph:add-edge (GraphEdge {:source self :target surfaces-node})))
-           surfaces-node)))
+            (when surfaces-node
+              (graph:add-edge (GraphEdge {:source self :target surfaces-node})))
+            surfaces-node)))
+  (set node.emit-items
+       (fn [_self]
+         [[{:id "surfaces"} "Surfaces"]]))
+  (set node.open-item
+       (fn [self item]
+         (assert (= (and item item.id) "surfaces")
+                 "WorldActivityNode.open-item requires surfaces item")
+         (self:open-surfaces)))
   (set node.actions
        [{:name "Open Surfaces"
          :icon "open_in_new"

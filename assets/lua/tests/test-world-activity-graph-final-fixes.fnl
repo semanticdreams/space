@@ -145,6 +145,28 @@
   (world-node:drop)
   (graph-map:drop))
 
+(fn world-activity-view-opens-surfaces []
+  (local {:WorldActivityNode WorldActivityNode} (require :graph/nodes/world-activity))
+  (local ctx (make-build-ctx))
+  (local graph-map (Graph {:with-start false}))
+  (local state (make-hierarchy-state))
+  (local manager (make-manager state))
+  (local activity-node (WorldActivityNode {:world-id "test-world"
+                                           :activity-id "sandbox"
+                                           :world-manager manager}))
+  (graph-map:add-node activity-node {})
+  (assert activity-node.view "world activity should expose a node view")
+  (local activity-view ((activity-node.view activity-node) ctx))
+  (local surfaces-item (assert (. activity-view.search.items 1)
+                               "world activity view should expose surfaces item"))
+  (assert (= (. surfaces-item 1 :id) "surfaces")
+          "world activity view first item should be surfaces")
+  (activity-view.search.submitted:emit surfaces-item)
+  (assert (graph-map:lookup "activity-surfaces:test-world:sandbox")
+          "submitting surfaces item should create activity surfaces node")
+  (activity-view:drop)
+  (graph-map:drop))
+
 (fn stale-scene-category-nodes-remove-when-activity-session-disappears []
   (local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
@@ -173,6 +195,8 @@
 
 (table.insert tests {:name "world activity hierarchy views navigate to scene category"
                      :fn world-activity-hierarchy-views-navigate-to-scene-category})
+(table.insert tests {:name "world activity view opens surfaces"
+                     :fn world-activity-view-opens-surfaces})
 (table.insert tests {:name "stale scene category nodes remove when activity session disappears"
                      :fn stale-scene-category-nodes-remove-when-activity-session-disappears})
 
