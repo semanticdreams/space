@@ -3,6 +3,7 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
+(local AgentSessionGraphNode (require :graph/nodes/agent-session))
 
 (local _main (require :main))
 
@@ -310,6 +311,29 @@
 
 (fn agent-session-node-loads-backing-workflow-run []
   (with-runtime agent-session-node-loads-backing-workflow-run-case))
+
+(fn agent-session-node-loads-only-recent-workflow-events-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local recent-limit AgentSessionGraphNode.RECENT_EVENT_LIMIT)
+  (for [i 1 (+ recent-limit 3)]
+    (runtime.store:append-event seeded.run.id {:id (.. "history-" i)
+                                               :kind :agent-history
+                                               :index i}))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "agent-session-recent-events-map"}))
+  (local node (map:load-by-key (.. "agent-session:" seeded.run.id)))
+  (assert node "agent-session node should load through graph map")
+  (local event-nodes (node:load-recent-run-events))
+  (assert (= (length event-nodes) recent-limit) "Show Recent Events should load a bounded recent window")
+  (assert (not (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-1")))
+          "Show Recent Events should not load stale historical events")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-4"))
+          "Show Recent Events should include the oldest event inside the recent window")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-" (+ recent-limit 3)))
+          "Show Recent Events should load newest workflow events")
+  (map:drop))
+
+(fn agent-session-node-loads-only-recent-workflow-events []
+  (with-runtime agent-session-node-loads-only-recent-workflow-events-case))
 
 (fn agent-session-preview-requires-direct-context-case [runtime]
   (local seeded (seed-agent-session-run runtime))
@@ -971,9 +995,11 @@
 (table.insert tests {:name "agent-session-key-loads-workflow-backed-session"
                      :fn agent-session-key-loads-workflow-backed-session})
 (table.insert tests {:name "agent-session-node-loads-backing-workflow-run"
-                     :fn agent-session-node-loads-backing-workflow-run})
+                      :fn agent-session-node-loads-backing-workflow-run})
+(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events"
+                     :fn agent-session-node-loads-only-recent-workflow-events})
 (table.insert tests {:name "agent-session-preview-requires-direct-context"
-                     :fn agent-session-preview-requires-direct-context})
+                      :fn agent-session-preview-requires-direct-context})
 (table.insert tests {:name "agent-session-preview-shows-status-and-item-count"
                      :fn agent-session-preview-shows-status-and-item-count})
 (table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"

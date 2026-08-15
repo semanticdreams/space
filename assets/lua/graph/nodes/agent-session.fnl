@@ -6,6 +6,7 @@
 
 (local SESSION_BLUE (glm.vec4 0.32 0.48 0.9 1))
 (local SESSION_BLUE_ACCENT (glm.vec4 0.45 0.62 1.0 1))
+(local RECENT_EVENT_LIMIT 10)
 
 (fn session? [session]
   (if (not session)
@@ -50,6 +51,14 @@
 
 (fn workflow-event-key [run-id event-id]
   (.. "workflow-run-event:" run-id ":" event-id))
+
+(fn recent-events [events]
+  (local source (assert events "recent-events requires events"))
+  (local start-index (math.max 1 (+ (- (length source) RECENT_EVENT_LIMIT) 1)))
+  (local recent [])
+  (for [i start-index (length source)]
+    (table.insert recent (. source i)))
+  recent)
 
 (fn current-session [self]
   (local session (project-session self.workflow-store self.workflow-run-id))
@@ -100,9 +109,9 @@
          (current-session self)
          (local graph (require-graph-map self "AgentSessionNode.load-recent-run-events"))
          (local loaded [])
-         (each [_ event (ipairs (self.workflow-store:list-events self.workflow-run-id))]
-           (local event-node (load-key graph (workflow-event-key self.workflow-run-id event.id)
-                                      "AgentSessionNode.load-recent-run-events"))
+          (each [_ event (ipairs (recent-events (self.workflow-store:list-events self.workflow-run-id)))]
+            (local event-node (load-key graph (workflow-event-key self.workflow-run-id event.id)
+                                       "AgentSessionNode.load-recent-run-events"))
            (add-visible-edge graph self event-node "event")
            (table.insert loaded event-node))
          loaded))
@@ -124,6 +133,8 @@
             (AgentSessionNode {:store store :run-id run-id})))))))
 
 {:AgentSessionNode AgentSessionNode
+ :RECENT_EVENT_LIMIT RECENT_EVENT_LIMIT
  :item-count item-count
+ :recent-events recent-events
  :session? session?
  :register-loader register-loader}
