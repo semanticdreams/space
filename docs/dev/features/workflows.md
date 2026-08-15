@@ -52,6 +52,9 @@ Version 1 intentionally does not include primitive workflow executors for condit
 - Primitive executors for agent/tool/condition/human-input nodes are out of scope.
 - Sandboxing workflow code is out of scope.
 - Edge-kind, condition, and port editing UI are out of scope.
+- Rich node port handles and edge endpoint anchoring are out of scope.
+- Naming dialogs, delete confirmations, template galleries, and human-input resume UI are out of scope.
+- Moving nodes between graph maps is out of scope.
 
 ## Validation ladder
 
