@@ -45,11 +45,17 @@ The graph exposes workflow records through key loaders and node adapters. Graph 
 
 Workflow data remains in `WorkflowStore`: definitions, steps, edges, runs, run steps, and events are owned there. Fennel source bodies remain in `CodeEntityStore`. Graph nodes and actions adapt those stores into the current interaction context, and graph maps only provide visibility, selection, and interaction context; they do not own workflow data or code bodies.
 
+## Agent sessions
+
+Sidebar agent chats are workflow-backed sessions: one chat is one long-lived workflow run, and each user turn resumes a waiting agent workflow step. The workflow subsystem owns the run, steps, and events; `llm.agent.workflow-runner` adapts those records to the existing sidebar runner API.
+
+Agent transcript/status/session state is projected from workflow events such as `:agent-session-created`, `:agent-status-changed`, and agent item events. Graph workflow nodes expose the same run and event records as the sidebar. See [Workflow-backed agent sessions](./workflow-backed-agent-sessions.md) for the event schema and migration command.
+
 ## V1 exclusions
 
-Version 1 intentionally does not include primitive workflow executors for conditions, loops, joins, tool calls, agent turns, or human input. It does not sandbox workflow code, store workflow data in graph maps, or replace `AgentRunner`.
+Version 1 intentionally does not include generic primitive workflow executors for conditions, loops, joins, tool calls, arbitrary agent nodes, or general-purpose human input UI. Sidebar chats use the dedicated workflow-backed agent runner described above; the generic scheduler does not become a provider streaming runtime. V1 also does not sandbox workflow code or store workflow data in graph maps.
 
-- Primitive executors for agent/tool/condition/human-input nodes are out of scope.
+- Generic primitive executors for agent/tool/condition/human-input nodes are out of scope.
 - Sandboxing workflow code is out of scope.
 - Edge-kind, condition, and port editing UI are out of scope.
 - Rich node port handles and edge endpoint anchoring are out of scope.
