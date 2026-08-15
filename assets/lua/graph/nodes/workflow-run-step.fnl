@@ -1,6 +1,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local WorkflowRunNode (require :graph/nodes/workflow-run))
+(local WorkflowRunStepNodePreview (require :graph/view/previews/workflow-run-step))
 
 (fn split-key-parts [text]
   (assert text "split-key-parts requires text")
@@ -45,8 +46,9 @@
   (local node (GraphNode {:key (run-step-key run-id step-id)
                           :label (run-step-label run-step step-id)
                           :color (WorkflowRunNode.status-color (and run-step run-step.status))
-                         :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
-                         :size 7.0}))
+                          :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
+                          :preview WorkflowRunStepNodePreview
+                          :size 7.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)

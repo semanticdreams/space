@@ -52,10 +52,17 @@
              (table.insert produced [notebooks-node (or notebooks-node.label notebooks-node.key)])
              (local kernels-node (KernelsNode {}))
              (table.insert produced [kernels-node (or kernels-node.label kernels-node.key)])
-             (when (and app app.world-manager)
-               (local worlds-node (WorldsNode {:world-manager app.world-manager}))
-               (table.insert produced [worlds-node (or worlds-node.label worlds-node.key)]))
-             produced))
+              (when (and app app.world-manager)
+                (local worlds-node (WorldsNode {:world-manager app.world-manager}))
+                (table.insert produced [worlds-node (or worlds-node.label worlds-node.key)]))
+              (when (and app app.workflow-store)
+                (local {:WorkflowsNode WorkflowsNode} (require :graph/nodes/workflows))
+                (local workflows-node
+                  (WorkflowsNode {:store app.workflow-store
+                                  :runner app.workflow-runner
+                                  :code-store app.code-store}))
+                (table.insert produced [workflows-node (or workflows-node.label workflows-node.key)]))
+              produced))
 
     (set node.emit-targets
          (fn [self]
