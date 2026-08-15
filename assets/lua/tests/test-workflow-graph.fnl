@@ -229,6 +229,28 @@
 (fn workflows-root-new-workflow-creates-and-loads-graph-nodes []
   (with-runtime workflows-root-new-workflow-creates-and-loads-graph-nodes-case))
 
+(fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code-case [runtime]
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-workflow-missing-graph-map"}))
+  (local root (map:load-by-key "workflows"))
+  (assert root "workflows root should load through key loader")
+  (local action (action-named root.actions "New Workflow"))
+  (assert action "workflows root should expose New Workflow action")
+  (set root.graph nil)
+  (local before-definitions (length (runtime.store:list-definitions)))
+  (local before-code (length (runtime.code-store:list-entities)))
+  (local (ok err) (pcall action.fn action {:source :test}))
+  (assert (not ok) "New Workflow without a graph should fail loudly")
+  (assert (string.find (tostring err) "requires a graph map" 1 true)
+          "New Workflow missing graph failure should explain the missing graph map")
+  (assert (= (length (runtime.store:list-definitions)) before-definitions)
+          "failed New Workflow without graph should not persist a workflow definition")
+  (assert (= (length (runtime.code-store:list-entities)) before-code)
+          "failed New Workflow without graph should not persist a code entity")
+  (map:drop))
+
+(fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code []
+  (with-runtime workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code-case))
+
 (fn workflows-preview-builds-with-new-workflow-action-case [runtime]
   (local map (GraphMap.GraphMap {:graph runtime.graph :id "workflow-preview-map"}))
   (local node (map:load-by-key "workflows"))
@@ -1073,9 +1095,11 @@
 (table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"
                       :fn start-node-includes-workflows-when-workflow-store-exists})
 (table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
-                     :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
+                      :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
+(table.insert tests {:name "workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code"
+                     :fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
-                      :fn workflows-preview-builds-with-new-workflow-action})
+                       :fn workflows-preview-builds-with-new-workflow-action})
 (table.insert tests {:name "workflows-preview-search-selects-one-definition-only"
                         :fn workflows-preview-search-selects-one-definition-only})
 (table.insert tests {:name "workflows-root-does-not-load-runs-directly"

@@ -34,6 +34,11 @@
   (assert graph.add-edge "WorkflowsNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn assert-graph-load-and-edge [graph action]
+  (assert graph (.. action " requires a graph map"))
+  (assert graph.load-by-key (.. action " requires graph:load-by-key"))
+  (assert graph.add-edge (.. action " requires graph:add-edge")))
+
 (fn list-required-definitions [store]
   (assert store "WorkflowsNode requires workflow store")
   (assert store.list-definitions "WorkflowsNode requires workflow-store:list-definitions")
@@ -67,6 +72,7 @@
          (assert self.workflow-store "WorkflowsNode.create-workflow-from-graph requires workflow store")
          (assert self.runner "WorkflowsNode.create-workflow-from-graph requires workflow runner")
          (assert self.code-store "WorkflowsNode.create-workflow-from-graph requires code store")
+         (assert-graph-load-and-edge self.graph "WorkflowsNode.create-workflow-from-graph")
          (local result (WorkflowTemplates.create-template-workflow self.workflow-store self.code-store (or opts {})))
          (local definition-key (.. "workflow-definition:" result.definition.id))
          (local step-key (.. "workflow-step:" result.definition.id ":" result.step.id))
@@ -75,9 +81,9 @@
          (local step-node (load-required-node self.graph step-key))
          (local code-node (load-required-node self.graph code-key))
          (add-visible-edge self.graph self definition-node "definition")
-          (add-visible-edge self.graph definition-node step-node "step")
-          (add-visible-edge self.graph step-node code-node "code")
-          result))
+         (add-visible-edge self.graph definition-node step-node "step")
+         (add-visible-edge self.graph step-node code-node "code")
+         result))
   (set node.definition-items
        (fn [self]
          (icollect [_ definition (ipairs (list-required-definitions self.workflow-store))]
