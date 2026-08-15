@@ -24,6 +24,62 @@
   (assert graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert graph.add-edge (.. action " requires graph:add-edge")))
 
+(fn loader-graph [graph]
+  (if (and graph graph.graph graph.graph.has-key-loader-for-key)
+      graph.graph
+      (if (and graph graph.has-key-loader-for-key)
+          graph
+          nil)))
+
+(fn assert-graph-loader [graph key action label]
+  (local provider (loader-graph graph))
+  (assert (and provider (provider:has-key-loader-for-key key))
+          (.. action " requires graph loader for " label)))
+
+(fn assert-create-workflow-loaders [graph action]
+  (assert-graph-loader graph "workflow-definition:__preflight__" action "workflow-definition")
+  (assert-graph-loader graph "workflow-step:__preflight__:__step__" action "workflow-step")
+  (assert-graph-loader graph "code-entity:__preflight__" action "code-entity"))
+
+(fn remove-graph-nodes-by-key! [graph keys]
+  (when (and graph graph.lookup graph.remove-nodes)
+    (local nodes [])
+    (each [_ key (ipairs keys)]
+      (local node (graph:lookup key))
+      (when node
+        (table.insert nodes node)))
+    (when (> (length nodes) 0)
+      (graph:remove-nodes nodes {:cause "workflow-create-rollback"}))))
+
+(fn rollback-created-workflow! [self result materialized-keys cause]
+  (local rollback-errors [])
+  (remove-graph-nodes-by-key! self.graph materialized-keys)
+  (when (and result result.definition result.definition.id)
+    (local (ok err) (pcall self.workflow-store.delete-definition
+                           self.workflow-store
+                           result.definition.id
+                           {:delete-dependent-edges? true}))
+    (when (not ok)
+      (table.insert rollback-errors (tostring err))))
+  (when (and result result.code-entity result.code-entity.id)
+    (local (ok err) (pcall self.code-store.delete-entity self.code-store result.code-entity.id))
+    (when (not ok)
+      (table.insert rollback-errors (tostring err))))
+  (if (> (length rollback-errors) 0)
+      (error (.. (tostring cause) " (rollback failed: " (table.concat rollback-errors "; ") ")"))
+      (error cause)))
+
+(fn load-created-workflow-into-graph! [self result]
+  (local definition-key (.. "workflow-definition:" result.definition.id))
+  (local step-key (.. "workflow-step:" result.definition.id ":" result.step.id))
+  (local code-key (.. "code-entity:" result.code-entity.id))
+  (local definition-node (load-required-node self.graph definition-key))
+  (local step-node (load-required-node self.graph step-key))
+  (local code-node (load-required-node self.graph code-key))
+  (add-visible-edge self.graph self definition-node "definition")
+  (add-visible-edge self.graph definition-node step-node "step")
+  (add-visible-edge self.graph step-node code-node "code"))
+
 (fn list-required-definitions [store]
   (assert store "WorkflowsNode requires workflow store")
   (assert store.list-definitions "WorkflowsNode requires workflow-store:list-definitions")
@@ -56,19 +112,18 @@
        (fn [self opts]
          (assert self.workflow-store "WorkflowsNode.create-workflow-from-graph requires workflow store")
          (assert self.runner "WorkflowsNode.create-workflow-from-graph requires workflow runner")
-         (assert self.code-store "WorkflowsNode.create-workflow-from-graph requires code store")
-         (assert-graph-load-and-edge self.graph "WorkflowsNode.create-workflow-from-graph")
-         (local result (WorkflowTemplates.create-template-workflow self.workflow-store self.code-store (or opts {})))
-         (local definition-key (.. "workflow-definition:" result.definition.id))
-         (local step-key (.. "workflow-step:" result.definition.id ":" result.step.id))
-         (local code-key (.. "code-entity:" result.code-entity.id))
-         (local definition-node (load-required-node self.graph definition-key))
-         (local step-node (load-required-node self.graph step-key))
-         (local code-node (load-required-node self.graph code-key))
-         (add-visible-edge self.graph self definition-node "definition")
-         (add-visible-edge self.graph definition-node step-node "step")
-         (add-visible-edge self.graph step-node code-node "code")
-         result))
+          (assert self.code-store "WorkflowsNode.create-workflow-from-graph requires code store")
+          (assert-graph-load-and-edge self.graph "WorkflowsNode.create-workflow-from-graph")
+          (assert-create-workflow-loaders self.graph "WorkflowsNode.create-workflow-from-graph")
+          (local result (WorkflowTemplates.create-template-workflow self.workflow-store self.code-store (or opts {})))
+          (local definition-key (.. "workflow-definition:" result.definition.id))
+          (local step-key (.. "workflow-step:" result.definition.id ":" result.step.id))
+          (local code-key (.. "code-entity:" result.code-entity.id))
+          (local (ok graph-err)
+            (pcall load-created-workflow-into-graph! self result))
+          (if ok
+              result
+              (rollback-created-workflow! self result [definition-key step-key code-key] graph-err))))
   (set node.definition-items
        (fn [self]
          (icollect [_ definition (ipairs (list-required-definitions self.workflow-store))]

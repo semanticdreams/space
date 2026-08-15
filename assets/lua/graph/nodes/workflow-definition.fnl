@@ -59,6 +59,26 @@
   (assert self.code-store.delete-entity
           "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:delete-entity"))
 
+(fn loader-graph [graph]
+  (if (and graph graph.graph graph.graph.has-key-loader-for-key)
+      graph.graph
+      (if (and graph graph.has-key-loader-for-key)
+          graph
+          nil)))
+
+(fn assert-graph-loader [graph key action label]
+  (local provider (loader-graph graph))
+  (assert (and provider (provider:has-key-loader-for-key key))
+          (.. action " requires graph loader for " label)))
+
+(fn assert-create-step-loaders [self]
+  (assert-graph-loader self.graph "workflow-step:__preflight__:__step__"
+                       "WorkflowDefinitionNode.create-step-from-graph"
+                       "workflow-step")
+  (assert-graph-loader self.graph "code-entity:__preflight__"
+                       "WorkflowDefinitionNode.create-step-from-graph"
+                       "code-entity"))
+
 (fn assert-load-run-graph-dependencies [self]
   (assert self.graph "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
@@ -68,14 +88,28 @@
   (assert self.graph "WorkflowDefinitionNode.start-workflow-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.start-workflow-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge")
-  (local loader-graph (or (and self.graph.graph self.graph.graph.has-key-loader-for-key self.graph.graph)
-                          (and self.graph.has-key-loader-for-key self.graph)))
-  (assert (and loader-graph
-               (loader-graph:has-key-loader-for-key "workflow-run:__preflight__"))
-          "WorkflowDefinitionNode.start-workflow-from-graph requires graph loader for workflow-run"))
+  (local provider (loader-graph self.graph))
+  (assert (and provider
+               (provider:has-key-loader-for-key "workflow-run:__preflight__"))
+           "WorkflowDefinitionNode.start-workflow-from-graph requires graph loader for workflow-run"))
+
+(fn remove-graph-nodes-by-key! [graph keys]
+  (when (and graph graph.lookup graph.remove-nodes)
+    (local nodes [])
+    (each [_ key (ipairs keys)]
+      (local node (graph:lookup key))
+      (when node
+        (table.insert nodes node)))
+    (when (> (length nodes) 0)
+      (graph:remove-nodes nodes {:cause "workflow-step-create-rollback"}))))
 
 (fn rollback-created-step! [self result cause]
   (local rollback-errors [])
+  (when (and result result.step result.step.id)
+    (remove-graph-nodes-by-key! self.graph [(step-key self.workflow-definition-id result.step.id)
+                                            (and result.code-entity
+                                                 result.code-entity.id
+                                                 (.. "code-entity:" result.code-entity.id))]))
   (when (and result result.step result.step.id)
     (local (ok err) (pcall self.workflow-store.delete-step
                            self.workflow-store
@@ -152,10 +186,11 @@
           run))
   (set node.create-step-from-graph
         (fn [self opts]
-          (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
-          (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
-          (assert-create-step-graph-dependencies self)
-          (local result (WorkflowTemplates.create-template-step self.workflow-store
+           (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
+           (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
+           (assert-create-step-graph-dependencies self)
+           (assert-create-step-loaders self)
+           (local result (WorkflowTemplates.create-template-step self.workflow-store
                                                                 self.code-store
                                                                 self.workflow-definition-id
                                                                 (or opts {})))
