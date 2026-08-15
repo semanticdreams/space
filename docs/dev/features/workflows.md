@@ -30,9 +30,28 @@ Every execution result must be an outcome table. Valid statuses are `:succeeded`
 
 The graph exposes workflow records through key loaders and node adapters. Graph maps provide user-facing interaction context, visible nodes, and display edges. Workflow definitions remain the canonical owner of workflow topology, so authoring workflow connections mutates the workflow store rather than persisting those derived edges as graph-map topology.
 
+## Graph user flow
+
+1. Open Graph.
+2. From `start`, search/select `Workflows`.
+3. On the Workflows node, invoke `New Workflow`.
+4. Open the generated workflow definition and starter step.
+5. Use `Show Code` on the step to open the linked `code-entity:<id>` node.
+6. Edit the Fennel code entity if desired.
+7. Use `New Step` on the definition for additional steps.
+8. Connect workflow step nodes; those connections create canonical workflow edges.
+9. Click `Start` / `Start Run` on the workflow definition.
+10. Open the run node, toggle `Show Details`, and inspect run-step and event previews.
+
+Workflow data remains in `WorkflowStore`: definitions, steps, edges, runs, run steps, and events are owned there. Fennel source bodies remain in `CodeEntityStore`. Graph nodes and actions adapt those stores into the current interaction context, and graph maps only provide visibility, selection, and interaction context; they do not own workflow data or code bodies.
+
 ## V1 exclusions
 
 Version 1 intentionally does not include primitive workflow executors for conditions, loops, joins, tool calls, agent turns, or human input. It does not sandbox workflow code, store workflow data in graph maps, or replace `AgentRunner`.
+
+- Primitive executors for agent/tool/condition/human-input nodes are out of scope.
+- Sandboxing workflow code is out of scope.
+- Edge-kind, condition, and port editing UI are out of scope.
 
 ## Validation ladder
 
