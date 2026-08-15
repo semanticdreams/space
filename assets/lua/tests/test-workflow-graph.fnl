@@ -539,24 +539,34 @@
 (fn workflow-definition-node-expands-to-step-code-and-run-edges []
   (with-runtime workflow-definition-node-expands-to-step-code-and-run-edges-case))
 
-(fn workflow-run-node-expands-to-definition-run-step-and-event-edges-case [runtime]
+(fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges-case [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
-  (var edges (node:get-edges))
-  (assert-edge-target edges (.. "workflow-definition:" seeded.definition.id) "run should always link to definition")
-  (assert (= (. (edge-target-key-set edges) (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "run should hide run-step edges before details expansion")
-  (node:show-details)
-  (set edges (node:get-edges))
-  (assert-edge-target edges (.. "workflow-run-step:" seeded.run.id ":step-a") "expanded run should link run step")
-  (assert-edge-target edges (.. "workflow-run-step:" seeded.run.id ":step-b") "expanded run should link second run step")
-  (assert-edge-target edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id) "expanded run should link event")
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-details-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (assert node.load-details-from-graph "run node should expose explicit detail loading")
+  (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "run-step should not be visible before explicit detail loading")
+  (local result (node:load-details-from-graph))
+  (assert (= result.run-step-count 2) "detail loading should report loaded run steps")
+  (assert (= result.event-count 1) "detail loading should report loaded run events")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "detail loading should make first run-step visible")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-b"))
+          "detail loading should make second run-step visible")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+          "detail loading should make run event visible")
+  (assert-edge-target map.edges (.. "workflow-run-step:" seeded.run.id ":step-a")
+                      "detail loading should add run-to-step edge")
+  (assert-edge-target map.edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id)
+                      "detail loading should add run-to-event edge")
   (node:hide-details)
-  (assert (not node.details-expanded?) "hide-details should collapse details"))
+  (assert (not node.details-expanded?) "hide-details should collapse UI state only")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "hide-details should not remove explicit graph materialization")
+  (map:drop))
 
-(fn workflow-run-node-expands-to-definition-run-step-and-event-edges []
-  (with-runtime workflow-run-node-expands-to-definition-run-step-and-event-edges-case))
+(fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges []
+  (with-runtime workflow-run-node-load-details-from-graph-materializes-step-and-event-edges-case))
 
 (fn workflow-status-color-mapping-covers-all-statuses []
   (local WorkflowRunNode (require :graph/nodes/workflow-run))
@@ -727,10 +737,10 @@
 (fn workflow-step-preview-builds-with-show-code-action []
   (with-runtime workflow-step-preview-builds-with-show-code-action-case))
 
-(fn workflow-run-preview-builds-with-toggle-action-case [runtime]
+(fn workflow-run-preview-show-details-loads-step-and-event-nodes-case [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-preview-details-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
   (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run))
   (assert loaded? "workflow run preview module should load")
   (assert-missing-build-context-with-fallbacks
@@ -739,40 +749,30 @@
   (local builder (Preview node {:node node}))
   (assert-missing-build-context builder "run preview should assert on missing build context")
   (local widget (builder (make-preview-ctx)))
-  (assert widget.toggle-button "run preview should expose a details toggle button")
-  (assert (= widget.toggle-button-label "Show Details") "collapsed run preview should show Show Details")
-  (widget.toggle-button:on-click {:source :test})
-  (assert node.details-expanded? "toggle button should expand run details")
-  (assert (= widget.toggle-button-label "Hide Details")
+  (assert widget.show-details-button "run preview should expose a Show Details button")
+  (assert (= widget.show-details-button-label "Show Details") "collapsed run preview should show Show Details")
+  (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "run-step should not be visible before Show Details")
+  (widget.show-details-button:on-click {:source :test})
+  (assert node.details-expanded? "Show Details button should expand run detail UI state")
+  (assert (= widget.show-details-button-label "Hide Details")
           "same run preview widget should update to Hide Details after expanding")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "Show Details should load run-step node into graph map")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+          "Show Details should load run-event node into graph map")
+  (assert-edge-target map.edges (.. "workflow-run-step:" seeded.run.id ":step-a")
+                      "Show Details should add visible run-to-step edge")
+  (assert-edge-target map.edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id)
+                      "Show Details should add visible run-to-event edge")
   (widget:drop)
   (local expanded-widget (builder (make-preview-ctx)))
-  (assert (= expanded-widget.toggle-button-label "Hide Details") "expanded run preview should show Hide Details")
-  (expanded-widget:drop))
+  (assert (= expanded-widget.show-details-button-label "Hide Details") "expanded run preview should show Hide Details")
+  (expanded-widget:drop)
+  (map:drop))
 
-(fn workflow-run-preview-builds-with-toggle-action []
-  (with-runtime workflow-run-preview-builds-with-toggle-action-case))
-
-(fn workflow-run-details-toggle-changes-expanded-edge-projection-case [runtime]
-  (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
-  (local collapsed-keys (edge-target-key-set (node:get-edges)))
-  (assert (= (. collapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "run details should default collapsed")
-  (node:toggle-details)
-  (local expanded-keys (edge-target-key-set (node:get-edges)))
-  (assert (. expanded-keys (.. "workflow-run-step:" seeded.run.id ":step-a"))
-          "expanded run should include run-step edges")
-  (assert (. expanded-keys (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
-          "expanded run should include run event edges")
-  (node:toggle-details)
-  (local recollapsed-keys (edge-target-key-set (node:get-edges)))
-  (assert (= (. recollapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "collapsed run should hide run-step edges again"))
-
-(fn workflow-run-details-toggle-changes-expanded-edge-projection []
-  (with-runtime workflow-run-details-toggle-changes-expanded-edge-projection-case))
+(fn workflow-run-preview-show-details-loads-step-and-event-nodes []
+  (with-runtime workflow-run-preview-show-details-loads-step-and-event-nodes-case))
 
 (fn workflow-run-node-omits-cancel-action-for-succeeded-run-case [runtime]
   (local seeded (seed-definition-with-run runtime))
@@ -1135,8 +1135,8 @@
 (table.insert tests {:name "workflow-definition-load-run-rejects-foreign-definition" :fn (fn [] (with-runtime workflow-definition-load-run-rejects-foreign-definition-case))})
 (table.insert tests {:name "workflow definition node expands to step code and run edges"
                          :fn workflow-definition-node-expands-to-step-code-and-run-edges})
-(table.insert tests {:name "workflow run node expands to definition run step and event edges"
-                     :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
+(table.insert tests {:name "workflow-run-node-load-details-from-graph-materializes-step-and-event-edges"
+                      :fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"
                        :fn workflow-status-color-mapping-covers-all-statuses})
 (table.insert tests {:name "workflow definition preview builds with start action"
@@ -1153,10 +1153,8 @@
                      :fn workflow-step-show-code-loads-linked-code-node})
 (table.insert tests {:name "workflow-step-preview-builds-with-show-code-action"
                      :fn workflow-step-preview-builds-with-show-code-action})
-(table.insert tests {:name "workflow run preview builds with toggle action"
-                      :fn workflow-run-preview-builds-with-toggle-action})
-(table.insert tests {:name "workflow run details toggle changes expanded edge projection"
-                      :fn workflow-run-details-toggle-changes-expanded-edge-projection})
+(table.insert tests {:name "workflow-run-preview-show-details-loads-step-and-event-nodes"
+                       :fn workflow-run-preview-show-details-loads-step-and-event-nodes})
 (table.insert tests {:name "workflow run node omits cancel action for succeeded run"
                       :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
 (table.insert tests {:name "workflow run step status colors cover all run step statuses"
