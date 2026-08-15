@@ -1,6 +1,5 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
-(local {:GraphEdge GraphEdge} (require :graph/edge))
 (local WorkflowRunEventNodePreview (require :graph/view/previews/workflow-run-event))
 
 (local EVENT_ORANGE (glm.vec4 0.85 0.45 0.15 1))
@@ -22,24 +21,8 @@
         (set found event))))
   found)
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
 (fn event-key [run-id event-id]
   (.. "workflow-run-event:" run-id ":" event-id))
-
-(fn event-step-edge [source graph run-id event]
-  (when (and event event.step-id)
-    (local target (resolve-node graph (.. "workflow-run-step:" run-id ":" event.step-id)))
-    (when target
-      (GraphEdge {:source source :target target :label "step"}))))
 
 (fn WorkflowRunEventNode [opts]
   (local options (or opts {}))
@@ -56,14 +39,6 @@
   (set node.workflow-run-id run-id)
   (set node.workflow-event-id event-id)
   (set node.workflow-store store)
-  (set node.get-edges
-       (fn [self]
-         (local edges [])
-         (local event-current (find-event self.workflow-store self.workflow-run-id self.workflow-event-id))
-         (local edge (event-step-edge self self.graph self.workflow-run-id event-current))
-         (when edge
-           (table.insert edges edge))
-         edges))
   node)
 
 (fn parse-key [key]

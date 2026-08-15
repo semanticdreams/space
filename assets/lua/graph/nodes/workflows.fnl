@@ -7,21 +7,6 @@
 (local WORKFLOW_PURPLE (glm.vec4 0.45 0.25 0.75 1))
 (local WORKFLOW_PURPLE_ACCENT (glm.vec4 0.58 0.38 0.88 1))
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
-(fn add-edge-to-key [edges source graph key label]
-  (local target (resolve-node graph key))
-  (when target
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
-
 (fn load-required-node [graph key]
   (assert graph "WorkflowsNode requires a graph map for node loading")
   (assert graph.load-by-key "WorkflowsNode requires graph:load-by-key")
@@ -102,12 +87,6 @@
                         :icon "add"
                         :fn (fn [_button _event]
                               (node:create-workflow-from-graph {}))}])
-  (set node.get-edges
-       (fn [self]
-         (local edges [])
-          (each [_ definition (ipairs (self.workflow-store:list-definitions))]
-            (add-edge-to-key edges self self.graph (.. "workflow-definition:" definition.id) "definition"))
-          edges))
   node)
 
 (fn register-loader [graph opts]

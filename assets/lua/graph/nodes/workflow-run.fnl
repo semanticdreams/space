@@ -52,20 +52,6 @@
   (local status (if (and run run.status) run.status :pending))
   (.. "Workflow run " run-id " (" (tostring status) ")"))
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
-(fn add-edge [edges source target label]
-  (when (and source target)
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
-
 (fn load-required-node [graph key]
   (assert graph "WorkflowRunNode.load-details-from-graph requires a graph map")
   (assert graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
@@ -192,15 +178,6 @@
   (set node.cancel-run-action (fn [_button _event]
                                 (node.workflow-runner:cancel-run node.workflow-run-id "cancelled from graph")))
   (set node.actions run-actions)
-  (set node.get-edges
-       (fn [self]
-         (local current (self.workflow-store:get-run self.workflow-run-id))
-         (local edges [])
-          (when current
-            (set self.color (status-color current.status))
-            (set self.label (run-label current self.workflow-run-id))
-            (add-edge edges self (resolve-node self.graph (.. "workflow-definition:" current.definition-id)) "definition"))
-          edges))
   node)
 
 (fn register-loader [graph opts]

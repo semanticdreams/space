@@ -22,25 +22,8 @@
         (set found step))))
   found)
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
 (fn step-key [definition-id step-id]
   (.. "workflow-step:" definition-id ":" step-id))
-
-(fn add-edge [edges source target label opts]
-  (when (and source target)
-    (local edge (GraphEdge {:source source :target target :label label}))
-    (when opts
-      (set edge._opts opts))
-    (table.insert edges edge)))
 
 (fn load-required-node [graph key]
   (assert graph "WorkflowStepNode requires a graph map for node loading")
@@ -53,9 +36,6 @@
   (assert graph "WorkflowStepNode requires a graph map for edge creation")
   (assert graph.add-edge "WorkflowStepNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
-
-(fn edge-label [edge]
-  (if edge.kind edge.kind "workflow"))
 
 (fn step-label [step step-id]
   (if (and step (> (string.len (if step.name step.name "")) 0))
@@ -101,20 +81,6 @@
                       :icon "code"
                       :fn (fn [_button _event]
                             (node:show-code-from-graph))}])
-  (set node.get-edges
-       (fn [self]
-         (local current (self.workflow-store:get-definition self.workflow-definition-id))
-         (local current-step (find-step current self.workflow-step-id))
-         (local edges [])
-         (when current-step
-           (add-edge edges self (resolve-node self.graph (.. "code-entity:" current-step.code-entity-id)) "code")
-           (each [_ edge (ipairs current.edges)]
-             (when (= edge.source-step-id self.workflow-step-id)
-                (add-edge edges self
-                          (resolve-node self.graph (step-key self.workflow-definition-id edge.target-step-id))
-                          (edge-label edge)
-                          {:from-workflow-edge edge.id}))))
-         edges))
   node)
 
 (fn parse-key [key]
