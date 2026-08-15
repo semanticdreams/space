@@ -47,6 +47,13 @@
 (fn step-key [definition-id step-id]
   (.. "workflow-step:" definition-id ":" step-id))
 
+(fn run-key [run-id]
+  (.. "workflow-run:" run-id))
+
+(fn run-label [run]
+  (local status (if (and run run.status) run.status :pending))
+  (.. "Workflow run " run.id " (" (tostring status) ")"))
+
 (fn assert-create-step-graph-dependencies [self]
   (assert self.graph "WorkflowDefinitionNode.create-step-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.create-step-from-graph requires graph:load-by-key")
@@ -55,6 +62,11 @@
           "WorkflowDefinitionNode.create-step-from-graph rollback requires workflow store:delete-step")
   (assert self.code-store.delete-entity
           "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:delete-entity"))
+
+(fn assert-load-run-graph-dependencies [self]
+  (assert self.graph "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowDefinitionNode.load-run-from-graph requires graph:add-edge"))
 
 (fn rollback-created-step! [self result cause]
   (local rollback-errors [])
@@ -157,8 +169,22 @@
           (local (ok graph-err)
             (pcall load-created-step-into-graph! self result))
           (if ok
-              result
-              (rollback-created-step! self result graph-err))))
+               result
+               (rollback-created-step! self result graph-err))))
+  (set node.run-items
+       (fn [self]
+         (assert self.workflow-store "WorkflowDefinitionNode.run-items requires workflow store")
+         (icollect [_ run (ipairs (self.workflow-store:list-runs {:definition-id self.workflow-definition-id}))]
+           [run (run-label run)])))
+  (set node.load-run-from-graph
+       (fn [self run-or-id]
+         (assert-load-run-graph-dependencies self)
+         (local run-id (if (= (type run-or-id) :table)
+                           (assert run-or-id.id "WorkflowDefinitionNode.load-run-from-graph requires run id")
+                           (assert run-or-id "WorkflowDefinitionNode.load-run-from-graph requires run id")))
+         (local run-node (load-required-node self.graph (run-key run-id)))
+         (add-visible-edge self.graph self run-node "run")
+         run-node))
   (set node.actions [{:name "Start Run"
                         :icon "play_arrow"
                         :fn (fn [_button _event]
