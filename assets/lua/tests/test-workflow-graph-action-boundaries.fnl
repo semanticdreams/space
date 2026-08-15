@@ -61,6 +61,28 @@
 (fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code []
   (with-runtime workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code-case))
 
+(fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code-case [runtime]
+  (local graph (make-graph-with-workflow-loaders runtime [:workflows :workflow-step :code-entity]))
+  (local map (GraphMap.GraphMap {:graph graph :id "new-workflow-missing-definition-loader-map"}))
+  (local root (map:load-by-key "workflows"))
+  (local before-definitions (length (runtime.store:list-definitions)))
+  (local before-code (length (runtime.code-store:list-entities)))
+  (local (ok err) (pcall root.create-workflow-from-graph root {:name "Should Not Persist"}))
+  (assert (not ok) "New Workflow without workflow-definition loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader for workflow-definition" 1 true)
+          "missing workflow-definition loader failure should explain the missing graph loader")
+  (assert (= (length (runtime.store:list-definitions)) before-definitions)
+          "failed New Workflow without workflow-definition loader should not persist a workflow definition")
+  (assert (= (length (runtime.code-store:list-entities)) before-code)
+          "failed New Workflow without workflow-definition loader should not persist a code entity")
+  (assert (= (map:node-count) 1) "failed New Workflow without workflow-definition loader should not leave partial graph nodes")
+  (assert (= (map:edge-count) 0) "failed New Workflow without workflow-definition loader should not leave partial graph edges")
+  (map:drop)
+  (graph:drop))
+
+(fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code []
+  (with-runtime workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code-case))
+
 (fn seed-definition [runtime]
   (local code (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
   (runtime.store:create-definition {:id "wf-demo" :name "Demo" :steps [{:id "step-a" :name "A" :code-entity-id code.id}] :edges []}))
@@ -114,6 +136,7 @@
   (with-runtime definition-new-step-code-load-failure-removes-stale-step-node-case))
 
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
+(table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
 (table.insert tests {:name "definition-new-step-code-load-failure-removes-stale-step-node" :fn definition-new-step-code-load-failure-removes-stale-step-node})
 
