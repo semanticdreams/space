@@ -254,6 +254,13 @@
 (fn refresh-run [self run-id]
   (self.store:get-run run-id))
 
+(fn execution-metadata [self run opts]
+  (local options (table-or-empty opts))
+  {:run-id run.id
+   :run run
+   :store self.store
+   :runtime options.runtime})
+
 (fn finish-run-if-complete [self run]
   (local fresh (refresh-run self run.id))
   (if (any-status? fresh :failed)
@@ -364,7 +371,7 @@
   (local input (build-step-input definition run step-id))
   (step-update self run step-id {:status :running :input input :started-at (now)})
   (append-event self run.id :step-started {:step-id step-id})
-  (local outcome (self.executor:run-step definition step input (table-or-empty current.state)))
+  (local outcome (self.executor:run-step definition step input (table-or-empty current.state) (execution-metadata self run nil)))
   (local fresh (refresh-run self run.id))
   (apply-outcome self definition fresh step outcome))
 
@@ -430,7 +437,7 @@
       (table.insert runs (self:tick-run run.id opts))))
   runs)
 
-(fn resume-step [self run-id step-id wait-result]
+(fn resume-step [self run-id step-id wait-result opts]
   (var run (refresh-run self run-id))
   (local definition (assert (self.store:get-definition run.definition-id) (.. "missing workflow definition: " run.definition-id)))
   (local step (assert (find-step definition step-id) (.. "missing workflow step: " step-id)))
@@ -439,7 +446,7 @@
   (set run (update-run-status self run :running {}))
   (step-update self run step-id {:status :running})
   (append-event self run.id :step-started {:step-id step-id :resume true})
-  (local outcome (self.executor:resume-step definition step wait-result (table-or-empty run-step.state)))
+  (local outcome (self.executor:resume-step definition step wait-result (table-or-empty run-step.state) (execution-metadata self run opts)))
   (apply-outcome self definition (refresh-run self run.id) step outcome)
   (finish-run-if-complete self (refresh-run self run.id))
   (self.store:get-run-step run.id step-id))

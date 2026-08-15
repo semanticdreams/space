@@ -2,6 +2,8 @@
 (local GraphMap (require :graph/map))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Templates (require :workflows/templates))
+(local WorkflowEvents (require :llm/agent/workflow-events))
+(local AgentSessionGraphNode (require :graph/nodes/agent-session))
 
 (local _main (require :main))
 
@@ -256,6 +258,112 @@
   (local event (runtime.store:append-event run.id {:id "event-started" :kind :step-started :step-id "step-a"}))
   {:definition definition :run (runtime.store:get-run run.id) :event event})
 
+(fn seed-agent-session-run [runtime]
+  (local definition (runtime.store:create-definition {:id "wf-agent-session-graph"
+                                                     :name "Agent Session Workflow"
+                                                     :steps []
+                                                     :edges []}))
+  (local run (runtime.store:create-run definition.id {} {:kind :agent-session
+                                                         :agent-session? true
+                                                         :agent-id "opencode"}))
+  (WorkflowEvents.append-session-created runtime.store run.id {:kind :agent-session
+                                                               :agent-session? true
+                                                               :agent-id "opencode"
+                                                               :data {:topic "Graph parity"}})
+  (WorkflowEvents.append-item runtime.store run.id {:id "item-user"
+                                                    :role "user"
+                                                    :content "hello"})
+  (WorkflowEvents.append-item runtime.store run.id {:id "item-assistant"
+                                                    :role "assistant"
+                                                    :content "hi"})
+  (WorkflowEvents.append-status runtime.store run.id :waiting {})
+  {:definition definition
+   :run (runtime.store:get-run run.id)
+   :session (WorkflowEvents.project-session (runtime.store:get-run run.id))})
+
+(fn agent-session-key-loads-workflow-backed-session-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local node (runtime.graph:create-node-by-key (.. "agent-session:" seeded.run.id)))
+  (assert node "agent-session key should resolve workflow-backed session")
+  (assert (= node.key (.. "agent-session:" seeded.run.id)) "agent session node key should use workflow run id")
+  (assert (= node.label (.. "Agent session " seeded.run.id " (waiting)")) "agent session title should project status")
+  (assert (= node.agent-session.status :waiting) "agent session node should expose projected status")
+  (assert (= (length node.agent-session.items) 2) "agent session node should expose projected item count"))
+
+(fn agent-session-key-loads-workflow-backed-session []
+  (with-runtime agent-session-key-loads-workflow-backed-session-case))
+
+(fn agent-session-node-loads-backing-workflow-run-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "agent-session-map"}))
+  (local node (map:load-by-key (.. "agent-session:" seeded.run.id)))
+  (assert node "agent-session node should load through graph map")
+  (assert (action-named node.actions "Open Workflow Run") "agent-session node should expose backing run action")
+  (assert (action-named node.actions "Show Recent Events") "agent-session node should expose recent events action")
+  (local run-node (node:load-backing-workflow-run))
+  (assert run-node "Open Workflow Run should return the loaded run node")
+  (assert (= run-node.key (.. "workflow-run:" seeded.run.id)) "Open Workflow Run should load workflow-run node")
+  (assert-edge-target map.edges run-node.key "Open Workflow Run should add session-to-run edge")
+  (local event-nodes (node:load-recent-run-events))
+  (assert (>= (length event-nodes) 4) "Show Recent Events should load projected run events")
+  (assert (map:lookup (. event-nodes 1 :key)) "Show Recent Events should make event nodes visible in graph map")
+  (map:drop))
+
+(fn agent-session-node-loads-backing-workflow-run []
+  (with-runtime agent-session-node-loads-backing-workflow-run-case))
+
+(fn agent-session-node-loads-only-recent-workflow-events-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local recent-limit AgentSessionGraphNode.RECENT_EVENT_LIMIT)
+  (for [i 1 (+ recent-limit 3)]
+    (runtime.store:append-event seeded.run.id {:id (.. "history-" i)
+                                               :kind :agent-history
+                                               :index i}))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "agent-session-recent-events-map"}))
+  (local node (map:load-by-key (.. "agent-session:" seeded.run.id)))
+  (assert node "agent-session node should load through graph map")
+  (local event-nodes (node:load-recent-run-events))
+  (assert (= (length event-nodes) recent-limit) "Show Recent Events should load a bounded recent window")
+  (assert (not (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-1")))
+          "Show Recent Events should not load stale historical events")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-4"))
+          "Show Recent Events should include the oldest event inside the recent window")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":history-" (+ recent-limit 3)))
+          "Show Recent Events should load newest workflow events")
+  (map:drop))
+
+(fn agent-session-node-loads-only-recent-workflow-events []
+  (with-runtime agent-session-node-loads-only-recent-workflow-events-case))
+
+(fn agent-session-preview-requires-direct-context-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local node (runtime.graph:load-by-key (.. "agent-session:" seeded.run.id)))
+  (local (loaded? Preview) (pcall require :graph/view/previews/agent-session))
+  (assert loaded? "agent session preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "agent session preview should not fall back to opts.ctx or graph.ctx")
+  (local builder (Preview node {:node node}))
+  (assert-missing-build-context builder "agent session preview should assert on missing build context"))
+
+(fn agent-session-preview-requires-direct-context []
+  (with-runtime agent-session-preview-requires-direct-context-case))
+
+(fn agent-session-preview-shows-status-and-item-count-case [runtime]
+  (local seeded (seed-agent-session-run runtime))
+  (local node (runtime.graph:load-by-key (.. "agent-session:" seeded.run.id)))
+  (local Preview (require :graph/view/previews/agent-session))
+  (local widget ((Preview node {:node node}) (make-preview-ctx)))
+  (assert widget.summary-text "agent session preview should expose summary text")
+  (local summary (text-widget-string widget.summary-text))
+  (assert-contains summary "Status: waiting" "agent session preview should show projected status")
+  (assert-contains summary "Agent: opencode" "agent session preview should show projected agent id")
+  (assert-contains summary "Items: 2" "agent session preview should show projected item count")
+  (assert-preview-drops-owned-children widget "agent session preview"))
+
+(fn agent-session-preview-shows-status-and-item-count []
+  (with-runtime agent-session-preview-shows-status-and-item-count-case))
+
 (fn workflow-key-loaders-resolve-all-workflow-keys-case [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local graph runtime.graph)
@@ -283,10 +391,12 @@
                    "workflow-step:missing:step-a"
                    (.. "workflow-step:" seeded.definition.id ":missing-step")
                    "workflow-run:missing"
-                   "workflow-run-step:missing:step-a"
-                   (.. "workflow-run-step:" seeded.run.id ":missing-step")
-                   "workflow-run-event:missing:event-a"
-                   (.. "workflow-run-event:" seeded.run.id ":missing-event")])
+                    "workflow-run-step:missing:step-a"
+                    (.. "workflow-run-step:" seeded.run.id ":missing-step")
+                    "workflow-run-event:missing:event-a"
+                    (.. "workflow-run-event:" seeded.run.id ":missing-event")
+                    "agent-session:missing"
+                    (.. "agent-session:" seeded.run.id)])
   (each [_ key (ipairs keys)]
     (local (ok result) (pcall missing-key-result graph key))
     (assert ok (.. "missing workflow key should not throw: " key))
@@ -881,9 +991,19 @@
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
-                      :fn workflow-key-loaders-return-nil-for-missing-records})
+                       :fn workflow-key-loaders-return-nil-for-missing-records})
+(table.insert tests {:name "agent-session-key-loads-workflow-backed-session"
+                     :fn agent-session-key-loads-workflow-backed-session})
+(table.insert tests {:name "agent-session-node-loads-backing-workflow-run"
+                      :fn agent-session-node-loads-backing-workflow-run})
+(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events"
+                     :fn agent-session-node-loads-only-recent-workflow-events})
+(table.insert tests {:name "agent-session-preview-requires-direct-context"
+                      :fn agent-session-preview-requires-direct-context})
+(table.insert tests {:name "agent-session-preview-shows-status-and-item-count"
+                     :fn agent-session-preview-shows-status-and-item-count})
 (table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"
-                     :fn start-node-includes-workflows-when-workflow-store-exists})
+                      :fn start-node-includes-workflows-when-workflow-store-exists})
 (table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
                      :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
 (table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"

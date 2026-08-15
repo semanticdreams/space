@@ -26,15 +26,15 @@
 (fn make-executor [outcomes]
   (local calls [])
   {:calls calls
-   :run-step (fn [_self _definition step input state]
-               (table.insert calls {:method :run :step-id step.id :input input :state state})
+    :run-step (fn [_self _definition step input state meta]
+                (table.insert calls {:method :run :step-id step.id :input input :state state :meta meta})
                (local step-id step.id)
                (local item (. outcomes step-id))
                (if (= (type item) "function")
                    (item calls input state)
                    item))
-   :resume-step (fn [_self _definition step wait-result state]
-                  (table.insert calls {:method :resume :step-id step.id :input wait-result :state state})
+    :resume-step (fn [_self _definition step wait-result state meta]
+                   (table.insert calls {:method :resume :step-id step.id :input wait-result :state state :meta meta})
                   (local step-id step.id)
                   (local item (. outcomes (.. step-id ":resume")))
                   (if (= (type item) "function")
@@ -121,6 +121,42 @@
 
 (fn runner-waits-and-resumes-human-input []
   (with-temp-store runner-waits-and-resumes-human-input-case))
+
+(fn resume-step-still-accepts-three-arguments-case [store]
+      (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}]))
+      (local (runner executor) (make-runner store {"ask" {:status :waiting :wait-kind :human-input :request {:prompt "continue?"} :state {:token "abc"}}
+                                                   "ask:resume" {:status :succeeded :output {:answer "yes"}}}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (runner:resume-step run.id "ask" {:answer "yes"})
+      (assert (= (. executor.calls 2 :method) :resume) "three-argument resume should call step resume method")
+      (assert (= (. (store:get-run run.id) :status) :succeeded) "three-argument resume should still complete run"))
+
+(fn resume-step-still-accepts-three-arguments []
+  (with-temp-store resume-step-still-accepts-three-arguments-case))
+
+(fn resumed-runtime-outcome [calls _wait-result _state]
+  (local meta (. calls (length calls) :meta))
+  {:status :succeeded :output {:runtime-value (and meta meta.runtime meta.runtime.value)
+                               :run-id (and meta meta.run-id)
+                               :store-present (not (= (and meta meta.store) nil))
+                               :run-present (not (= (and meta meta.run) nil))}})
+
+(fn resume-step-passes-runtime-to-resumed-step-case [store]
+      (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}]))
+      (local (runner _executor) (make-runner store {"ask" {:status :waiting :wait-kind :human-input :request {:prompt "continue?"} :state {:token "abc"}}
+                                                   "ask:resume" resumed-runtime-outcome}))
+      (local run (runner:start-run definition.id {} {}))
+      (runner:tick-run run.id {})
+      (runner:resume-step run.id "ask" {:answer "yes"} {:runtime {:value "agent-runtime"}})
+      (local step (store:get-run-step run.id "ask"))
+      (assert (= step.output.runtime-value "agent-runtime") "resume opts should pass runtime to resumed step")
+      (assert (= step.output.run-id run.id) "resume metadata should include run id")
+      (assert (= step.output.store-present true) "resume metadata should include store")
+      (assert (= step.output.run-present true) "resume metadata should include current run"))
+
+(fn resume-step-passes-runtime-to-resumed-step []
+  (with-temp-store resume-step-passes-runtime-to-resumed-step-case))
 
 (fn runner-resume-reactivates-waiting-run-for-downstream-tick-case [store]
       (local definition (define-workflow store [{:id "ask" :code-entity-id "code-ask"}
@@ -364,6 +400,8 @@
 (table.insert tests {:name "runner-succeeds-linear-workflow-and-data-edge" :fn runner-succeeds-linear-workflow-and-data-edge})
 (table.insert tests {:name "runner-fails-step-on-invalid-contract" :fn runner-fails-step-on-invalid-contract})
 (table.insert tests {:name "runner-waits-and-resumes-human-input" :fn runner-waits-and-resumes-human-input})
+(table.insert tests {:name "resume-step-still-accepts-three-arguments" :fn resume-step-still-accepts-three-arguments})
+(table.insert tests {:name "resume-step-passes-runtime-to-resumed-step" :fn resume-step-passes-runtime-to-resumed-step})
 (table.insert tests {:name "runner-resume-reactivates-waiting-run-for-downstream-tick" :fn runner-resume-reactivates-waiting-run-for-downstream-tick})
 (table.insert tests {:name "runner-resume-cancelled-outcome-finishes-run" :fn runner-resume-cancelled-outcome-finishes-run})
 (table.insert tests {:name "runner-retries-with-attempt-state" :fn runner-retries-with-attempt-state})

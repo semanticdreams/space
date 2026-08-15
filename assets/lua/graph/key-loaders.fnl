@@ -328,7 +328,8 @@
       (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
     (register-workflow-step-loader graph {:store workflow-store})
     (register-workflow-run-step-loader graph {:store workflow-store})
-    (register-workflow-run-event-loader graph {:store workflow-store}))
+    (register-workflow-run-event-loader graph {:store workflow-store})
+    ((. (require :graph/nodes/agent-session) :register-loader) graph {:store workflow-store}))
   (register-list-entity-loader graph {:store list-store
                                       :identity-store identity-store})
   (register-link-entity-loader graph {:store link-store})

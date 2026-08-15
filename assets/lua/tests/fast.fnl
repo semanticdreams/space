@@ -149,7 +149,11 @@
     :tests.test-agent-layer
     :tests.test-agent-panel
     :tests.test-agent-units
-    :tests.test-disclosure-row
+      :tests.test-agent-workflow-events
+      :tests.test-agent-workflow-template
+      :tests.test-agent-workflow-runner
+      :tests.test-agent-session-migration
+      :tests.test-disclosure-row
     :tests.test-status-badge
     :tests.test-cgltf
     :tests.test-graph-core
