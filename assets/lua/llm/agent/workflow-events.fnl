@@ -3,6 +3,7 @@
 (local KIND_ITEM_APPENDED :agent-item-appended)
 (local KIND_ITEM_UPSERTED :agent-item-upserted)
 (local KIND_ITEM_UPDATED :agent-item-updated)
+(local KIND_SESSION_DATA_UPDATED :agent-session-data-updated)
 
 (fn table-or-empty [value]
   (if (= (type value) "table") value {}))
@@ -88,6 +89,8 @@
       true
       (= event.kind KIND_ITEM_UPDATED)
       true
+      (= event.kind KIND_SESSION_DATA_UPDATED)
+      true
       false))
 
 (fn seed-session [run]
@@ -112,6 +115,10 @@
   (copy-projection-metadata! session data)
   (when event.created-at
     (set session.created-at event.created-at))
+  session)
+
+(fn apply-session-data-updated! [session event]
+  (set session.data (deep-copy (table-or-empty event.data)))
   session)
 
 (fn append-projected-item! [session item]
@@ -150,7 +157,9 @@
         (= event.kind KIND_ITEM_UPSERTED)
         (upsert-projected-item! session event.item)
         (= event.kind KIND_ITEM_UPDATED)
-        (update-projected-item! session event.item-id event.updates))
+        (update-projected-item! session event.item-id event.updates)
+        (= event.kind KIND_SESSION_DATA_UPDATED)
+        (apply-session-data-updated! session event))
     (when (and (relevant-event? event) event.created-at)
       (set session.updated-at event.created-at)))
   session)
@@ -179,8 +188,15 @@
   (local payload (table-or-empty data))
   (append-isolated-event store run-id {:kind KIND_STATUS_CHANGED
                                        :status status
-                                       :data (deep-copy payload)
-                                       :created-at payload.created-at}))
+                                        :data (deep-copy payload)
+                                        :created-at payload.created-at}))
+
+(fn append-session-data-updated [store run-id data]
+  (assert-store store)
+  (assert-run-id run-id)
+  (assert (= (type data) "table") "agent session data update must be a table")
+  (append-isolated-event store run-id {:kind KIND_SESSION_DATA_UPDATED
+                                       :data (deep-copy data)}))
 
 (fn append-item [store run-id item]
   (assert-store store)
@@ -224,11 +240,13 @@
 
 {:KIND_SESSION_CREATED KIND_SESSION_CREATED
  :KIND_STATUS_CHANGED KIND_STATUS_CHANGED
- :KIND_ITEM_APPENDED KIND_ITEM_APPENDED
- :KIND_ITEM_UPSERTED KIND_ITEM_UPSERTED
- :KIND_ITEM_UPDATED KIND_ITEM_UPDATED
- :append-session-created append-session-created
- :append-status append-status
+  :KIND_ITEM_APPENDED KIND_ITEM_APPENDED
+  :KIND_ITEM_UPSERTED KIND_ITEM_UPSERTED
+  :KIND_ITEM_UPDATED KIND_ITEM_UPDATED
+  :KIND_SESSION_DATA_UPDATED KIND_SESSION_DATA_UPDATED
+  :append-session-created append-session-created
+  :append-status append-status
+  :append-session-data-updated append-session-data-updated
  :append-item append-item
  :append-upsert append-upsert
  :append-update append-update

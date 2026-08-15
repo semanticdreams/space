@@ -975,6 +975,14 @@
    :name "Workflow Test Agent"
    :run workflow-panel-agent-run})
 
+(fn workflow-panel-required-deps []
+  {:app {}
+   :presets {}
+   :tools {}
+   :approvals {}
+   :agents {}
+   :providers {}})
+
 (fn make-workflow-panel-runner []
   (local fs (require :fs))
   (local Uuid (require :uuid))
@@ -993,10 +1001,10 @@
   (local workflow-runner (WorkflowRunner {:store workflow-store :executor executor :app {}}))
   (WorkflowAgentRunner {:workflow-store workflow-store
                         :workflow-runner workflow-runner
-                        :code-store code-store
-                        :registry {:get workflow-panel-registry-get}
-                        :artifact-root (fs.join-path dir "agent-artifacts")
-                        :deps {}}))
+                         :code-store code-store
+                         :registry {:get workflow-panel-registry-get}
+                         :artifact-root (fs.join-path dir "agent-artifacts")
+                         :deps (workflow-panel-required-deps)}))
 
 (fn test-controller-send-loads-user-message-with-workflow-runner []
   (local registry (AgentRegistry {:deps {}}))

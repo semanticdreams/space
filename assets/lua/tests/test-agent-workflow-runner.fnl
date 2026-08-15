@@ -19,6 +19,20 @@
   {:get (fn [_self id]
           (. agents id))})
 
+(fn required-deps []
+  {:app {}
+   :presets {}
+   :tools {}
+   :approvals {}
+   :agents {}
+   :providers {}})
+
+(fn merge-deps [overrides]
+  (local deps (required-deps))
+  (each [k v (pairs (table-or-empty overrides))]
+    (tset deps k v))
+  deps)
+
 (fn make-harness [opts]
   (local options (table-or-empty opts))
   (local dir (make-temp-dir))
@@ -40,7 +54,7 @@
                                  :code-store code-store
                                  :registry (make-registry agents)
                                   :artifact-root (fs.join-path dir "agent-artifacts")
-                                  :deps (if options.deps options.deps {})})})
+                                  :deps (merge-deps options.deps)})})
 
 (fn find-item [items item-id]
   (var found nil)
@@ -175,6 +189,70 @@
   (assert (= runtime.last-live-connection-at 123) "runtime should preserve last-live-connection-at")
   (assert (= runtime.validation-mode "live") "runtime should preserve validation-mode"))
 
+(fn turn-persist-preserves-provider-continuity-mutations []
+  (local observations [])
+  (local mutating-agent
+    {:id "space-agent"
+     :name "Space Agent"
+     :run (fn [_agent input session ctx]
+            (if (= input "first")
+                (do
+                  (tset session.data :opencode-session-id "opc-from-turn")
+                  (when (not session.data.runtime-context)
+                    (tset session.data :runtime-context {}))
+                  (tset session.data.runtime-context :opencode-session-id "opc-from-turn")
+                  (tset session.data.runtime-context :last-live-connection-at 456)
+                  (ctx.turn:finish {:ok true}))
+                (do
+                  (table.insert observations {:opencode-session-id session.data.opencode-session-id
+                                              :runtime-opencode-session-id session.data.runtime-context.opencode-session-id
+                                              :last-live-connection-at session.data.runtime-context.last-live-connection-at})
+                  (ctx.turn:finish {:ok true}))))})
+  (local h (make-harness {:agents {"space-agent" mutating-agent}}))
+  (local session (h.runner:create-session "space-agent"))
+  (h.runner:run-turn session.id "first" {})
+  (local after-first (h.runner:get-session session.id))
+  (assert (= after-first.data.opencode-session-id "opc-from-turn")
+          "projection should preserve provider session id mutated during turn")
+  (assert (= after-first.data.runtime-context.opencode-session-id "opc-from-turn")
+          "projection should preserve runtime provider id mutated during turn")
+  (h.runner:run-turn session.id "second" {})
+  (assert (= (. observations 1 :opencode-session-id) "opc-from-turn")
+          "second turn should observe persisted provider session id")
+  (assert (= (. observations 1 :runtime-opencode-session-id) "opc-from-turn")
+          "second turn should observe persisted runtime provider id")
+  (assert (= (. observations 1 :last-live-connection-at) 456)
+          "second turn should observe persisted runtime context updates"))
+
+(fn constructor-requires-runtime-dependencies []
+  (local h (make-harness {:agents {"space-agent" (idle-agent)}}))
+  (local {: WorkflowAgentRunner} (require :llm/agent/workflow-runner))
+  (fn build-with-deps [deps]
+    (WorkflowAgentRunner {:workflow-store h.workflow-store
+                          :workflow-runner h.workflow-runner
+                          :code-store h.code-store
+                          :registry (make-registry {"space-agent" (idle-agent)})
+                          :artifact-root (fs.join-path h.dir "assertion-artifacts")
+                          :deps deps}))
+  (each [_ assertion-case (ipairs [{:deps nil :message "WorkflowAgentRunner requires :deps"}
+                                   {:deps {:presets {} :tools {} :approvals {} :agents {} :providers {}}
+                                    :message "WorkflowAgentRunner requires deps.app"}
+                                   {:deps {:app {} :tools {} :approvals {} :agents {} :providers {}}
+                                    :message "WorkflowAgentRunner requires deps.presets"}
+                                   {:deps {:app {} :presets {} :approvals {} :agents {} :providers {}}
+                                    :message "WorkflowAgentRunner requires deps.tools"}
+                                   {:deps {:app {} :presets {} :tools {} :agents {} :providers {}}
+                                    :message "WorkflowAgentRunner requires deps.approvals"}
+                                   {:deps {:app {} :presets {} :tools {} :approvals {} :providers {}}
+                                    :message "WorkflowAgentRunner requires deps.agents"}
+                                   {:deps {:app {} :presets {} :tools {} :approvals {} :agents {}}
+                                    :message "WorkflowAgentRunner requires deps.providers"}])]
+    (local (ok err) (pcall build-with-deps assertion-case.deps))
+    (assert (not ok) (.. "constructor should reject missing dependency: " assertion-case.message))
+    (assert (string.find (tostring err) assertion-case.message 1 true)
+            (.. "constructor error should mention missing dependency: " assertion-case.message)))
+  (assert (build-with-deps (required-deps)) "constructor should accept explicit runtime deps"))
+
 (table.insert tests {:name "create-session-creates-workflow-run-and-projects-session" :fn create-session-creates-workflow-run-and-projects-session})
 (table.insert tests {:name "list-sessions-sorts-projected-workflow-sessions-by-updated-at" :fn list-sessions-sorts-projected-workflow-sessions-by-updated-at})
 (table.insert tests {:name "run-turn-appends-user-message-and-returns-turn-handle" :fn run-turn-appends-user-message-and-returns-turn-handle})
@@ -184,6 +262,8 @@
 (table.insert tests {:name "cancel-turn-cancels-active-turn-and-allows-next-input" :fn cancel-turn-cancels-active-turn-and-allows-next-input})
 (table.insert tests {:name "new-turn-cancels-existing-active-turn-for-same-session" :fn new-turn-cancels-existing-active-turn-for-same-session})
 (table.insert tests {:name "runtime-context-preserves-provider-continuity-fields" :fn runtime-context-preserves-provider-continuity-fields})
+(table.insert tests {:name "turn-persist-preserves-provider-continuity-mutations" :fn turn-persist-preserves-provider-continuity-mutations})
+(table.insert tests {:name "constructor-requires-runtime-dependencies" :fn constructor-requires-runtime-dependencies})
 
 (fn main []
   (local runner (require :tests/runner))

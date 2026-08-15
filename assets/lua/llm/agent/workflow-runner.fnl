@@ -75,6 +75,15 @@
   (self.workflow-store:update-run run-id {:context context})
   status)
 
+(fn persist-session-data! [self session-id session]
+  (local data (copy-table (table-or-empty session.data)))
+  (WorkflowEvents.append-session-data-updated self.workflow-store session-id data)
+  (local run (assert (self.workflow-store:get-run session-id) (.. "session not found: " session-id)))
+  (local context (copy-table (table-or-empty run.context)))
+  (tset context :data data)
+  (self.workflow-store:update-run session-id {:context context})
+  data)
+
 (fn update-context! [self run-id updates]
   (local run (assert (self.workflow-store:get-run run-id) (.. "session not found: " run-id)))
   (local context (copy-table (table-or-empty run.context)))
@@ -126,6 +135,7 @@
   (local session (assert (get-session self session-id) (.. "session not found: " session-id)))
   (local agent (assert (resolve-agent self session.agent-id) (.. "agent not found: " (tostring session.agent-id))))
   (local active (assert (. self.active-turns session-id) "active turn missing during workflow resume"))
+  (tset active :session session)
   (local agent-ctx (build-agent-context self session active.controller))
   (local (ok err) (pcall agent.run agent input session agent-ctx))
   (when (not ok)
@@ -139,7 +149,7 @@
       (set existed true)))
   existed)
 
-(fn make-turn-pair [self session-id user-callbacks]
+(fn make-turn-pair [self session-id session user-callbacks]
   (TurnMod.TurnPair session-id
     {:on-item (fn [item]
                 (WorkflowEvents.append-item self.workflow-store session-id item)
@@ -176,7 +186,9 @@
                  (tset self.active-turns session-id nil)
                  (when user-callbacks.on-error
                    (user-callbacks.on-error error-info)))
-     :persist (fn [] nil)}))
+      :persist (fn []
+                 (local active (. self.active-turns session-id))
+                 (persist-session-data! self session-id (if active active.session session)))}))
 
 (fn create-session [self agent-id]
   (assert (= (type agent-id) "string") "agent-id must be a string")
@@ -217,7 +229,7 @@
                                                              :content input
                                                              :created-at (now)})
   (local user-callbacks (table-or-empty callbacks))
-  (local (handle controller) (make-turn-pair self session-id user-callbacks))
+  (local (handle controller) (make-turn-pair self session-id session user-callbacks))
   (tset self.active-turns session-id {:handle handle :controller controller})
   (handle:start)
   (local runtime {:runner self
@@ -263,7 +275,13 @@
   (local get-agent options.get-agent)
   (assert (or registry get-agent) "WorkflowAgentRunner requires :registry or :get-agent")
   (local artifact-root (assert options.artifact-root "WorkflowAgentRunner requires :artifact-root"))
-  (local deps (table-or-empty options.deps))
+  (local deps (assert options.deps "WorkflowAgentRunner requires :deps"))
+  (assert deps.app "WorkflowAgentRunner requires deps.app")
+  (assert deps.presets "WorkflowAgentRunner requires deps.presets")
+  (assert deps.tools "WorkflowAgentRunner requires deps.tools")
+  (assert deps.approvals "WorkflowAgentRunner requires deps.approvals")
+  (assert deps.agents "WorkflowAgentRunner requires deps.agents")
+  (assert deps.providers "WorkflowAgentRunner requires deps.providers")
   {:workflow-store workflow-store
    :workflow-runner workflow-runner
    :code-store code-store
