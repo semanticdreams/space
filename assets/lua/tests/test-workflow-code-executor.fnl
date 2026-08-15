@@ -99,6 +99,16 @@
   (assert (= direct-outcome.status :succeeded) "direct step object should succeed")
   (assert (= direct-outcome.output.direct true) "direct step object should be accepted"))
 
+(fn step-context-includes-run-and-runtime-metadata []
+  (local definition {:id "def-runtime"})
+  (local step {:id "step-runtime" :code-entity-id "code-runtime"})
+  (local source "{:run (fn [self ctx input state] (ctx:succeed {:run-id ctx.run-id :runtime-value ctx.runtime.value}))}")
+  (local executor (make-executor {"code-runtime" {:id "code-runtime" :language "fnl" :source source}}))
+  (local outcome (executor:run-step definition step {} {} {:run-id "run-runtime" :runtime {:value "agent-runtime"}}))
+  (assert (= outcome.status :succeeded) "step should succeed")
+  (assert (= outcome.output.run-id "run-runtime") "step context should include run id")
+  (assert (= outcome.output.runtime-value "agent-runtime") "step context should include runtime value"))
+
 (fn executor-rejects-missing-code-entity []
   (local executor (make-executor {"lua-code" {:id "lua-code" :language "lua" :source "return {}"}}))
   (local missing (executor:run-step {:id "def-1"} {:id "step-1" :code-entity-id "missing"} {} {}))
@@ -162,7 +172,9 @@
 (table.insert tests {:name "sparse next step ids fail loudly"
                      :fn sparse-next-step-ids-fail-loudly})
 (table.insert tests {:name "executor evaluates code entity factory with full app access"
-                     :fn executor-evaluates-code-entity-factory-with-full-app-access})
+                      :fn executor-evaluates-code-entity-factory-with-full-app-access})
+(table.insert tests {:name "step-context-includes-run-and-runtime-metadata"
+                     :fn step-context-includes-run-and-runtime-metadata})
 (table.insert tests {:name "executor rejects missing code entity"
                       :fn executor-rejects-missing-code-entity})
 (table.insert tests {:name "executor returns structured step object errors"

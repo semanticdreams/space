@@ -15,10 +15,15 @@
       true
       false))
 
-(fn step-context [self definition step]
+(fn step-context [self definition step meta]
+  (local options (if (= meta nil) {} meta))
   (Outcomes.make-context {:definition-id (and definition definition.id)
                           :step-id (and step step.id)
-                          :app self.app}))
+                          :app self.app
+                          :run-id options.run-id
+                          :run options.run
+                          :store options.store
+                          :runtime options.runtime}))
 
 (fn format-error [value]
   (FennelEvaluator.format-error value))
@@ -108,8 +113,8 @@
                         {:kind :invalid-outcome})
         context)))
 
-(fn call-step-method [self definition step method-name input state]
-  (local context (step-context self definition step))
+(fn call-step-method [self definition step method-name input state meta]
+  (local context (step-context self definition step meta))
   (local (object-ok object-or-err) (pcall evaluate-step-object self definition step))
   (if (not object-ok)
       (Outcomes.validate-outcome
@@ -134,11 +139,11 @@
   {:code-store options.code-store
    :app options.app
    :evaluate-step-object evaluate-step-object
-   :run-step (fn [executor definition step input state]
-               (call-step-method executor definition step :run input state))
-   :resume-step (fn [executor definition step wait-result state]
-                  (call-step-method executor definition step :resume wait-result state))
-   :cancel-step (fn [executor definition step state]
-                  (call-step-method executor definition step :cancel state nil))})
+    :run-step (fn [executor definition step input state meta]
+                (call-step-method executor definition step :run input state meta))
+    :resume-step (fn [executor definition step wait-result state meta]
+                   (call-step-method executor definition step :resume wait-result state meta))
+    :cancel-step (fn [executor definition step state meta]
+                   (call-step-method executor definition step :cancel state nil meta))})
 
 {:WorkflowCodeExecutor WorkflowCodeExecutor}

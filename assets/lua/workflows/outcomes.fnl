@@ -60,6 +60,9 @@
 (fn make-context [opts]
   (local options (or opts {}))
   {:run-id options.run-id
+   :run options.run
+   :store options.store
+   :runtime options.runtime
    :step-id options.step-id
    :definition-id options.definition-id
    :app options.app
