@@ -1,0 +1,209 @@
+(local KIND_SESSION_CREATED :agent-session-created)
+(local KIND_STATUS_CHANGED :agent-status-changed)
+(local KIND_ITEM_APPENDED :agent-item-appended)
+(local KIND_ITEM_UPSERTED :agent-item-upserted)
+(local KIND_ITEM_UPDATED :agent-item-updated)
+
+(fn table-or-empty [value]
+  (if (= (type value) "table") value {}))
+
+(fn shallow-copy [value]
+  (local result {})
+  (each [k v (pairs (table-or-empty value))]
+    (tset result k v))
+  result)
+
+(fn assert-store [store]
+  (assert store "workflow event helper requires store")
+  (assert store.append-event "workflow event helper requires store:append-event")
+  store)
+
+(fn assert-run-id [run-id]
+  (assert (= (type run-id) "string") "workflow event helper requires string run-id")
+  run-id)
+
+(fn assert-item [item]
+  (assert (= (type item) "table") "agent item must be a table")
+  (assert (= (type item.id) "string") "agent item requires string :id")
+  item)
+
+(fn assert-updates [updates]
+  (assert (= (type updates) "table") "agent item updates must be a table")
+  updates)
+
+(fn item-index [items item-id]
+  (var found nil)
+  (each [idx item (ipairs (if items items []))]
+    (when (= item.id item-id)
+      (set found idx)))
+  found)
+
+(fn merge-into! [target updates]
+  (each [k v (pairs (table-or-empty updates))]
+    (tset target k v))
+  target)
+
+(fn relevant-event? [event]
+  (if (= event.kind KIND_SESSION_CREATED)
+      true
+      (= event.kind KIND_STATUS_CHANGED)
+      true
+      (= event.kind KIND_ITEM_APPENDED)
+      true
+      (= event.kind KIND_ITEM_UPSERTED)
+      true
+      (= event.kind KIND_ITEM_UPDATED)
+      true
+      false))
+
+(fn seed-session [run]
+  (assert (= (type run) "table") "project-session requires workflow run")
+  (local context (table-or-empty run.context))
+  (local session {:id run.id
+                  :workflow-run-id run.id
+                  :agent-id context.agent-id
+                  :status (or context.status run.status)
+                  :items []
+                  :data (shallow-copy context.data)
+                  :created-at run.created-at
+                  :updated-at run.updated-at})
+  (each [k v (pairs context)]
+    (when (and (not (= k :agent-id))
+               (not (= k :status))
+               (not (= k :data)))
+      (tset session k v)))
+  session)
+
+(fn apply-session-created! [session event]
+  (local data (table-or-empty event.data))
+  (when data.agent-id
+    (set session.agent-id data.agent-id))
+  (when data.data
+    (set session.data (shallow-copy data.data)))
+  (each [k v (pairs data)]
+    (when (and (not (= k :agent-id))
+               (not (= k :data))
+               (not (= k :created-at))
+               (not (= k :updated-at)))
+      (tset session k v)))
+  (when event.created-at
+    (set session.created-at event.created-at))
+  session)
+
+(fn append-projected-item! [session item]
+  (assert-item item)
+  (when (item-index session.items item.id)
+    (error (.. "duplicate agent item id: " item.id)))
+  (table.insert session.items (shallow-copy item))
+  session)
+
+(fn upsert-projected-item! [session item]
+  (assert-item item)
+  (local index (item-index session.items item.id))
+  (if index
+      (tset session.items index (shallow-copy item))
+      (table.insert session.items (shallow-copy item)))
+  session)
+
+(fn update-projected-item! [session item-id updates]
+  (assert (= (type item-id) "string") "agent item update requires string :item-id")
+  (assert-updates updates)
+  (local index (item-index session.items item-id))
+  (when (not index)
+    (error (.. "missing agent item id for update: " item-id)))
+  (merge-into! (. session.items index) updates)
+  session)
+
+(fn project-session [run]
+  (local session (seed-session run))
+  (each [_ event (ipairs (if run.events run.events []))]
+    (if (= event.kind KIND_SESSION_CREATED)
+        (apply-session-created! session event)
+        (= event.kind KIND_STATUS_CHANGED)
+        (set session.status event.status)
+        (= event.kind KIND_ITEM_APPENDED)
+        (append-projected-item! session event.item)
+        (= event.kind KIND_ITEM_UPSERTED)
+        (upsert-projected-item! session event.item)
+        (= event.kind KIND_ITEM_UPDATED)
+        (update-projected-item! session event.item-id event.updates))
+    (when (and (relevant-event? event) event.created-at)
+      (set session.updated-at event.created-at)))
+  session)
+
+(fn current-session-if-readable [store run-id]
+  (when store.get-run
+    (local run (store:get-run run-id))
+    (when run
+      (project-session run))))
+
+(fn append-session-created [store run-id data]
+  (assert-store store)
+  (assert-run-id run-id)
+  (local payload (table-or-empty data))
+  (store:append-event run-id {:kind KIND_SESSION_CREATED
+                              :data payload
+                              :created-at payload.created-at}))
+
+(fn append-status [store run-id status data]
+  (assert-store store)
+  (assert-run-id run-id)
+  (assert status "append-status requires status")
+  (local payload (table-or-empty data))
+  (store:append-event run-id {:kind KIND_STATUS_CHANGED
+                              :status status
+                              :data payload
+                              :created-at payload.created-at}))
+
+(fn append-item [store run-id item]
+  (assert-store store)
+  (assert-run-id run-id)
+  (assert-item item)
+  (local session (current-session-if-readable store run-id))
+  (when (and session (item-index session.items item.id))
+    (error (.. "duplicate agent item id: " item.id)))
+  (store:append-event run-id {:kind KIND_ITEM_APPENDED
+                              :item (shallow-copy item)
+                              :created-at item.created-at}))
+
+(fn append-upsert [store run-id item]
+  (assert-store store)
+  (assert-run-id run-id)
+  (assert-item item)
+  (store:append-event run-id {:kind KIND_ITEM_UPSERTED
+                              :item (shallow-copy item)
+                              :created-at (if item.updated-at item.updated-at item.created-at)}))
+
+(fn append-update [store run-id item-id updates]
+  (assert-store store)
+  (assert-run-id run-id)
+  (assert (= (type item-id) "string") "append-update requires string item-id")
+  (assert-updates updates)
+  (local session (current-session-if-readable store run-id))
+  (when (and session (not (item-index session.items item-id)))
+    (error (.. "missing agent item id for update: " item-id)))
+  (store:append-event run-id {:kind KIND_ITEM_UPDATED
+                              :item-id item-id
+                              :updates (shallow-copy updates)
+                              :created-at updates.updated-at}))
+
+(fn session-summary [session]
+  {:id session.id
+   :agent-id session.agent-id
+   :status session.status
+   :item-count (length (if session.items session.items []))
+   :created-at session.created-at
+   :updated-at session.updated-at})
+
+{:KIND_SESSION_CREATED KIND_SESSION_CREATED
+ :KIND_STATUS_CHANGED KIND_STATUS_CHANGED
+ :KIND_ITEM_APPENDED KIND_ITEM_APPENDED
+ :KIND_ITEM_UPSERTED KIND_ITEM_UPSERTED
+ :KIND_ITEM_UPDATED KIND_ITEM_UPDATED
+ :append-session-created append-session-created
+ :append-status append-status
+ :append-item append-item
+ :append-upsert append-upsert
+ :append-update append-update
+ :project-session project-session
+ :session-summary session-summary}

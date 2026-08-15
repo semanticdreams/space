@@ -149,6 +149,7 @@
     :tests.test-agent-layer
     :tests.test-agent-panel
     :tests.test-agent-units
+    :tests.test-agent-workflow-events
     :tests.test-disclosure-row
     :tests.test-status-badge
     :tests.test-cgltf
