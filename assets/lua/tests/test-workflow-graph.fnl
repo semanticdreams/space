@@ -299,10 +299,8 @@
    :run seeded.run})
 
 (fn seed-two-definitions-with-runs [runtime]
-  (local seeded (seed-definition-with-run runtime))
-  (local other (runtime.store:create-definition {:id "wf-other" :name "Other workflow" :steps [] :edges []}))
-  (local other-run (runtime.store:create-run other.id {:prompt "other"} {:source :other-test}))
-  {:selected seeded.definition :other other :selected-run seeded.run :other-run other-run})
+  (local seeded (seed-definition-with-run runtime)) (local other (runtime.store:create-definition {:id "wf-other" :name "Other workflow" :steps [] :edges []}))
+  (local other-run (runtime.store:create-run other.id {:prompt "other"} {:source :other-test})) {:selected seeded.definition :other other :selected-run seeded.run :other-run other-run})
 
 (fn workflows-preview-search-selects-one-definition-only-case [runtime]
   (local seeded (seed-two-definitions-with-run runtime))
@@ -355,10 +353,8 @@
   (with-runtime workflows-root-does-not-load-runs-directly-case))
 
 (fn with-definition-run-preview [runtime map-id f]
-  (local seeded (seed-two-definitions-with-runs runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id map-id}))
-  (local node (map:load-by-key (.. "workflow-definition:" seeded.selected.id))) (local Preview (require :graph/view/previews/workflow-definition))
-  (local widget ((Preview node {:node node}) (make-preview-ctx))) (local (ok result) (pcall f seeded map node widget))
-  (widget:drop) (map:drop) (if ok result (error result)))
+  (local seeded (seed-two-definitions-with-runs runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id map-id})) (local node (map:load-by-key (.. "workflow-definition:" seeded.selected.id))) (local Preview (require :graph/view/previews/workflow-definition))
+  (local widget ((Preview node {:node node}) (make-preview-ctx))) (local (ok result) (pcall f seeded map node widget)) (widget:drop) (map:drop) (if ok result (error result)))
 
 (fn workflow-definition-preview-search-selects-one-run-case [runtime]
   (with-definition-run-preview runtime "definition-run-search-map" (fn [seeded map node widget]
@@ -373,6 +369,11 @@
     (assert (= (. items 1 1 :id) seeded.selected-run.id) "workflow definition run item should be selected definition's run") (widget.run-search.submitted:emit (. items 1))
     (assert (map:lookup (.. "workflow-run:" seeded.selected-run.id)) "filtered run search should load selected definition's run")
     (assert (not (map:lookup (.. "workflow-run:" seeded.other-run.id))) "filtered run search should not load other definition's run"))))
+(fn workflow-definition-load-run-rejects-foreign-definition-case [runtime]
+  (with-definition-run-preview runtime "definition-run-foreign-map" (fn [seeded map node _widget]
+    (local foreign-key (.. "workflow-run:" seeded.other-run.id)) (local (ok err) (pcall node.load-run-from-graph node seeded.other-run))
+    (assert (not ok) "workflow definition should reject a run owned by another definition") (assert (string.find (tostring err) "does not belong" 1 true) "foreign run failure should explain ownership mismatch")
+    (assert (not (map:lookup foreign-key)) "foreign run rejection should not materialize the run node") (assert (not (. (edge-target-key-set map.edges) foreign-key)) "foreign run rejection should not add a visible edge"))))
 (fn seed-agent-session-run [runtime]
   (local definition (runtime.store:create-definition {:id "wf-agent-session-graph"
                                                      :name "Agent Session Workflow"
@@ -1129,12 +1130,11 @@
                         :fn workflows-preview-search-selects-one-definition-only})
 (table.insert tests {:name "workflows-root-does-not-load-runs-directly"
                          :fn workflows-root-does-not-load-runs-directly})
-(table.insert tests {:name "workflow-definition-preview-search-selects-one-run"
-                     :fn (fn [] (with-runtime workflow-definition-preview-search-selects-one-run-case))})
-(table.insert tests {:name "workflow-definition-run-search-filters-to-definition"
-                     :fn (fn [] (with-runtime workflow-definition-run-search-filters-to-definition-case))})
+(table.insert tests {:name "workflow-definition-preview-search-selects-one-run" :fn (fn [] (with-runtime workflow-definition-preview-search-selects-one-run-case))})
+(table.insert tests {:name "workflow-definition-run-search-filters-to-definition" :fn (fn [] (with-runtime workflow-definition-run-search-filters-to-definition-case))})
+(table.insert tests {:name "workflow-definition-load-run-rejects-foreign-definition" :fn (fn [] (with-runtime workflow-definition-load-run-rejects-foreign-definition-case))})
 (table.insert tests {:name "workflow definition node expands to step code and run edges"
-                        :fn workflow-definition-node-expands-to-step-code-and-run-edges})
+                         :fn workflow-definition-node-expands-to-step-code-and-run-edges})
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"
                      :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"

@@ -54,6 +54,19 @@
   (local status (if (and run run.status) run.status :pending))
   (.. "Workflow run " run.id " (" (tostring status) ")"))
 
+(fn load-owned-run-record [self run-or-id]
+  (assert self.workflow-store "WorkflowDefinitionNode.load-run-from-graph requires workflow store")
+  (assert self.workflow-store.get-run "WorkflowDefinitionNode.load-run-from-graph requires workflow store:get-run")
+  (local run-id (if (= (type run-or-id) :table)
+                    (assert run-or-id.id "WorkflowDefinitionNode.load-run-from-graph requires run id")
+                    (assert run-or-id "WorkflowDefinitionNode.load-run-from-graph requires run id")))
+  (local run (self.workflow-store:get-run run-id))
+  (assert run (.. "WorkflowDefinitionNode.load-run-from-graph missing workflow run: " (tostring run-id)))
+  (assert (= run.definition-id self.workflow-definition-id)
+          (.. "WorkflowDefinitionNode.load-run-from-graph run " (tostring run-id)
+              " does not belong to workflow definition " (tostring self.workflow-definition-id)))
+  run)
+
 (fn assert-create-step-graph-dependencies [self]
   (assert self.graph "WorkflowDefinitionNode.create-step-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.create-step-from-graph requires graph:load-by-key")
@@ -177,14 +190,13 @@
          (icollect [_ run (ipairs (self.workflow-store:list-runs {:definition-id self.workflow-definition-id}))]
            [run (run-label run)])))
   (set node.load-run-from-graph
-       (fn [self run-or-id]
-         (assert-load-run-graph-dependencies self)
-         (local run-id (if (= (type run-or-id) :table)
-                           (assert run-or-id.id "WorkflowDefinitionNode.load-run-from-graph requires run id")
-                           (assert run-or-id "WorkflowDefinitionNode.load-run-from-graph requires run id")))
-         (local run-node (load-required-node self.graph (run-key run-id)))
-         (add-visible-edge self.graph self run-node "run")
-         run-node))
+        (fn [self run-or-id]
+          (assert-load-run-graph-dependencies self)
+          (local run (load-owned-run-record self run-or-id))
+          (local run-id run.id)
+          (local run-node (load-required-node self.graph (run-key run-id)))
+          (add-visible-edge self.graph self run-node "run")
+          run-node))
   (set node.actions [{:name "Start Run"
                         :icon "play_arrow"
                         :fn (fn [_button _event]
