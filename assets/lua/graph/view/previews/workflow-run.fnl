@@ -21,57 +21,59 @@
   (local run (current-run target))
   (if (and run run.status) run.status :pending))
 
-(fn toggle-label [target]
+(fn details-label [target]
   (if (and target target.details-expanded?) "Hide Details" "Show Details"))
 
-(fn toggle-from-preview [target]
-  (assert (and target target.toggle-details)
-          "Workflow run preview requires toggle-details")
-  (target:toggle-details))
+(fn show-details-from-preview [target]
+  (assert (and target target.load-details-from-graph)
+          "Workflow run preview requires load-details-from-graph")
+  (if target.details-expanded?
+      (target:hide-details)
+      (target:load-details-from-graph)))
 
-(fn update-toggle-label [view target]
-  (local label (toggle-label target))
-  (set view.toggle-button-label label)
-  (when (and view.toggle-button view.toggle-button.text view.toggle-button.text.set-text)
-    (view.toggle-button.text:set-text label))
+(fn update-details-label [view target]
+  (local label (details-label target))
+  (set view.show-details-button-label label)
+  (when (and view.show-details-button view.show-details-button.text view.show-details-button.text.set-text)
+    (view.show-details-button.text:set-text label))
   label)
 
-(fn toggle-click-handler [target view]
+(fn details-click-handler [target view]
   (fn [_button _event]
-    (toggle-from-preview target)
-    (update-toggle-label view target)))
+    (show-details-from-preview target)
+    (update-details-label view target)))
 
 (fn build-content [target build-ctx]
   (local view {})
   (local label (if (and target target.label) target.label target.key target.key "Workflow run"))
   (local title ((Text {:text (tostring label)}) build-ctx))
   (local status-text ((Text {:text (.. "Status: " (tostring (current-status target)))}) build-ctx))
-  (local button-label (update-toggle-label view target))
-  (local toggle-button
+  (local button-label (update-details-label view target))
+  (local show-details-button
     ((Button {:text button-label
-              :variant :ghost
-              :padding [0.25 0.2]
-              :on-click (toggle-click-handler target view)})
-     build-ctx))
-  (set view.toggle-button toggle-button)
-  (update-toggle-label view target)
+               :variant :ghost
+               :padding [0.25 0.2]
+               :on-click (details-click-handler target view)})
+      build-ctx))
+  (set view.show-details-button show-details-button)
+  (update-details-label view target)
   (local flex
     ((Flex {:axis 2
             :xalign :stretch
             :yspacing 0.25
             :children [(FlexChild (existing-widget title) 0)
-                       (FlexChild (existing-widget status-text) 0)
-                       (FlexChild (existing-widget toggle-button) 0)]})
-     build-ctx))
+                        (FlexChild (existing-widget status-text) 0)
+                        (FlexChild (existing-widget show-details-button) 0)]})
+      build-ctx))
   (set view.layout flex.layout)
   (set view.title title)
   (set view.status-text status-text)
   (set view.drop
        (fn [_self]
-         (title:drop)
-         (status-text:drop)
-         (toggle-button:drop)
-         (flex:drop)))
+          (title:drop)
+          (status-text:drop)
+          (show-details-button:drop)
+          (flex:drop)))
   view)
 
 (fn WorkflowRunNodePreview [node opts]

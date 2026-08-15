@@ -1,5 +1,4 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
-(local {:GraphEdge GraphEdge} (require :graph/edge))
 (local WorkflowRunNode (require :graph/nodes/workflow-run))
 (local WorkflowRunStepNodePreview (require :graph/view/previews/workflow-run-step))
 
@@ -9,20 +8,6 @@
   (each [part (string.gmatch text "[^:]+")]
     (table.insert parts part))
   parts)
-
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
-(fn add-edge [edges source target label]
-  (when (and source target)
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
 
 (fn run-step-key [run-id step-id]
   (.. "workflow-run-step:" run-id ":" step-id))
@@ -52,18 +37,6 @@
   (set node.workflow-run-id run-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)
-  (set node.get-edges
-       (fn [self]
-         (local current-run (self.workflow-store:get-run self.workflow-run-id))
-         (local current-step (self.workflow-store:get-run-step self.workflow-run-id self.workflow-step-id))
-         (local edges [])
-          (when current-step
-            (set self.color (WorkflowRunNode.status-color current-step.status))
-            (set self.label (run-step-label current-step self.workflow-step-id))
-            (add-edge edges self
-                     (resolve-node self.graph (.. "workflow-step:" current-run.definition-id ":" self.workflow-step-id))
-                     "definition step"))
-         edges))
   node)
 
 (fn parse-key [key]

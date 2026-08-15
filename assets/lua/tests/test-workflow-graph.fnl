@@ -4,7 +4,6 @@
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
 (local AgentSessionGraphNode (require :graph/nodes/agent-session))
-(local {:WorkflowsNode WorkflowsNode} (require :graph/nodes/workflows))
 
 (local _main (require :main))
 
@@ -18,8 +17,7 @@
 (local temp-root (fs.join-path "/tmp/space/tests" "workflow-graph"))
 
 (fn make-temp-dir []
-  (set temp-counter (+ temp-counter 1))
-  (fs.join-path temp-root (.. "graph-" (os.time) "-" temp-counter)))
+  (set temp-counter (+ temp-counter 1)) (fs.join-path temp-root (.. "graph-" (os.time) "-" temp-counter)))
 
 (fn with-temp-dir [f]
   (local dir (make-temp-dir))
@@ -79,27 +77,23 @@
 (fn edge-target-key-set [edges]
   (local keys {})
   (each [_ edge (ipairs (if edges edges []))]
-    (when (and edge edge.target edge.target.key)
-      (set (. keys edge.target.key) true)))
+    (when (and edge edge.target edge.target.key) (set (. keys edge.target.key) true)))
   keys)
 
 (fn action-named? [actions name]
   (var found false)
   (each [_ action (ipairs (if actions actions []))]
-    (when (= action.name name)
-      (set found true)))
+    (when (= action.name name) (set found true)))
   found)
 
 (fn action-named [actions name]
   (var found nil)
   (each [_ action (ipairs (if actions actions []))]
-    (when (= action.name name)
-      (set found action)))
+    (when (= action.name name) (set found action)))
   found)
 
 (fn assert-edge-target [edges key message]
-  (local keys (edge-target-key-set edges))
-  (assert (. keys key) message))
+  (assert (. (edge-target-key-set edges) key) message))
 
 (fn make-preview-ctx []
   (local AppBootstrap (require :app-bootstrap))
@@ -132,6 +126,15 @@
 (fn assert-contains [text needle message]
   (assert (string.find (tostring text) needle 1 true) message))
 
+(local graph-discovery-files ["assets/lua/graph/node-base.fnl" "assets/lua/graph/core.fnl" "assets/lua/graph/map.fnl" "assets/lua/graph/nodes/workflows.fnl" "assets/lua/graph/nodes/workflow-definition.fnl" "assets/lua/graph/nodes/workflow-step.fnl" "assets/lua/graph/nodes/workflow-run.fnl" "assets/lua/graph/nodes/workflow-run-step.fnl" "assets/lua/graph/nodes/workflow-run-event.fnl"])
+(fn graph-discovery-has-no-relationship-hook-leftovers []
+  (local relationship-hook-marker (.. "get" "-edges"))
+  (local graph-api-marker (.. "self." "tri" "gger"))
+  (each [_ path (ipairs graph-discovery-files)]
+    (local source (fs.read-file path))
+    (assert (not (string.find source relationship-hook-marker 1 true)) (.. path " should not contain the removed relationship hook"))
+    (assert (not (string.find source graph-api-marker 1 true)) (.. path " should not contain the removed graph materialization API"))))
+
 (fn codepoints->text [codepoints]
   (local source (if codepoints codepoints []))
   (accumulate [text "" _ codepoint (ipairs source)]
@@ -141,10 +144,11 @@
   (codepoints->text (widget:get-codepoints)))
 
 (fn assert-preview-drops-owned-children [widget message]
-  (local dropped {:title 0 :summary 0 :flex 0})
+  (local dropped {:title 0 :summary 0 :flex 0 :definition-search 0})
   (local original-title-drop widget.title.drop)
   (local original-summary-drop widget.summary-text.drop)
   (local original-flex-drop widget.flex.drop)
+  (local original-definition-search-drop (and widget.definition-search widget.definition-search.drop))
   (set widget.title.drop
        (fn [self]
          (set dropped.title (+ dropped.title 1))
@@ -157,9 +161,16 @@
        (fn [self]
          (set dropped.flex (+ dropped.flex 1))
          (original-flex-drop self)))
+  (when widget.definition-search
+    (set widget.definition-search.drop
+         (fn [self]
+           (set dropped.definition-search (+ dropped.definition-search 1))
+           (original-definition-search-drop self))))
   (widget:drop)
   (assert (> dropped.title 0) (.. message " should drop title"))
   (assert (> dropped.summary 0) (.. message " should drop summary"))
+  (when widget.definition-search
+    (assert (> dropped.definition-search 0) (.. message " should drop definition search")))
   (assert (> dropped.flex 0) (.. message " should drop flex")))
 
 (fn target-node-by-key [targets key]
@@ -222,6 +233,28 @@
 (fn workflows-root-new-workflow-creates-and-loads-graph-nodes []
   (with-runtime workflows-root-new-workflow-creates-and-loads-graph-nodes-case))
 
+(fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code-case [runtime]
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "new-workflow-missing-graph-map"}))
+  (local root (map:load-by-key "workflows"))
+  (assert root "workflows root should load through key loader")
+  (local action (action-named root.actions "New Workflow"))
+  (assert action "workflows root should expose New Workflow action")
+  (set root.graph nil)
+  (local before-definitions (length (runtime.store:list-definitions)))
+  (local before-code (length (runtime.code-store:list-entities)))
+  (local (ok err) (pcall action.fn action {:source :test}))
+  (assert (not ok) "New Workflow without a graph should fail loudly")
+  (assert (string.find (tostring err) "requires a graph map" 1 true)
+          "New Workflow missing graph failure should explain the missing graph map")
+  (assert (= (length (runtime.store:list-definitions)) before-definitions)
+          "failed New Workflow without graph should not persist a workflow definition")
+  (assert (= (length (runtime.code-store:list-entities)) before-code)
+          "failed New Workflow without graph should not persist a code entity")
+  (map:drop))
+
+(fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code []
+  (with-runtime workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code-case))
+
 (fn workflows-preview-builds-with-new-workflow-action-case [runtime]
   (local map (GraphMap.GraphMap {:graph runtime.graph :id "workflow-preview-map"}))
   (local node (map:load-by-key "workflows"))
@@ -259,59 +292,92 @@
   (local event (runtime.store:append-event run.id {:id "event-started" :kind :step-started :step-id "step-a"}))
   {:definition definition :run (runtime.store:get-run run.id) :event event})
 
-(fn workflows-root-show-existing-loads-definition-and-run-nodes-case [runtime]
+(fn seed-two-definitions-with-run [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "existing-workflows-map"}))
-  (local root (map:load-by-key "workflows"))
-  (assert root "workflows root should load through key loader")
-  (local action (action-named root.actions "Show Existing Workflows"))
-  (assert action "workflows root should expose Show Existing Workflows action")
-  (assert root.load-existing-workflows "workflows root should expose load-existing-workflows")
-  (local loaded (root:load-existing-workflows))
-  (assert (= loaded.definition-count 1) "Show Existing Workflows should report loaded definitions")
-  (assert (= loaded.run-count 1) "Show Existing Workflows should report loaded runs")
-  (local definition-key (.. "workflow-definition:" seeded.definition.id))
-  (local run-key (.. "workflow-run:" seeded.run.id))
-  (assert (map:lookup definition-key) "Show Existing Workflows should load existing definition node")
-  (assert (map:lookup run-key) "Show Existing Workflows should load existing run node")
-  (assert-edge-target map.edges definition-key "Show Existing Workflows should add root-to-definition edge")
-  (assert-edge-target map.edges run-key "Show Existing Workflows should add root-to-run edge")
-  (map:drop))
+  (local other (runtime.store:create-definition {:id "wf-other"
+                                                 :name "Other workflow"
+                                                 :steps []
+                                                 :edges []}))
+  {:selected seeded.definition
+   :other other
+   :run seeded.run})
 
-(fn workflows-root-show-existing-loads-definition-and-run-nodes []
-  (with-runtime workflows-root-show-existing-loads-definition-and-run-nodes-case))
+(fn seed-two-definitions-with-runs [runtime]
+  (local seeded (seed-definition-with-run runtime)) (local other (runtime.store:create-definition {:id "wf-other" :name "Other workflow" :steps [] :edges []}))
+  (local other-run (runtime.store:create-run other.id {:prompt "other"} {:source :other-test})) {:selected seeded.definition :other other :selected-run seeded.run :other-run other-run})
 
-(fn workflows-root-show-existing-requires-graph-before-empty-store-listing-case [runtime]
-  (local root (WorkflowsNode {:store runtime.store}))
-  (local (ok result) (pcall (fn [] (root:load-existing-workflows))))
-  (assert (not ok) "Show Existing Workflows should require a graph map even when the store is empty")
-  (assert (string.find (tostring result) "requires a graph map" 1 true)
-          "Show Existing Workflows missing graph failure should mention graph map"))
-
-(fn workflows-root-show-existing-requires-graph-before-empty-store-listing []
-  (with-runtime workflows-root-show-existing-requires-graph-before-empty-store-listing-case))
-
-(fn workflows-preview-shows-existing-counts-and-action-case [runtime]
-  (seed-definition-with-run runtime)
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "existing-workflows-preview-map"}))
+(fn workflows-preview-search-selects-one-definition-only-case [runtime]
+  (local seeded (seed-two-definitions-with-run runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "definition-search-map"}))
   (local root (map:load-by-key "workflows"))
   (local Preview (require :graph/view/previews/workflows))
   (local widget ((Preview root {:node root}) (make-preview-ctx)))
-  (assert widget.summary-text "workflows preview should expose existing workflow summary text")
-  (local summary (text-widget-string widget.summary-text))
-  (assert-contains summary "Definitions: 1" "workflows preview should show definition count")
-  (assert-contains summary "Runs: 1" "workflows preview should show run count")
-  (assert widget.show-existing-button "workflows preview should expose Show Existing Workflows button")
-  (widget.show-existing-button:on-click {:source :test})
-  (assert (map:lookup "workflow-definition:wf-demo") "Show Existing preview button should load definition node")
-  (assert (map:lookup (.. "workflow-run:" (. (runtime.store:list-runs {}) 1 :id)))
-          "Show Existing preview button should load run node")
-  (widget:drop)
+  (assert widget.definition-search "workflows preview should expose definition search")
+  (assert widget.definition-count-text "workflows preview should expose definition count text")
+  (assert (not widget.show-existing-button) "workflows preview should not expose bulk existing workflows button")
+  (local count-text (text-widget-string widget.definition-count-text))
+  (assert-contains count-text "Definitions: 2" "workflows preview should count definitions only")
+  (local selected-item (. (root:definition-items) 1))
+  (widget.definition-search.submitted:emit selected-item)
+  (local selected-key (.. "workflow-definition:" (. selected-item 1 :id)))
+  (local other-key (.. "workflow-definition:" seeded.other.id))
+  (local run-key (.. "workflow-run:" seeded.run.id))
+  (assert (map:lookup selected-key) "definition search submit should load selected definition")
+  (assert (not (map:lookup other-key)) "definition search submit should not load unselected definitions")
+  (assert (not (map:lookup run-key)) "definition search submit should not load workflow runs")
+  (assert-edge-target map.edges selected-key "definition search submit should add root-to-definition edge")
+  (assert-preview-drops-owned-children widget "workflows preview")
   (map:drop))
 
-(fn workflows-preview-shows-existing-counts-and-action []
-  (with-runtime workflows-preview-shows-existing-counts-and-action-case))
+(fn workflows-preview-search-selects-one-definition-only []
+  (with-runtime workflows-preview-search-selects-one-definition-only-case))
 
+(fn workflows-root-does-not-load-runs-directly-case [runtime]
+  (local seeded (seed-two-definitions-with-run runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "definition-only-root-map"}))
+  (local root (map:load-by-key "workflows"))
+  (assert root "workflows root should load through key loader")
+  (assert (not (action-named root.actions "Show Existing Workflows"))
+          "workflows root should not expose bulk Show Existing Workflows action")
+  (assert root.definition-items "workflows root should expose definition items")
+  (assert root.load-definition-from-graph "workflows root should load one selected definition")
+  (assert (not root.load-existing-workflows) "workflows root should not expose bulk existing workflow loader")
+  (local loaded (root:load-definition-from-graph seeded.selected))
+  (local definition-key (.. "workflow-definition:" seeded.selected.id))
+  (local other-key (.. "workflow-definition:" seeded.other.id))
+  (local run-key (.. "workflow-run:" seeded.run.id))
+  (assert (= loaded.key definition-key) "selected definition loader should return the selected node")
+  (assert (map:lookup definition-key) "selected definition loader should load the selected definition")
+  (assert (not (map:lookup other-key)) "selected definition loader should not load other definitions")
+  (assert (not (map:lookup run-key)) "workflows root should not load workflow runs directly")
+  (assert-edge-target map.edges definition-key "selected definition loader should add root-to-definition edge")
+  (map:drop))
+
+(fn workflows-root-does-not-load-runs-directly []
+  (with-runtime workflows-root-does-not-load-runs-directly-case))
+
+(fn with-definition-run-preview [runtime map-id f]
+  (local seeded (seed-two-definitions-with-runs runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id map-id})) (local node (map:load-by-key (.. "workflow-definition:" seeded.selected.id))) (local Preview (require :graph/view/previews/workflow-definition))
+  (local widget ((Preview node {:node node}) (make-preview-ctx))) (local (ok result) (pcall f seeded map node widget)) (widget:drop) (map:drop) (if ok result (error result)))
+
+(fn workflow-definition-preview-search-selects-one-run-case [runtime]
+  (with-definition-run-preview runtime "definition-run-search-map" (fn [seeded map node widget]
+    (assert widget.run-search "workflow definition preview should expose run search") (assert widget.run-count-text "workflow definition preview should expose run count text")
+    (assert widget.start-button "workflow definition preview should keep Start button") (assert widget.new-step-button "workflow definition preview should keep New Step button") (assert-contains (text-widget-string widget.run-count-text) "Runs: 1" "definition preview should count only this definition's runs")
+    (widget.run-search.submitted:emit (. (node:run-items) 1)) (local selected-run-key (.. "workflow-run:" seeded.selected-run.id)) (assert (map:lookup selected-run-key) "run search submit should load selected run")
+    (assert (not (map:lookup (.. "workflow-run:" seeded.other-run.id))) "run search submit should not load runs from other definitions")
+    (assert-edge-target map.edges selected-run-key "run search submit should add definition-to-run edge"))))
+(fn workflow-definition-run-search-filters-to-definition-case [runtime]
+  (with-definition-run-preview runtime "definition-run-filter-map" (fn [seeded map node widget]
+    (local items (node:run-items)) (assert (= (length items) 1) "workflow definition run items should include only selected definition runs")
+    (assert (= (. items 1 1 :id) seeded.selected-run.id) "workflow definition run item should be selected definition's run") (widget.run-search.submitted:emit (. items 1))
+    (assert (map:lookup (.. "workflow-run:" seeded.selected-run.id)) "filtered run search should load selected definition's run")
+    (assert (not (map:lookup (.. "workflow-run:" seeded.other-run.id))) "filtered run search should not load other definition's run"))))
+(fn workflow-definition-load-run-rejects-foreign-definition-case [runtime]
+  (with-definition-run-preview runtime "definition-run-foreign-map" (fn [seeded map node _widget]
+    (local foreign-key (.. "workflow-run:" seeded.other-run.id)) (local (ok err) (pcall node.load-run-from-graph node seeded.other-run))
+    (assert (not ok) "workflow definition should reject a run owned by another definition") (assert (string.find (tostring err) "does not belong" 1 true) "foreign run failure should explain ownership mismatch")
+    (assert (not (map:lookup foreign-key)) "foreign run rejection should not materialize the run node") (assert (not (. (edge-target-key-set map.edges) foreign-key)) "foreign run rejection should not add a visible edge"))))
 (fn seed-agent-session-run [runtime]
   (local definition (runtime.store:create-definition {:id "wf-agent-session-graph"
                                                      :name "Agent Session Workflow"
@@ -459,42 +525,82 @@
 (fn workflow-key-loaders-return-nil-for-missing-records []
   (with-runtime workflow-key-loaders-return-nil-for-missing-records-case))
 
-(fn workflow-definition-node-expands-to-step-code-and-run-edges-case [runtime]
+(fn workflow-definition-explicit-actions-materialize-selected-run-and-step-code-case [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-definition:" seeded.definition.id)))
-  (local edges (node:get-edges))
-  (assert-edge-target edges (.. "workflow-step:" seeded.definition.id ":step-a") "definition should link to first step")
-  (assert-edge-target edges (.. "workflow-step:" seeded.definition.id ":step-b") "definition should link to second step")
-  (assert-edge-target edges "code-entity:code-a" "definition expansion should include step code entity")
-  (assert-edge-target edges "code-entity:code-b" "definition expansion should include second step code entity")
-  (assert-edge-target edges (.. "workflow-run:" seeded.run.id) "definition should link to its runs")
-  (local step-node (graph:load-by-key (.. "workflow-step:" seeded.definition.id ":step-a")))
-  (assert-edge-target (step-node:get-edges)
-                      (.. "workflow-step:" seeded.definition.id ":step-b")
-                      "workflow step should project canonical workflow step edges"))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "explicit-definition-actions-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" seeded.definition.id)))
+  (local run-node (node:load-run-from-graph seeded.run))
+  (assert (= run-node.key (.. "workflow-run:" seeded.run.id)) "definition run action should load selected run")
+  (assert-edge-target map.edges run-node.key "definition run action should add a visible run edge")
+  (local step-node (map:load-by-key (.. "workflow-step:" seeded.definition.id ":step-a")))
+  (local code-node (step-node:show-code-from-graph))
+  (assert (= code-node.key "code-entity:code-a") "step code action should load linked code entity")
+  (assert-edge-target map.edges code-node.key "step code action should add a visible code edge")
+  (map:drop))
 
-(fn workflow-definition-node-expands-to-step-code-and-run-edges []
-  (with-runtime workflow-definition-node-expands-to-step-code-and-run-edges-case))
+(fn workflow-definition-explicit-actions-materialize-selected-run-and-step-code []
+  (with-runtime workflow-definition-explicit-actions-materialize-selected-run-and-step-code-case))
 
-(fn workflow-run-node-expands-to-definition-run-step-and-event-edges-case [runtime]
+(fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges-case [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
-  (var edges (node:get-edges))
-  (assert-edge-target edges (.. "workflow-definition:" seeded.definition.id) "run should always link to definition")
-  (assert (= (. (edge-target-key-set edges) (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "run should hide run-step edges before details expansion")
-  (node:show-details)
-  (set edges (node:get-edges))
-  (assert-edge-target edges (.. "workflow-run-step:" seeded.run.id ":step-a") "expanded run should link run step")
-  (assert-edge-target edges (.. "workflow-run-step:" seeded.run.id ":step-b") "expanded run should link second run step")
-  (assert-edge-target edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id) "expanded run should link event")
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-details-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (assert node.load-details-from-graph "run node should expose explicit detail loading")
+  (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "run-step should not be visible before explicit detail loading")
+  (local result (node:load-details-from-graph))
+  (assert (= result.run-step-count 2) "detail loading should report loaded run steps")
+  (assert (= result.event-count 1) "detail loading should report loaded run events")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "detail loading should make first run-step visible")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-b"))
+          "detail loading should make second run-step visible")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+          "detail loading should make run event visible")
+  (assert-edge-target map.edges (.. "workflow-run-step:" seeded.run.id ":step-a")
+                      "detail loading should add run-to-step edge")
+  (assert-edge-target map.edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id)
+                      "detail loading should add run-to-event edge")
   (node:hide-details)
-  (assert (not node.details-expanded?) "hide-details should collapse details"))
+  (assert (not node.details-expanded?) "hide-details should collapse UI state only")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "hide-details should not remove explicit graph materialization")
+  (map:drop))
 
-(fn workflow-run-node-expands-to-definition-run-step-and-event-edges []
-  (with-runtime workflow-run-node-expands-to-definition-run-step-and-event-edges-case))
+(fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges []
+  (with-runtime workflow-run-node-load-details-from-graph-materializes-step-and-event-edges-case))
+
+(fn workflow-run-node-load-details-requires-graph-map-before-materializing-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local run-key (.. "workflow-run:" seeded.run.id))
+  (local step-key (.. "workflow-run-step:" seeded.run.id ":step-a"))
+  (local event-key (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+  (local shared-node (runtime.graph:load-by-key run-key))
+  (local before-graph-edges (runtime.graph:edge-count))
+  (local (shared-ok shared-err) (pcall shared-node.load-details-from-graph shared-node))
+  (assert (not shared-ok) "run details mounted on shared Graph should fail loudly")
+  (assert (string.find (tostring shared-err) "requires a graph map" 1 true)
+          "shared Graph failure should explain the missing graph map")
+  (assert (and (= (runtime.graph:lookup step-key) nil)
+               (= (runtime.graph:lookup event-key) nil)
+               (= (runtime.graph:edge-count) before-graph-edges))
+          "shared Graph failure should not materialize detail nodes or edges")
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-details-missing-map"}))
+  (local map-node (map:load-by-key run-key))
+  (set map-node.graph nil)
+  (local before-map-edges (map:edge-count))
+  (local (missing-ok missing-err) (pcall map-node.load-details-from-graph map-node))
+  (assert (not missing-ok) "run details without a graph map should fail loudly")
+  (assert (string.find (tostring missing-err) "requires a graph map" 1 true)
+          "missing graph failure should explain the missing graph map")
+  (assert (and (= (map:lookup step-key) nil)
+               (= (map:lookup event-key) nil)
+               (= (map:edge-count) before-map-edges))
+          "missing graph failure should not materialize detail nodes or edges")
+  (map:drop))
+
+(fn workflow-run-node-load-details-requires-graph-map-before-materializing []
+  (with-runtime workflow-run-node-load-details-requires-graph-map-before-materializing-case))
 
 (fn workflow-status-color-mapping-covers-all-statuses []
   (local WorkflowRunNode (require :graph/nodes/workflow-run))
@@ -665,10 +771,10 @@
 (fn workflow-step-preview-builds-with-show-code-action []
   (with-runtime workflow-step-preview-builds-with-show-code-action-case))
 
-(fn workflow-run-preview-builds-with-toggle-action-case [runtime]
+(fn workflow-run-preview-show-details-loads-step-and-event-nodes-case [runtime]
   (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "run-preview-details-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
   (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run))
   (assert loaded? "workflow run preview module should load")
   (assert-missing-build-context-with-fallbacks
@@ -677,40 +783,30 @@
   (local builder (Preview node {:node node}))
   (assert-missing-build-context builder "run preview should assert on missing build context")
   (local widget (builder (make-preview-ctx)))
-  (assert widget.toggle-button "run preview should expose a details toggle button")
-  (assert (= widget.toggle-button-label "Show Details") "collapsed run preview should show Show Details")
-  (widget.toggle-button:on-click {:source :test})
-  (assert node.details-expanded? "toggle button should expand run details")
-  (assert (= widget.toggle-button-label "Hide Details")
+  (assert widget.show-details-button "run preview should expose a Show Details button")
+  (assert (= widget.show-details-button-label "Show Details") "collapsed run preview should show Show Details")
+  (assert (= (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
+          "run-step should not be visible before Show Details")
+  (widget.show-details-button:on-click {:source :test})
+  (assert node.details-expanded? "Show Details button should expand run detail UI state")
+  (assert (= widget.show-details-button-label "Hide Details")
           "same run preview widget should update to Hide Details after expanding")
+  (assert (map:lookup (.. "workflow-run-step:" seeded.run.id ":step-a"))
+          "Show Details should load run-step node into graph map")
+  (assert (map:lookup (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
+          "Show Details should load run-event node into graph map")
+  (assert-edge-target map.edges (.. "workflow-run-step:" seeded.run.id ":step-a")
+                      "Show Details should add visible run-to-step edge")
+  (assert-edge-target map.edges (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id)
+                      "Show Details should add visible run-to-event edge")
   (widget:drop)
   (local expanded-widget (builder (make-preview-ctx)))
-  (assert (= expanded-widget.toggle-button-label "Hide Details") "expanded run preview should show Hide Details")
-  (expanded-widget:drop))
+  (assert (= expanded-widget.show-details-button-label "Hide Details") "expanded run preview should show Hide Details")
+  (expanded-widget:drop)
+  (map:drop))
 
-(fn workflow-run-preview-builds-with-toggle-action []
-  (with-runtime workflow-run-preview-builds-with-toggle-action-case))
-
-(fn workflow-run-details-toggle-changes-expanded-edge-projection-case [runtime]
-  (local seeded (seed-definition-with-run runtime))
-  (local graph runtime.graph)
-  (local node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
-  (local collapsed-keys (edge-target-key-set (node:get-edges)))
-  (assert (= (. collapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "run details should default collapsed")
-  (node:toggle-details)
-  (local expanded-keys (edge-target-key-set (node:get-edges)))
-  (assert (. expanded-keys (.. "workflow-run-step:" seeded.run.id ":step-a"))
-          "expanded run should include run-step edges")
-  (assert (. expanded-keys (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))
-          "expanded run should include run event edges")
-  (node:toggle-details)
-  (local recollapsed-keys (edge-target-key-set (node:get-edges)))
-  (assert (= (. recollapsed-keys (.. "workflow-run-step:" seeded.run.id ":step-a")) nil)
-          "collapsed run should hide run-step edges again"))
-
-(fn workflow-run-details-toggle-changes-expanded-edge-projection []
-  (with-runtime workflow-run-details-toggle-changes-expanded-edge-projection-case))
+(fn workflow-run-preview-show-details-loads-step-and-event-nodes []
+  (with-runtime workflow-run-preview-show-details-loads-step-and-event-nodes-case))
 
 (fn workflow-run-node-omits-cancel-action-for-succeeded-run-case [runtime]
   (local seeded (seed-definition-with-run runtime))
@@ -887,36 +983,36 @@
 (fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes []
   (with-runtime graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes-case))
 
-(fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge-case [runtime]
-  (local definition (seed-definition-for-authoring runtime))
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "trigger-map"}))
-  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
-  (local run (node:start-workflow-from-graph {:prompt "go"} {}))
-  (assert run "starting workflow from graph should return run")
-  (assert (runtime.store:get-run run.id) "run should be durable immediately")
-  (assert (map:lookup (.. "workflow-run:" run.id)) "run node should be visible in active graph map")
-  (assert-edge-target map.edges (.. "workflow-run:" run.id) "definition-to-run edge should be inserted in graph map")
-  (map:drop))
+(fn start-definition-node-creates-visible-run-node-and-definition-run-edge-case [runtime]
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (local run (node:start-workflow-from-graph {:prompt "go"} {}))
+  (assert run "starting workflow from graph should return run") (assert (runtime.store:get-run run.id) "run should be durable immediately") (assert (map:lookup (.. "workflow-run:" run.id)) "run node should be visible in active graph map")
+  (assert-edge-target map.edges (.. "workflow-run:" run.id) "definition-to-run edge should be inserted in graph map") (map:drop))
 
-(fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge []
-  (with-runtime trigger-definition-node-creates-visible-run-node-and-definition-run-edge-case))
+(fn start-definition-node-creates-visible-run-node-and-definition-run-edge []
+  (with-runtime start-definition-node-creates-visible-run-node-and-definition-run-edge-case))
 
-(fn trigger-context-captures-graph-map-and-selected-node-keys-case [runtime]
-  (local definition (seed-definition-for-authoring runtime))
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"}))
-  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
-  (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
-  (set map.selected_node_keys [node.key (.. "workflow-step:" definition.id ":step-a")])
-  (node:start-workflow-from-graph {:prompt "go"} {})
-  (local started (. runtime.runner.started 1))
-  (assert (= started.context.graph-map-id "context-map") "run context should include active graph map id")
-  (assert (= (. started.context.graph-node-keys 1) node.key) "run context should include first selected node key")
-  (assert (= (. started.context.graph-node-keys 2) (.. "workflow-step:" definition.id ":step-a"))
-          "run context should include selected workflow step key")
-  (map:drop))
+(fn assert-start-preflight-fails-without-persisting [runtime node graph-value expected-message]
+  (set node.graph graph-value) (local before-started (length runtime.runner.started)) (local before-runs (length (runtime.store:list-runs {:definition-id node.workflow-definition-id}))) (local (ok err) (pcall node.start-workflow-from-graph node {:prompt "go"} {}))
+  (assert (not ok) "Start should fail loudly when graph dependencies are missing") (assert (string.find (tostring err) expected-message 1 true) "Start missing dependency failure should explain the missing graph dependency")
+  (assert (= (length runtime.runner.started) before-started) "Start missing dependency failure should not call the runner") (assert (= (length (runtime.store:list-runs {:definition-id node.workflow-definition-id})) before-runs) "Start missing dependency failure should not persist a workflow run"))
 
-(fn trigger-context-captures-graph-map-and-selected-node-keys []
-  (with-runtime trigger-context-captures-graph-map-and-selected-node-keys-case))
+(fn start-definition-node-requires-graph-dependencies-before-persisting-case [runtime]
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-preflight-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (assert-start-preflight-fails-without-persisting runtime node nil "requires a graph map") (assert-start-preflight-fails-without-persisting runtime node {:add-edge (fn [])} "requires graph:load-by-key") (assert-start-preflight-fails-without-persisting runtime node {:load-by-key (fn [])} "requires graph:add-edge") (map:drop))
+
+(fn start-definition-node-requires-workflow-run-loader-before-persisting-case [runtime] (local Graph (require :graph/init)) (local DefinitionNode (require :graph/nodes/workflow-definition))
+  (local graph (Graph {:with-start false})) (DefinitionNode.register-loader graph {:store runtime.store :runner runtime.runner :code-store runtime.code-store})
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph graph :id "start-missing-run-loader-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local before-started (length runtime.runner.started)) (local before-runs (length (runtime.store:list-runs {:definition-id definition.id}))) (local (ok err) (pcall node.start-workflow-from-graph node {:prompt "go"} {}))
+  (assert (not ok) "Start should fail loudly without a workflow-run key loader") (assert (string.find (tostring err) "requires graph loader for workflow-run" 1 true) "Start missing loader failure should explain the workflow-run loader requirement") (assert (= (length runtime.runner.started) before-started) "Start without workflow-run loader should not call the runner") (assert (= (length (runtime.store:list-runs {:definition-id definition.id})) before-runs) "Start without workflow-run loader should not persist a workflow run") (map:drop) (graph:drop))
+
+(fn start-context-captures-graph-map-and-selected-node-keys-case [runtime]
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
+  (set map.selected_node_keys [node.key (.. "workflow-step:" definition.id ":step-a")]) (node:start-workflow-from-graph {:prompt "go"} {}) (local started (. runtime.runner.started 1))
+  (assert (= started.context.graph-map-id "context-map") "run context should include active graph map id") (assert (= (. started.context.graph-node-keys 1) node.key) "run context should include first selected node key")
+  (assert (= (. started.context.graph-node-keys 2) (.. "workflow-step:" definition.id ":step-a")) "run context should include selected workflow step key") (map:drop))
+
+(fn start-context-captures-graph-map-and-selected-node-keys []
+  (with-runtime start-context-captures-graph-map-and-selected-node-keys-case))
 
 (fn workflow-step-source [value]
   (.. "{:run (fn [_self _context _input _state] {:status :succeeded :output {:value " value "}})}"))
@@ -1042,6 +1138,7 @@
 (fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit []
   (with-temp-dir template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit-case))
 
+(table.insert tests {:name "graph-discovery-has-no-relationship-hook-leftovers" :fn graph-discovery-has-no-relationship-hook-leftovers})
 (table.insert tests {:name "workflow key loaders resolve all workflow keys"
                      :fn workflow-key-loaders-resolve-all-workflow-keys})
 (table.insert tests {:name "workflow key loaders return nil for missing records"
@@ -1050,78 +1147,46 @@
                      :fn agent-session-key-loads-workflow-backed-session})
 (table.insert tests {:name "agent-session-node-loads-backing-workflow-run"
                       :fn agent-session-node-loads-backing-workflow-run})
-(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events"
-                     :fn agent-session-node-loads-only-recent-workflow-events})
-(table.insert tests {:name "agent-session-preview-requires-direct-context"
-                      :fn agent-session-preview-requires-direct-context})
-(table.insert tests {:name "agent-session-preview-shows-status-and-item-count"
-                     :fn agent-session-preview-shows-status-and-item-count})
-(table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists"
-                      :fn start-node-includes-workflows-when-workflow-store-exists})
-(table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
-                     :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
-(table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
-                      :fn workflows-preview-builds-with-new-workflow-action})
-(table.insert tests {:name "workflows-root-show-existing-loads-definition-and-run-nodes"
-                       :fn workflows-root-show-existing-loads-definition-and-run-nodes})
-(table.insert tests {:name "workflows-root-show-existing-requires-graph-before-empty-store-listing"
-                       :fn workflows-root-show-existing-requires-graph-before-empty-store-listing})
-(table.insert tests {:name "workflows-preview-shows-existing-counts-and-action"
-                       :fn workflows-preview-shows-existing-counts-and-action})
-(table.insert tests {:name "workflow definition node expands to step code and run edges"
-                       :fn workflow-definition-node-expands-to-step-code-and-run-edges})
-(table.insert tests {:name "workflow run node expands to definition run step and event edges"
-                     :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
-(table.insert tests {:name "workflow status color mapping covers all statuses"
-                       :fn workflow-status-color-mapping-covers-all-statuses})
-(table.insert tests {:name "workflow definition preview builds with start action"
-                      :fn workflow-definition-preview-builds-with-start-action})
-(table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes"
-                      :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
-(table.insert tests {:name "definition-new-step-without-graph-does-not-persist-step-or-code"
-                      :fn definition-new-step-without-graph-does-not-persist-step-or-code})
-(table.insert tests {:name "definition-new-step-rolls-back-when-graph-load-fails"
-                      :fn definition-new-step-rolls-back-when-graph-load-fails})
-(table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action"
-                      :fn workflow-definition-preview-builds-with-new-step-action})
-(table.insert tests {:name "workflow-step-show-code-loads-linked-code-node"
-                     :fn workflow-step-show-code-loads-linked-code-node})
-(table.insert tests {:name "workflow-step-preview-builds-with-show-code-action"
-                     :fn workflow-step-preview-builds-with-show-code-action})
-(table.insert tests {:name "workflow run preview builds with toggle action"
-                      :fn workflow-run-preview-builds-with-toggle-action})
-(table.insert tests {:name "workflow run details toggle changes expanded edge projection"
-                      :fn workflow-run-details-toggle-changes-expanded-edge-projection})
-(table.insert tests {:name "workflow run node omits cancel action for succeeded run"
-                      :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
-(table.insert tests {:name "workflow run step status colors cover all run step statuses"
-                       :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
-(table.insert tests {:name "workflow-run-step-and-event-summaries-include-details"
-                       :fn workflow-run-step-and-event-summaries-include-details})
-(table.insert tests {:name "workflow-run-step-preview-builds-summary"
-                       :fn workflow-run-step-preview-builds-summary})
-(table.insert tests {:name "workflow-run-event-preview-builds-summary"
-                       :fn workflow-run-event-preview-builds-summary})
-(table.insert tests {:name "graph step connection creates canonical workflow control edge"
-                      :fn graph-step-connection-creates-canonical-workflow-control-edge})
-(table.insert tests {:name "graph map capture skips workflow derived edges"
-                     :fn graph-map-capture-skips-workflow-derived-edges})
-(table.insert tests {:name "graph remove edge deletes canonical workflow edge"
-                      :fn graph-remove-edge-deletes-canonical-workflow-edge})
-(table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes"
-                     :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
-(table.insert tests {:name "trigger definition node creates visible run node and definition run edge"
-                      :fn trigger-definition-node-creates-visible-run-node-and-definition-run-edge})
-(table.insert tests {:name "trigger context captures graph map and selected node keys"
-                      :fn trigger-context-captures-graph-map-and-selected-node-keys})
-(table.insert tests {:name "graph code entity edits feed cached workflow executor"
-                     :fn graph-code-entity-edits-feed-cached-workflow-executor})
-(table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code"
-                      :fn template-helper-creates-durable-workflow-step-and-code})
-(table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit"
-                      :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
-(table.insert tests {:name "template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit"
-                     :fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit})
+(table.insert tests {:name "agent-session-node-loads-only-recent-workflow-events" :fn agent-session-node-loads-only-recent-workflow-events})
+(table.insert tests {:name "agent-session-preview-requires-direct-context" :fn agent-session-preview-requires-direct-context})
+(table.insert tests {:name "agent-session-preview-shows-status-and-item-count" :fn agent-session-preview-shows-status-and-item-count})
+(table.insert tests {:name "start-node-includes-workflows-when-workflow-store-exists" :fn start-node-includes-workflows-when-workflow-store-exists})
+(table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes" :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
+(table.insert tests {:name "workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code})
+(table.insert tests {:name "workflows-preview-builds-with-new-workflow-action" :fn workflows-preview-builds-with-new-workflow-action})
+(table.insert tests {:name "workflows-preview-search-selects-one-definition-only" :fn workflows-preview-search-selects-one-definition-only})
+(table.insert tests {:name "workflows-root-does-not-load-runs-directly" :fn workflows-root-does-not-load-runs-directly})
+(table.insert tests {:name "workflow-definition-preview-search-selects-one-run" :fn (fn [] (with-runtime workflow-definition-preview-search-selects-one-run-case))})
+(table.insert tests {:name "workflow-definition-run-search-filters-to-definition" :fn (fn [] (with-runtime workflow-definition-run-search-filters-to-definition-case))})
+(table.insert tests {:name "workflow-definition-load-run-rejects-foreign-definition" :fn (fn [] (with-runtime workflow-definition-load-run-rejects-foreign-definition-case))})
+(table.insert tests {:name "workflow-definition-explicit-actions-materialize-selected-run-and-step-code" :fn workflow-definition-explicit-actions-materialize-selected-run-and-step-code})
+(table.insert tests {:name "workflow-run-node-load-details-from-graph-materializes-step-and-event-edges" :fn workflow-run-node-load-details-from-graph-materializes-step-and-event-edges})
+(table.insert tests {:name "workflow-run-node-load-details-requires-graph-map-before-materializing" :fn workflow-run-node-load-details-requires-graph-map-before-materializing})
+(table.insert tests {:name "workflow status color mapping covers all statuses" :fn workflow-status-color-mapping-covers-all-statuses})
+(table.insert tests {:name "workflow definition preview builds with start action" :fn workflow-definition-preview-builds-with-start-action})
+(table.insert tests {:name "definition-new-step-creates-template-backed-step-and-loads-nodes" :fn definition-new-step-creates-template-backed-step-and-loads-nodes})
+(table.insert tests {:name "definition-new-step-without-graph-does-not-persist-step-or-code" :fn definition-new-step-without-graph-does-not-persist-step-or-code})
+(table.insert tests {:name "definition-new-step-rolls-back-when-graph-load-fails" :fn definition-new-step-rolls-back-when-graph-load-fails})
+(table.insert tests {:name "workflow-definition-preview-builds-with-new-step-action" :fn workflow-definition-preview-builds-with-new-step-action})
+(table.insert tests {:name "workflow-step-show-code-loads-linked-code-node" :fn workflow-step-show-code-loads-linked-code-node})
+(table.insert tests {:name "workflow-step-preview-builds-with-show-code-action" :fn workflow-step-preview-builds-with-show-code-action})
+(table.insert tests {:name "workflow-run-preview-show-details-loads-step-and-event-nodes" :fn workflow-run-preview-show-details-loads-step-and-event-nodes})
+(table.insert tests {:name "workflow run node omits cancel action for succeeded run" :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
+(table.insert tests {:name "workflow run step status colors cover all run step statuses" :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
+(table.insert tests {:name "workflow-run-step-and-event-summaries-include-details" :fn workflow-run-step-and-event-summaries-include-details})
+(table.insert tests {:name "workflow-run-step-preview-builds-summary" :fn workflow-run-step-preview-builds-summary})
+(table.insert tests {:name "workflow-run-event-preview-builds-summary" :fn workflow-run-event-preview-builds-summary})
+(table.insert tests {:name "graph step connection creates canonical workflow control edge" :fn graph-step-connection-creates-canonical-workflow-control-edge})
+(table.insert tests {:name "graph map capture skips workflow derived edges" :fn graph-map-capture-skips-workflow-derived-edges})
+(table.insert tests {:name "graph remove edge deletes canonical workflow edge" :fn graph-remove-edge-deletes-canonical-workflow-edge})
+(table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes" :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
+(table.insert tests {:name "start definition node creates visible run node and definition run edge" :fn start-definition-node-creates-visible-run-node-and-definition-run-edge})
+(table.insert tests {:name "start definition node requires graph dependencies before persisting" :fn (fn [] (with-runtime start-definition-node-requires-graph-dependencies-before-persisting-case))}) (table.insert tests {:name "start definition node requires workflow-run loader before persisting" :fn (fn [] (with-runtime start-definition-node-requires-workflow-run-loader-before-persisting-case))})
+(table.insert tests {:name "start context captures graph map and selected node keys" :fn start-context-captures-graph-map-and-selected-node-keys})
+(table.insert tests {:name "graph code entity edits feed cached workflow executor" :fn graph-code-entity-edits-feed-cached-workflow-executor})
+(table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code" :fn template-helper-creates-durable-workflow-step-and-code})
+(table.insert tests {:name "template-helper-keeps-code-entity-when-add-step-fails-after-commit" :fn template-helper-keeps-code-entity-when-add-step-fails-after-commit})
+(table.insert tests {:name "template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit" :fn template-helper-rolls-back-workflow-and-code-when-starter-step-fails-after-commit})
 
 (local main
   (fn []

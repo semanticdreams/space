@@ -8,7 +8,7 @@ Status: implemented through map manager, graph view attachment, map switching UI
 
 The graph is intended to provide one uniform interface to many kinds of things: files, code, entities, worlds, terrain tools, conversations, kernels, and future object types. A single current graph state becomes hard to use when different tasks require different expansions, layouts, selections, and open panels.
 
-`GraphMap` is the named, persistent interaction context for a task or workflow. A graph map owns references, arrangement, and interaction state. It does not own the underlying objects.
+`GraphMap` is the named, persistent interaction context for a task or workflow. A graph map owns the visible references, display edges, arrangement, and interaction state that a user has explicitly materialized. It does not own the underlying objects.
 
 This keeps the existing graph-as-universal-model direction while avoiding multiple independent `Graph` instances that duplicate shared store subscriptions and shared key-loader behavior.
 
@@ -19,6 +19,7 @@ Implemented:
 - `GraphMap` provides map-local node/edge membership, selection/focus state, unresolved restored state, mount/unmount behavior, and capture/restore/drop APIs.
 - Shared `Graph:create-node-by-key` creates node adapter instances without mutating shared graph state.
 - `GraphMap:load-by-key` resolves keys through the shared graph and inserts fresh map-local adapters.
+- Related objects are added explicitly by preview/view/action/search controls that load selected keys into the active map; graph maps do not perform hidden relationship-hook expansion.
 - `GraphMapManager` owns map records, active map id, legacy migration, create/rename/delete/switch, hydration pruning, capture, and metadata cleanup.
 - `GraphView` attaches to the active `GraphMap`, scopes persistence by map id, and captures/drops/restores runtime view state around map switching.
 - Graph canvas context exposes `graph-map`; root actions and node menu actions mutate the active graph map instead of the shared graph.
@@ -83,6 +84,7 @@ Owned per graph map:
 - Map id and name.
 - Included node keys.
 - Explicit map edges.
+- User-materialized visible topology only; domain records and hidden relationships stay in their owning systems until an explicit control exposes them.
 - Unresolved restored keys/edges until hydration resolves or prunes them.
 - Map-local node adapter instances.
 - Positions.
@@ -195,7 +197,7 @@ Link-entity edges should be recomputed, not persisted.
 
 Persist:
 
-- Explicit map edges that the user or a node action created as part of map expansion.
+- Explicit map edges that the user or a node preview/action/search row created as part of making related records visible.
 - Map node membership.
 - Layout/presentation/panel/selection state.
 
@@ -206,6 +208,8 @@ Do not persist:
 - Edges that can be recomputed deterministically from shared backing stores.
 
 When both endpoints of a link entity are present in a graph map, the map may create a derived edge record for display. Derived edge records should be distinguishable from explicit map edges so capture skips them.
+
+Workflow display edges follow the same visibility rule: workflow definitions, runs, run steps, and events are loaded only by explicit workflow controls, and workflow-derived display edges are not the canonical workflow topology. The workflow store owns definition edges, run records, run-step records, and event records.
 
 ## Deleted Or Invalid Objects
 

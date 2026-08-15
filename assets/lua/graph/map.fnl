@@ -249,13 +249,6 @@
     (set self.remove-edge remove-edge)
     (set self.remove-nodes remove-nodes)
 
-    (set self.trigger
-        (fn [self node]
-            (local child-edges (node:get-edges))
-            (each [_ e (ipairs child-edges)]
-                (self:add-edge e))
-            child-edges))
-
     (set self.edge-count (fn [_self] (length edges)))
     (set self.node-count (fn [_self] (length (icollect [_ _ (pairs nodes)] true))))
     (set self.lookup (fn [_self key] (lookup self key)))

@@ -1,5 +1,6 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
+(local SearchView (require :search-view))
 (local Text (require :text))
 
 (fn resolve-target [node options]
@@ -18,68 +19,71 @@
           "Workflows preview requires create-workflow-from-graph")
   (target:create-workflow-from-graph {}))
 
-(fn show-existing-from-preview [target]
-  (assert (and target target.load-existing-workflows)
-          "Workflows preview requires load-existing-workflows")
-  (target:load-existing-workflows))
-
-(fn workflow-counts [target]
+(fn definition-items [target]
   (assert (and target target.workflow-store) "Workflows preview requires workflow store")
-  (local store target.workflow-store)
-  (assert store.list-definitions "Workflows preview requires workflow-store:list-definitions")
-  (assert store.list-runs "Workflows preview requires workflow-store:list-runs")
-  {:definitions (length (store:list-definitions))
-   :runs (length (store:list-runs {}))})
+  (assert (and target target.definition-items)
+          "Workflows preview requires definition-items")
+  (target:definition-items))
 
-(fn workflow-summary-text [target]
-  (local counts (workflow-counts target))
-  (.. "Definitions: " counts.definitions "\nRuns: " counts.runs))
+(fn definition-count-label [items]
+  (.. "Definitions: " (length items)))
 
 (fn new-workflow-click-handler [target]
   (fn [_button _event]
     (create-workflow-from-preview target)))
 
-(fn show-existing-click-handler [target]
-  (fn [_button _event]
-    (show-existing-from-preview target)))
+(fn select-definition [target item]
+  (assert (and target target.load-definition-from-graph)
+          "Workflows preview requires load-definition-from-graph")
+  (target:load-definition-from-graph (. item 1)))
 
 (fn build-content [target build-ctx]
   (local view {})
+  (local items (definition-items target))
   (local title ((Text {:text "Workflows"}) build-ctx))
-  (local summary-text ((Text {:text (workflow-summary-text target)}) build-ctx))
+  (local definition-count-text ((Text {:text (definition-count-label items)}) build-ctx))
   (local new-workflow-button
     ((Button {:text "New Workflow"
               :variant :ghost
               :padding [0.25 0.2]
               :on-click (new-workflow-click-handler target)})
      build-ctx))
-  (local show-existing-button
-    ((Button {:text "Show Existing Workflows"
-              :variant :ghost
-              :padding [0.25 0.2]
-              :on-click (show-existing-click-handler target)})
+  (local definition-search
+    ((SearchView {:items items
+                  :name "workflow-definition-search"
+                  :placeholder "Search workflow definitions"})
      build-ctx))
+  (set view.__definition-search-listener
+       (definition-search.submitted:connect
+         (fn [item]
+           (select-definition target item))))
   (local flex
     ((Flex {:axis 2
             :xalign :stretch
             :yspacing 0.25
             :children [(FlexChild (existing-widget title) 0)
-                       (FlexChild (existing-widget summary-text) 0)
-                       (FlexChild (existing-widget show-existing-button) 0)
-                       (FlexChild (existing-widget new-workflow-button) 0)]})
+                        (FlexChild (existing-widget definition-count-text) 0)
+                        (FlexChild (existing-widget definition-search) 1)
+                        (FlexChild (existing-widget new-workflow-button) 0)]})
      build-ctx))
   (set view.layout flex.layout)
   (set view.title title)
-  (set view.summary-text summary-text)
-  (set view.show-existing-button show-existing-button)
+  (set view.summary-text definition-count-text)
+  (set view.definition-count-text definition-count-text)
+  (set view.definition-search definition-search)
   (set view.new-workflow-button new-workflow-button)
+  (set view.flex flex)
   (set view.drop
        (fn [_self]
-         (title:drop)
-         (summary-text:drop)
-         (show-existing-button:drop)
-         (new-workflow-button:drop)
-         (flex:drop)))
+          (when view.__definition-search-listener
+            (definition-search.submitted:disconnect view.__definition-search-listener true)
+            (set view.__definition-search-listener nil))
+          (title:drop)
+          (definition-count-text:drop)
+          (definition-search:drop)
+          (new-workflow-button:drop)
+          (set flex.children [])
+          (flex:drop)))
   view)
 
 (fn WorkflowsNodePreview [node opts]

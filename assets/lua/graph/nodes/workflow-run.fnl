@@ -52,19 +52,44 @@
   (local status (if (and run run.status) run.status :pending))
   (.. "Workflow run " run-id " (" (tostring status) ")"))
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
+(fn load-required-node [graph key]
+  (assert graph "WorkflowRunNode.load-details-from-graph requires a graph map")
+  (assert graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
+  (local node (graph:load-by-key key))
+  (assert node (.. "WorkflowRunNode.load-details-from-graph failed to load graph node: " key))
   node)
 
-(fn add-edge [edges source target label]
-  (when (and source target)
-    (table.insert edges (GraphEdge {:source source :target target :label label}))))
+(fn add-visible-edge [graph source target label]
+  (assert graph "WorkflowRunNode.load-details-from-graph requires a graph map")
+  (assert graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge")
+  (graph:add-edge (GraphEdge {:source source :target target :label label})))
+
+(fn graph-map? [graph]
+  (and graph
+       graph.graph
+       (not (= graph.graph graph))
+       graph.nodes
+       graph.edges
+       graph.edge-map
+       graph.lookup
+       graph.load-by-key
+       graph.add-edge
+       graph.node-added
+       graph.edge-added
+       graph.node-removed
+       graph.edge-removed
+       graph.node-added.emit
+       graph.edge-added.emit
+       graph.graph.register-key-loader))
+
+(fn assert-detail-dependencies [self]
+  (assert self.workflow-store "WorkflowRunNode.load-details-from-graph requires workflow store")
+  (assert self.workflow-store.get-run "WorkflowRunNode.load-details-from-graph requires workflow store:get-run")
+  (assert self.workflow-store.list-run-steps "WorkflowRunNode.load-details-from-graph requires workflow store:list-run-steps")
+  (assert self.workflow-store.list-events "WorkflowRunNode.load-details-from-graph requires workflow store:list-events")
+  (assert (graph-map? self.graph) "WorkflowRunNode.load-details-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge"))
 
 (fn event-key [run-id event-id]
   (.. "workflow-run-event:" run-id ":" event-id))
@@ -118,35 +143,41 @@
   (set node.workflow-store store)
   (set node.workflow-runner runner)
   (set node.details-expanded? false)
+  (set node.load-details-from-graph
+       (fn [self]
+         (assert-detail-dependencies self)
+         (local current (self.workflow-store:get-run self.workflow-run-id))
+         (assert current (.. "WorkflowRunNode.load-details-from-graph missing workflow run: "
+                            (tostring self.workflow-run-id)))
+         (local run-steps (self.workflow-store:list-run-steps current.id))
+         (local events (self.workflow-store:list-events current.id))
+         (each [_ run-step (ipairs run-steps)]
+           (local step-id (assert run-step.step-id
+                                  "WorkflowRunNode.load-details-from-graph requires run step.step-id"))
+           (local step-node (load-required-node self.graph (run-step-key current.id step-id)))
+           (add-visible-edge self.graph self step-node "run step"))
+         (each [_ event (ipairs events)]
+           (local event-id (assert event.id
+                                  "WorkflowRunNode.load-details-from-graph requires event.id"))
+           (local event-node (load-required-node self.graph (event-key current.id event-id)))
+           (add-visible-edge self.graph self event-node "event"))
+         (set self.details-expanded? true)
+         {:run-step-count (length run-steps)
+          :event-count (length events)}))
   (set node.show-details (fn [self]
-                           (set self.details-expanded? true)
-                           true))
+                            (self:load-details-from-graph)))
   (set node.hide-details (fn [self]
-                           (set self.details-expanded? false)
-                           true))
+                            (set self.details-expanded? false)
+                            true))
   (set node.toggle-details (fn [self]
                              (if self.details-expanded?
                                  (self:hide-details)
-                                 (self:show-details))))
+                                  (self:load-details-from-graph))))
   (set node.toggle-details-action (fn [_button _event]
                                     (node:toggle-details)))
   (set node.cancel-run-action (fn [_button _event]
                                 (node.workflow-runner:cancel-run node.workflow-run-id "cancelled from graph")))
   (set node.actions run-actions)
-  (set node.get-edges
-       (fn [self]
-         (local current (self.workflow-store:get-run self.workflow-run-id))
-         (local edges [])
-          (when current
-            (set self.color (status-color current.status))
-            (set self.label (run-label current self.workflow-run-id))
-            (add-edge edges self (resolve-node self.graph (.. "workflow-definition:" current.definition-id)) "definition")
-           (when self.details-expanded?
-             (each [_ run-step (ipairs (self.workflow-store:list-run-steps current.id))]
-               (add-edge edges self (resolve-node self.graph (run-step-key current.id run-step.step-id)) "run step"))
-             (each [_ event (ipairs (self.workflow-store:list-events current.id))]
-               (add-edge edges self (resolve-node self.graph (event-key current.id event.id)) "event"))))
-         edges))
   node)
 
 (fn register-loader [graph opts]

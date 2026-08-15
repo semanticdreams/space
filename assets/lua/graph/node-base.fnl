@@ -21,7 +21,6 @@
     (set node.unmount (fn [self]
         (set self.graph nil)
         self))
-    (set node.get-edges (fn [_self] []))
     (set node.drop (fn [_self] nil))
     node)
 

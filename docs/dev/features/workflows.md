@@ -30,18 +30,26 @@ Every execution result must be an outcome table. Valid statuses are `:succeeded`
 
 The graph exposes workflow records through key loaders and node adapters. Graph maps provide user-facing interaction context, visible nodes, and display edges. Workflow definitions remain the canonical owner of workflow topology, so authoring workflow connections mutates the workflow store rather than persisting those derived edges as graph-map topology.
 
+Workflow discovery is explicit and hierarchical:
+
+```text
+Workflows root -> selected workflow definition -> selected workflow run -> run details
+```
+
+The `Workflows` root browse/search surface lists workflow definitions only. Runs are browsed from a selected workflow definition, and run steps/events are materialized from an explicit run detail control. This avoids root-level fan-out of all runs and keeps graph-map topology limited to records the user has chosen to reveal.
+
 ## Graph user flow
 
 1. Open Graph.
 2. From `start`, search/select `Workflows`.
-3. On the Workflows node, invoke `New Workflow`.
-4. Open the generated workflow definition and starter step.
-5. Use `Show Code` on the step to open the linked `code-entity:<id>` node.
+3. Browse/search workflow definitions from the `Workflows` root, or invoke `New Workflow`.
+4. Open a workflow definition to browse/search that definition's runs and to reveal its steps.
+5. Use `Show Code` on a step to open the linked `code-entity:<id>` node.
 6. Edit the Fennel code entity if desired.
 7. Use `New Step` on the definition for additional steps.
 8. Connect workflow step nodes; those connections create canonical workflow edges.
-9. Click `Start` / `Start Run` on the workflow definition.
-10. Open the run node, toggle `Show Details`, and inspect run-step and event previews.
+9. Click `Start` / `Start Run` on the workflow definition to create and reveal a run node in the active graph map.
+10. Open the run node, use `Show Details`, and inspect the explicitly materialized run-step and event previews.
 
 Workflow data remains in `WorkflowStore`: definitions, steps, edges, runs, run steps, and events are owned there. Fennel source bodies remain in `CodeEntityStore`. Graph nodes and actions adapt those stores into the current interaction context, and graph maps only provide visibility, selection, and interaction context; they do not own workflow data or code bodies.
 

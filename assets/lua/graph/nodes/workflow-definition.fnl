@@ -15,23 +15,6 @@
         (set found step))))
   found)
 
-(fn resolve-node [graph key]
-  (var node nil)
-  (when (and graph key graph.lookup)
-    (set node (graph:lookup key)))
-  (when (and (= node nil) graph key graph.create-node-by-key)
-    (set node (graph:create-node-by-key key)))
-  (when (and (= node nil) graph key graph.load-by-key)
-    (set node (graph:load-by-key key)))
-  node)
-
-(fn add-edge [edges source target label opts]
-  (when (and source target)
-    (local edge (GraphEdge {:source source :target target :label label}))
-    (when opts
-      (set edge._opts opts))
-    (table.insert edges edge)))
-
 (fn load-required-node [graph key]
   (assert graph "WorkflowDefinitionNode requires a graph map for node loading")
   (assert graph.load-by-key "WorkflowDefinitionNode requires graph:load-by-key")
@@ -47,6 +30,26 @@
 (fn step-key [definition-id step-id]
   (.. "workflow-step:" definition-id ":" step-id))
 
+(fn run-key [run-id]
+  (.. "workflow-run:" run-id))
+
+(fn run-label [run]
+  (local status (if (and run run.status) run.status :pending))
+  (.. "Workflow run " run.id " (" (tostring status) ")"))
+
+(fn load-owned-run-record [self run-or-id]
+  (assert self.workflow-store "WorkflowDefinitionNode.load-run-from-graph requires workflow store")
+  (assert self.workflow-store.get-run "WorkflowDefinitionNode.load-run-from-graph requires workflow store:get-run")
+  (local run-id (if (= (type run-or-id) :table)
+                    (assert run-or-id.id "WorkflowDefinitionNode.load-run-from-graph requires run id")
+                    (assert run-or-id "WorkflowDefinitionNode.load-run-from-graph requires run id")))
+  (local run (self.workflow-store:get-run run-id))
+  (assert run (.. "WorkflowDefinitionNode.load-run-from-graph missing workflow run: " (tostring run-id)))
+  (assert (= run.definition-id self.workflow-definition-id)
+          (.. "WorkflowDefinitionNode.load-run-from-graph run " (tostring run-id)
+              " does not belong to workflow definition " (tostring self.workflow-definition-id)))
+  run)
+
 (fn assert-create-step-graph-dependencies [self]
   (assert self.graph "WorkflowDefinitionNode.create-step-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.create-step-from-graph requires graph:load-by-key")
@@ -56,8 +59,57 @@
   (assert self.code-store.delete-entity
           "WorkflowDefinitionNode.create-step-from-graph rollback requires code store:delete-entity"))
 
+(fn loader-graph [graph]
+  (if (and graph graph.graph graph.graph.has-key-loader-for-key)
+      graph.graph
+      (if (and graph graph.has-key-loader-for-key)
+          graph
+          nil)))
+
+(fn assert-graph-loader [graph key action label]
+  (local provider (loader-graph graph))
+  (assert (and provider (provider:has-key-loader-for-key key))
+          (.. action " requires graph loader for " label)))
+
+(fn assert-create-step-loaders [self]
+  (assert-graph-loader self.graph "workflow-step:__preflight__:__step__"
+                       "WorkflowDefinitionNode.create-step-from-graph"
+                       "workflow-step")
+  (assert-graph-loader self.graph "code-entity:__preflight__"
+                       "WorkflowDefinitionNode.create-step-from-graph"
+                       "code-entity"))
+
+(fn assert-load-run-graph-dependencies [self]
+  (assert self.graph "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowDefinitionNode.load-run-from-graph requires graph:add-edge"))
+
+(fn assert-start-graph-dependencies [self]
+  (assert self.graph "WorkflowDefinitionNode.start-workflow-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowDefinitionNode.start-workflow-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge")
+  (local provider (loader-graph self.graph))
+  (assert (and provider
+               (provider:has-key-loader-for-key "workflow-run:__preflight__"))
+           "WorkflowDefinitionNode.start-workflow-from-graph requires graph loader for workflow-run"))
+
+(fn remove-graph-nodes-by-key! [graph keys]
+  (when (and graph graph.lookup graph.remove-nodes)
+    (local nodes [])
+    (each [_ key (ipairs keys)]
+      (local node (graph:lookup key))
+      (when node
+        (table.insert nodes node)))
+    (when (> (length nodes) 0)
+      (graph:remove-nodes nodes {:cause "workflow-step-create-rollback"}))))
+
 (fn rollback-created-step! [self result cause]
   (local rollback-errors [])
+  (when (and result result.step result.step.id)
+    (remove-graph-nodes-by-key! self.graph [(step-key self.workflow-definition-id result.step.id)
+                                            (and result.code-entity
+                                                 result.code-entity.id
+                                                 (.. "code-entity:" result.code-entity.id))]))
   (when (and result result.step result.step.id)
     (local (ok err) (pcall self.workflow-store.delete-step
                            self.workflow-store
@@ -100,18 +152,6 @@
     (set out.graph-node-keys (copy-array graph.selected_node_keys)))
   out)
 
-(fn edge-label [edge]
-  (if edge.kind edge.kind "workflow"))
-
-(fn step-key [definition-id step-id]
-  (.. "workflow-step:" definition-id ":" step-id))
-
-(fn cached-or-resolved-step-node [step-nodes graph definition-id step-id]
-  (local cached (. step-nodes step-id))
-  (if cached
-      cached
-      (resolve-node graph (step-key definition-id step-id))))
-
 (fn definition-label [definition definition-id]
   (if (and definition (> (string.len (if definition.name definition.name "")) 0))
       definition.name
@@ -136,29 +176,42 @@
   (set node.code-store options.code-store)
   (set node.start-workflow-from-graph
        (fn [self input context-opts]
-         (local run-input (if (= input nil) {} input))
-         (local run (self.workflow-runner:start-run self.workflow-definition-id
-                                                    run-input
-                                                    (graph-context self.graph context-opts)))
-         (local run-node (and self.graph self.graph.load-by-key
-                              (self.graph:load-by-key (.. "workflow-run:" run.id))))
-          (when (and run-node self.graph self.graph.add-edge)
-            (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
+          (assert-start-graph-dependencies self)
+          (local run-input (if (= input nil) {} input))
+          (local run (self.workflow-runner:start-run self.workflow-definition-id
+                                                     run-input
+                                                     (graph-context self.graph context-opts)))
+          (local run-node (load-required-node self.graph (run-key run.id)))
+          (add-visible-edge self.graph self run-node "run")
           run))
   (set node.create-step-from-graph
         (fn [self opts]
-          (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
-          (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
-          (assert-create-step-graph-dependencies self)
-          (local result (WorkflowTemplates.create-template-step self.workflow-store
+           (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
+           (assert self.code-store "WorkflowDefinitionNode.create-step-from-graph requires code store")
+           (assert-create-step-graph-dependencies self)
+           (assert-create-step-loaders self)
+           (local result (WorkflowTemplates.create-template-step self.workflow-store
                                                                 self.code-store
                                                                 self.workflow-definition-id
                                                                 (or opts {})))
           (local (ok graph-err)
             (pcall load-created-step-into-graph! self result))
           (if ok
-              result
-              (rollback-created-step! self result graph-err))))
+               result
+               (rollback-created-step! self result graph-err))))
+  (set node.run-items
+       (fn [self]
+         (assert self.workflow-store "WorkflowDefinitionNode.run-items requires workflow store")
+         (icollect [_ run (ipairs (self.workflow-store:list-runs {:definition-id self.workflow-definition-id}))]
+           [run (run-label run)])))
+  (set node.load-run-from-graph
+        (fn [self run-or-id]
+          (assert-load-run-graph-dependencies self)
+          (local run (load-owned-run-record self run-or-id))
+          (local run-id run.id)
+          (local run-node (load-required-node self.graph (run-key run-id)))
+          (add-visible-edge self.graph self run-node "run")
+          run-node))
   (set node.actions [{:name "Start Run"
                         :icon "play_arrow"
                         :fn (fn [_button _event]
@@ -167,26 +220,6 @@
                       :icon "add"
                       :fn (fn [_button _event]
                             (node:create-step-from-graph {}))}])
-  (set node.get-edges
-       (fn [self]
-         (local current (self.workflow-store:get-definition self.workflow-definition-id))
-         (local edges [])
-         (when current
-           (local step-nodes {})
-           (each [_ step (ipairs current.steps)]
-             (local step-node (resolve-node self.graph (step-key current.id step.id)))
-             (when step-node
-               (set (. step-nodes step.id) step-node)
-               (add-edge edges self step-node "step"))
-             (local code-node (resolve-node self.graph (.. "code-entity:" step.code-entity-id)))
-             (add-edge edges (if step-node step-node self) code-node "code"))
-           (each [_ edge (ipairs current.edges)]
-             (local source (cached-or-resolved-step-node step-nodes self.graph current.id edge.source-step-id))
-             (local target (cached-or-resolved-step-node step-nodes self.graph current.id edge.target-step-id))
-              (add-edge edges source target (edge-label edge) {:from-workflow-edge edge.id}))
-           (each [_ run (ipairs (self.workflow-store:list-runs {:definition-id current.id}))]
-             (add-edge edges self (resolve-node self.graph (.. "workflow-run:" run.id)) "run")))
-         edges))
   node)
 
 (fn register-loader [graph opts]
