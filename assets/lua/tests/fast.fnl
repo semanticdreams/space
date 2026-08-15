@@ -150,6 +150,7 @@
     :tests.test-agent-panel
     :tests.test-agent-units
     :tests.test-agent-workflow-events
+    :tests.test-agent-workflow-template
     :tests.test-disclosure-row
     :tests.test-status-badge
     :tests.test-cgltf
