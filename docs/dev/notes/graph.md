@@ -10,7 +10,9 @@ tags:
 
 **The graph is an exposure/adaptor layer — it does not own the objects it exposes.** Domain data lives wherever it naturally belongs: entity data in entity stores (`entities/string/`, `entities/code/`, etc.), activity-owned world surface state in activity sessions, LLM conversations in the LLM store (`llm/`), filesystem nodes on the real filesystem, kernel instances in the kernel system. The graph creates lightweight adapter nodes that project these domain objects into a uniform navigable topology.
 
-**Graph core persists only topology** — which node keys exist and which edge connections exist (`graph:capture-state` / `graph:restore-state`). Owning systems persist the actual object data. There is no "full graph state backup" that captures domain data; `capture-state` stores node keys and edge source/target keys only.
+**Graph core persists only user-materialized topology** — which visible node keys exist and which visible edge connections exist (`graph:capture-state` / `graph:restore-state`). Owning systems persist the actual object data. There is no "full graph state backup" that captures domain data; `capture-state` stores node keys and edge source/target keys only.
+
+Related objects become graph-visible only through explicit preview, view, search-row, or action controls. A node may offer actions such as `Show Code`, `Show Details`, `Start`, or a searchable picker that loads a selected key into the current graph map and adds any display edge needed for that user-visible relationship. Graph code should not rely on hidden relationship expansion hooks to bulk-materialize neighboring records.
 
 ### Canonical terminology
 
@@ -28,6 +30,7 @@ tags:
 
 - `graph/core.fnl`: nodes are lightweight records (key, label, color, view ref, graph ref). `capture-state` stores node keys and edge source/target keys only — no domain data.
 - `graph/key-loaders.fnl`: each loader adapts its owning store/system into a graph node on demand via `load-by-key`. Entity loaders adapt entity stores; LLM loaders adapt the LLM store; world activity and surface loaders adapt `world-manager` and `WorldData`.
+- `graph/map.fnl`: graph maps hold the visible topology a user has materialized in that interaction context. Preview/search/action code loads keys through the active `GraphMap` and inserts explicit display edges when the user asks to reveal related records.
 - `graph/world-data.fnl`: activity-owned scene/HUD/canvas state is resolved from `world.state.activity.sessions.<activity-id>` through `WorldData` helpers. Activity-owned graph keys include both `world-id` and `activity-id` (for example `activity-scene:<world-id>:<activity-id>`, `activity-background:<world-id>:<activity-id>`, and `activity-terrain:<world-id>:<activity-id>:<terrain-id>`). Updates mutate the owning activity surface state, then sync to the active surface and persist world. Graph nodes are projections, not the source of truth.
 - Activity hierarchy keys expose `world:<world-id>` → `world-activities:<world-id>` → `world-activity:<world-id>:<activity-id>` → `activity-surfaces:<world-id>:<activity-id>` before reaching concrete surface nodes such as scene, HUD, or canvas.
 - `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
@@ -55,7 +58,7 @@ tags:
 - Graph nodes **do not track view instances**. Nodes expose a plain `:view` constructor (e.g. `:view HackerNewsStoryView`) and emit state via signals (`rows-changed`, `items-changed`, `targets-changed`, etc.). Views subscribe to those signals (or call node methods like `fetch`, `open-entry`, `add-target`) and stay UI-only so multiple views can hang off the same node.
 
 ## What stays in core
-- Graph model: adding/removing/replacing nodes/edges, triggering nodes, and lifecycle (`drop`).
+- Graph model: adding/removing/replacing visible nodes/edges and lifecycle (`drop`).
 - No visual state: layout, labels, selection, movables, points, or persistence belong in `graph/view`.
 
 ## See also
