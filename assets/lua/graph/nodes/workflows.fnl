@@ -34,6 +34,23 @@
   (assert graph.add-edge "WorkflowsNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn list-required-definitions [store]
+  (assert store "WorkflowsNode.load-existing-workflows requires workflow store")
+  (assert store.list-definitions "WorkflowsNode.load-existing-workflows requires workflow-store:list-definitions")
+  (store:list-definitions))
+
+(fn list-required-runs [store]
+  (assert store "WorkflowsNode.load-existing-workflows requires workflow store")
+  (assert store.list-runs "WorkflowsNode.load-existing-workflows requires workflow-store:list-runs")
+  (store:list-runs {}))
+
+(fn load-workflow-record-node [graph key]
+  (assert graph "WorkflowsNode.load-existing-workflows requires a graph map")
+  (assert graph.load-by-key "WorkflowsNode.load-existing-workflows requires graph:load-by-key")
+  (local node (graph:load-by-key key))
+  (assert node (.. "WorkflowsNode.load-existing-workflows failed to load graph node: " key))
+  node)
+
 (fn WorkflowsNode [opts]
   (local options (or opts {}))
   (local store (assert options.store "WorkflowsNode requires store"))
@@ -60,12 +77,36 @@
          (local code-node (load-required-node self.graph code-key))
          (add-visible-edge self.graph self definition-node "definition")
          (add-visible-edge self.graph definition-node step-node "step")
-         (add-visible-edge self.graph step-node code-node "code")
-         result))
+          (add-visible-edge self.graph step-node code-node "code")
+          result))
+  (set node.load-existing-workflows
+       (fn [self]
+         (local definitions (list-required-definitions self.workflow-store))
+         (local runs (list-required-runs self.workflow-store))
+         (local loaded-definitions [])
+         (local loaded-runs [])
+         (each [_ definition (ipairs definitions)]
+           (local definition-node
+             (load-workflow-record-node self.graph (.. "workflow-definition:" definition.id)))
+           (add-visible-edge self.graph self definition-node "definition")
+           (table.insert loaded-definitions definition-node))
+         (each [_ run (ipairs runs)]
+           (local run-node
+             (load-workflow-record-node self.graph (.. "workflow-run:" run.id)))
+           (add-visible-edge self.graph self run-node "run")
+           (table.insert loaded-runs run-node))
+         {:definition-count (length loaded-definitions)
+          :run-count (length loaded-runs)
+          :definitions loaded-definitions
+          :runs loaded-runs}))
   (set node.actions [{:name "New Workflow"
-                      :icon "add"
-                      :fn (fn [_button _event]
-                            (node:create-workflow-from-graph {}))}])
+                       :icon "add"
+                       :fn (fn [_button _event]
+                             (node:create-workflow-from-graph {}))}
+                      {:name "Show Existing Workflows"
+                       :icon "account_tree"
+                       :fn (fn [_button _event]
+                             (node:load-existing-workflows))}])
   (set node.get-edges
        (fn [self]
          (local edges [])
