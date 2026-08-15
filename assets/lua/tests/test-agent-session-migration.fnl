@@ -146,12 +146,52 @@
   (assert (string.find (tostring err) "failed to parse legacy agent session" 1 true) "error should identify malformed legacy session")
   (assert (fs.exists (fs.join-path dir "bad.json")) "malformed file should remain for operator repair"))
 
+(fn rerun-with-changed-content-or-provider-fails-without-archive []
+  (local h (make-harness))
+  (write-session! h.dir (sample-session {}))
+  (local first (migrate h))
+  (write-session! h.dir
+                  (sample-session {:items [{:id "item-1" :type "message" :role "user" :content "corrected hello" :created-at 10}
+                                           {:id "item-2" :type "message" :role "assistant" :content "hi" :created-at 11}]
+                                   :data {:opencode-session-id "opc-2"
+                                          :runtime-context {:agent-session-id "legacy-1"
+                                                            :artifact-dir "/old/artifacts/legacy-1"
+                                                            :report-path "/old/artifacts/legacy-1/report.md"
+                                                            :opencode-session-id "opc-2"
+                                                            :opencode-server-url "http://127.0.0.1:4444"
+                                                            :last-live-connection-at 456
+                                                            :validation-mode "live"}}
+                                   :updated-at 13}))
+  (local restored-path (session-path h.dir "legacy-1"))
+  (local (ok err) (pcall migrate h))
+  (assert (not ok) "rerun with changed legacy content/provider data should fail")
+  (assert (string.find (tostring err) "existing workflow run does not match legacy agent session" 1 true)
+          "error should identify incompatible existing migration")
+  (assert (fs.exists restored-path) "changed restored legacy file should not be archived")
+  (assert (= (length (h.workflow-store:list-runs {})) 1) "failed rerun should not duplicate runs")
+  (local projected (projected-for h first "legacy-1"))
+  (assert (= (. projected.items 1 :content) "hello") "failed rerun should not mutate existing transcript")
+  (assert (= projected.data.opencode-session-id "opc-1") "failed rerun should not mutate provider continuity data"))
+
+(fn malformed-item-fails-without-archive-or-run []
+  (local h (make-harness))
+  (write-session! h.dir (sample-session {:items [{:id "item-1" :role "user" :content "missing type"}]}))
+  (local old-path (session-path h.dir "legacy-1"))
+  (local (ok err) (pcall migrate h))
+  (assert (not ok) "legacy item without type should fail")
+  (assert (string.find (tostring err) "requires string :type" 1 true) "error should identify malformed item type")
+  (assert (fs.exists old-path) "malformed item file should remain for operator repair")
+  (assert (not (fs.exists (fs.join-path h.dir "agent-sessions-archive"))) "archive dir should not be created for malformed item")
+  (assert (= (length (h.workflow-store:list-runs {})) 0) "malformed item should not create a workflow run"))
+
 (table.insert tests {:name "migrates-items-to-workflow-events" :fn migrates-items-to-workflow-events})
 (table.insert tests {:name "preserves-provider-continuity-fields" :fn preserves-provider-continuity-fields})
 (table.insert tests {:name "archives-old-files-after-successful-migration" :fn archives-old-files-after-successful-migration})
 (table.insert tests {:name "does-not-archive-when-workflow-write-fails" :fn does-not-archive-when-workflow-write-fails})
 (table.insert tests {:name "rerun-does-not-create-duplicate-for-legacy-id" :fn rerun-does-not-create-duplicate-for-legacy-id})
 (table.insert tests {:name "malformed-json-fails-loudly" :fn malformed-json-fails-loudly})
+(table.insert tests {:name "rerun-with-changed-content-or-provider-fails-without-archive" :fn rerun-with-changed-content-or-provider-fails-without-archive})
+(table.insert tests {:name "malformed-item-fails-without-archive-or-run" :fn malformed-item-fails-without-archive-or-run})
 
 (fn main []
   (local runner (require :tests/runner))

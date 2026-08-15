@@ -18,6 +18,67 @@
           (tset out k (deep-copy v)))
         out)))
 
+(fn deep-equal? [a b]
+  (if (not (= (type a) (type b)))
+      false
+      (not (= (type a) "table"))
+      (= a b)
+      (do
+        (var matches true)
+        (each [k v (pairs a)]
+          (when (not (deep-equal? v (. b k)))
+            (set matches false)))
+        (each [k v (pairs b)]
+          (when (not (deep-equal? (. a k) v))
+            (set matches false)))
+        matches)))
+
+(fn known-item-type? [item-type]
+  (if (= item-type "message")
+      true
+      (= item-type "tool-call")
+      true
+      (= item-type "tool-result")
+      true
+      (= item-type "reasoning")
+      true
+      (= item-type "event")
+      true
+      (= item-type "error")
+      true
+      false))
+
+(fn assert-item-field [item field-name idx file]
+  (assert (= (type (. item field-name)) "string")
+          (.. "legacy agent session item requires string :" field-name " at index " idx ": " file)))
+
+(fn validate-legacy-item [item idx file]
+  (assert (= (type item) "table") (.. "legacy agent session item must be an object at index " idx ": " file))
+  (assert-item-field item :id idx file)
+  (assert-item-field item :type idx file)
+  (assert (known-item-type? item.type)
+          (.. "legacy agent session item has unknown :type at index " idx ": " item.type ": " file))
+  (if (= item.type "message")
+      (do
+        (assert-item-field item :role idx file)
+        (assert-item-field item :content idx file))
+      (= item.type "tool-call")
+      (do
+        (assert-item-field item :call-id idx file)
+        (assert-item-field item :name idx file))
+      (= item.type "tool-result")
+      (do
+        (assert-item-field item :call-id idx file)
+        (assert-item-field item :name idx file)
+        (assert-item-field item :output idx file))
+      (= item.type "reasoning")
+      (assert-item-field item :content idx file)
+      (= item.type "event")
+      (assert-item-field item :event idx file)
+      (= item.type "error")
+      (assert-item-field item :error idx file))
+  item)
+
 (fn legacy-sessions-dir [base-dir]
   (fs.join-path base-dir "agent-sessions"))
 
@@ -59,8 +120,7 @@
   (assert session.created-at (.. "legacy agent session requires :created-at: " file.path))
   (assert session.updated-at (.. "legacy agent session requires :updated-at: " file.path))
   (each [idx item (ipairs (array-or-empty session.items))]
-    (assert (= (type item) "table") (.. "legacy agent session item must be an object at index " idx ": " file.path))
-    (assert (= (type item.id) "string") (.. "legacy agent session item requires string :id at index " idx ": " file.path)))
+    (validate-legacy-item item idx file.path))
   session)
 
 (fn find-existing-run [workflow-store legacy-id]
@@ -74,16 +134,29 @@
 
 (fn projected-matches-legacy? [projected legacy]
   (var matches true)
-  (when (not (= projected.agent-id legacy.agent-id))
-    (set matches false))
   (assert (= (type projected.items) "table") "projected migration session requires :items")
   (assert (= (type legacy.items) "table") "legacy migration session requires :items")
+  (when (not (= projected.legacy-agent-session-id legacy.id))
+    (set matches false))
+  (when (not (= projected.kind "agent-session"))
+    (set matches false))
+  (when (not projected.agent-session?)
+    (set matches false))
+  (when (not (= projected.agent-id legacy.agent-id))
+    (set matches false))
+  (when (not (= projected.status legacy.status))
+    (set matches false))
+  (when (not (= projected.created-at legacy.created-at))
+    (set matches false))
+  (when (not (= projected.updated-at legacy.updated-at))
+    (set matches false))
+  (when (not (deep-equal? projected.data legacy.data))
+    (set matches false))
   (when (not (= (length projected.items) (length legacy.items)))
     (set matches false))
   (each [idx item (ipairs legacy.items)]
     (local projected-item (. projected.items idx))
-    (when (or (not projected-item)
-              (not (= projected-item.id item.id)))
+    (when (not (deep-equal? projected-item item))
       (set matches false)))
   matches)
 
