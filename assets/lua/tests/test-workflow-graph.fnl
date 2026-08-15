@@ -126,6 +126,39 @@
   (assert (string.find (tostring result) "requires a build context")
           "missing build context failure should mention build context"))
 
+(fn assert-contains [text needle message]
+  (assert (string.find (tostring text) needle 1 true) message))
+
+(fn codepoints->text [codepoints]
+  (local source (if codepoints codepoints []))
+  (accumulate [text "" _ codepoint (ipairs source)]
+    (.. text (string.char codepoint))))
+
+(fn text-widget-string [widget]
+  (codepoints->text (widget:get-codepoints)))
+
+(fn assert-preview-drops-owned-children [widget message]
+  (local dropped {:title 0 :summary 0 :flex 0})
+  (local original-title-drop widget.title.drop)
+  (local original-summary-drop widget.summary-text.drop)
+  (local original-flex-drop widget.flex.drop)
+  (set widget.title.drop
+       (fn [self]
+         (set dropped.title (+ dropped.title 1))
+         (original-title-drop self)))
+  (set widget.summary-text.drop
+       (fn [self]
+         (set dropped.summary (+ dropped.summary 1))
+         (original-summary-drop self)))
+  (set widget.flex.drop
+       (fn [self]
+         (set dropped.flex (+ dropped.flex 1))
+         (original-flex-drop self)))
+  (widget:drop)
+  (assert (> dropped.title 0) (.. message " should drop title"))
+  (assert (> dropped.summary 0) (.. message " should drop summary"))
+  (assert (> dropped.flex 0) (.. message " should drop flex")))
+
 (fn target-node-by-key [targets key]
   (var found nil)
   (each [_ target (ipairs (assert targets "target-node-by-key requires targets"))]
@@ -534,6 +567,80 @@
     (assert color (.. "run step status color should exist for " (tostring status)))
     (assert (= (type color) :userdata) (.. "run step status color should be vec4 for " (tostring status)))))
 
+(fn workflow-run-step-and-event-summaries-include-details []
+  (local PreviewSummary (require :workflows/preview-summary))
+  (local step-summary
+    (PreviewSummary.run-step-summary {:status :failed
+                                      :attempt 2
+                                      :output {:answer 42}
+                                      :wait {:kind :human-input}
+                                      :error {:message "boom"}}))
+  (assert-contains step-summary "Status:" "run-step summary should include status label")
+  (assert-contains step-summary "Attempt:" "run-step summary should include attempt label")
+  (assert-contains step-summary "Output:" "run-step summary should include output label")
+  (assert-contains step-summary "Wait:" "run-step summary should include wait label")
+  (assert-contains step-summary "Error:" "run-step summary should include error label")
+  (assert-contains step-summary "42" "run-step summary should include serialized output")
+  (local event-summary
+    (PreviewSummary.run-event-summary {:id "event-a"
+                                      :run-id "run-a"
+                                      :kind :step-waiting
+                                      :step-id "step-a"
+                                      :created-at 123
+                                      :wait-kind :human-input
+                                      :payload {:question "continue?"}}))
+  (assert-contains event-summary "Kind:" "run-event summary should include kind label")
+  (assert-contains event-summary "Step:" "run-event summary should include step label")
+  (assert-contains event-summary "Payload:" "run-event summary should include payload label")
+  (assert-contains event-summary "step-a" "run-event summary should include step id")
+  (assert-contains event-summary "human-input" "run-event summary should include non-metadata event fields"))
+
+(fn workflow-run-step-preview-builds-summary-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local graph runtime.graph)
+  (local node (graph:load-by-key (.. "workflow-run-step:" seeded.run.id ":step-a")))
+  (assert node.preview "workflow run-step node should expose a preview")
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run-step))
+  (assert loaded? "workflow run-step preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "workflow run-step preview should not fall back to opts.ctx or graph.ctx")
+  (local builder (node.preview node {:node node}))
+  (assert-missing-build-context builder "workflow run-step preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget.summary-text "workflow run-step preview should expose summary text")
+  (local summary (text-widget-string widget.summary-text))
+  (assert-contains summary "Status:" "workflow run-step preview summary should include status")
+  (assert-contains summary "succeeded" "workflow run-step preview summary should include useful status text")
+  (assert-contains summary "Output:" "workflow run-step preview summary should include output")
+  (assert-preview-drops-owned-children widget "workflow run-step preview"))
+
+(fn workflow-run-step-preview-builds-summary []
+  (with-runtime workflow-run-step-preview-builds-summary-case))
+
+(fn workflow-run-event-preview-builds-summary-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local graph runtime.graph)
+  (local node (graph:load-by-key (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id)))
+  (assert node.preview "workflow run-event node should expose a preview")
+  (local (loaded? Preview) (pcall require :graph/view/previews/workflow-run-event))
+  (assert loaded? "workflow run-event preview module should load")
+  (assert-missing-build-context-with-fallbacks
+    Preview node
+    "workflow run-event preview should not fall back to opts.ctx or graph.ctx")
+  (local builder (node.preview node {:node node}))
+  (assert-missing-build-context builder "workflow run-event preview should assert on missing build context")
+  (local widget (builder (make-preview-ctx)))
+  (assert widget.summary-text "workflow run-event preview should expose summary text")
+  (local summary (text-widget-string widget.summary-text))
+  (assert-contains summary "Kind:" "workflow run-event preview summary should include kind")
+  (assert-contains summary "step-started" "workflow run-event preview summary should include useful kind text")
+  (assert-contains summary "Step:" "workflow run-event preview summary should include step id")
+  (assert-preview-drops-owned-children widget "workflow run-event preview"))
+
+(fn workflow-run-event-preview-builds-summary []
+  (with-runtime workflow-run-event-preview-builds-summary-case))
+
 (fn seed-definition-for-authoring [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
   (local code-b (runtime.code-store:create-entity {:id "code-b" :name "B" :source "(+ 2 2)"}))
@@ -808,9 +915,15 @@
 (table.insert tests {:name "workflow run node omits cancel action for succeeded run"
                       :fn workflow-run-node-omits-cancel-action-for-succeeded-run})
 (table.insert tests {:name "workflow run step status colors cover all run step statuses"
-                      :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
+                       :fn workflow-run-step-status-colors-cover-all-run-step-statuses})
+(table.insert tests {:name "workflow-run-step-and-event-summaries-include-details"
+                       :fn workflow-run-step-and-event-summaries-include-details})
+(table.insert tests {:name "workflow-run-step-preview-builds-summary"
+                       :fn workflow-run-step-preview-builds-summary})
+(table.insert tests {:name "workflow-run-event-preview-builds-summary"
+                       :fn workflow-run-event-preview-builds-summary})
 (table.insert tests {:name "graph step connection creates canonical workflow control edge"
-                     :fn graph-step-connection-creates-canonical-workflow-control-edge})
+                      :fn graph-step-connection-creates-canonical-workflow-control-edge})
 (table.insert tests {:name "graph map capture skips workflow derived edges"
                      :fn graph-map-capture-skips-workflow-derived-edges})
 (table.insert tests {:name "graph remove edge deletes canonical workflow edge"
