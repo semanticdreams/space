@@ -214,6 +214,47 @@
 (fn isolates-nested-status-and-update-payloads []
   (with-temp-store assert-status-and-update-payloads-are-isolated))
 
+(fn assert-returned-events-are-isolated-from-history [store run]
+  (local created-event (WorkflowEvents.append-session-created store run.id {:agent-id "agent-beta"
+                                                                            :data {:nested {:value "created-before"}}
+                                                                            :created-at "2026-08-15T00:00:00Z"}))
+  (local status-event (WorkflowEvents.append-status store run.id :running {:details {:value "status-before"}
+                                                                           :created-at "2026-08-15T00:00:01Z"}))
+  (local append-event (WorkflowEvents.append-item store run.id {:id "returned-append"
+                                                                :type :message
+                                                                :content {:value "append-before"}}))
+  (local upsert-event (WorkflowEvents.append-upsert store run.id {:id "returned-upsert"
+                                                                  :type :message
+                                                                  :content {:value "upsert-before"}}))
+  (local update-event (WorkflowEvents.append-update store run.id "returned-append" {:content {:value "update-before"}
+                                                                                    :updated-at "2026-08-15T00:00:02Z"}))
+  (set created-event.data.data.nested.value "created-after")
+  (set status-event.data.details.value "status-after")
+  (set append-event.item.content.value "append-after")
+  (set upsert-event.item.content.value "upsert-after")
+  (set update-event.updates.content.value "update-after")
+  (local stored-run (store:get-run run.id))
+  (local stored-created-event (. stored-run.events 1))
+  (local stored-status-event (. stored-run.events 2))
+  (local stored-append-event (. stored-run.events 3))
+  (local stored-upsert-event (. stored-run.events 4))
+  (local stored-update-event (. stored-run.events 5))
+  (assert (= stored-created-event.data.data.nested.value "created-before") "returned session-created event must not mutate stored run history")
+  (assert (= stored-status-event.data.details.value "status-before") "returned status event must not mutate stored run history")
+  (assert (= stored-append-event.item.content.value "append-before") "returned append event must not mutate stored run history")
+  (assert (= stored-upsert-event.item.content.value "upsert-before") "returned upsert event must not mutate stored run history")
+  (assert (= stored-update-event.updates.content.value "update-before") "returned update event must not mutate stored run history")
+  (local session (get-projected-session store run.id))
+  (local appended-item (. session.items 1))
+  (local upserted-item (. session.items 2))
+  (assert (= session.data.nested.value "created-before") "returned session-created event must not mutate stored history")
+  (assert (= session.status :running) "returned status event mutation should not affect status projection")
+  (assert (= appended-item.content.value "update-before") "returned append/update events must not mutate stored item history")
+  (assert (= upserted-item.content.value "upsert-before") "returned upsert event must not mutate stored item history"))
+
+(fn isolates-returned-events-from-stored-history []
+  (with-temp-store assert-returned-events-are-isolated-from-history))
+
 (table.insert tests {:name "projects-session-created-event-to-sidebar-session-shape"
                      :fn projects-session-created-event-to-sidebar-session-shape})
 (table.insert tests {:name "projects-appended-message-items-in-order"
@@ -235,7 +276,9 @@
 (table.insert tests {:name "isolates-nested-item-payloads-and-projections"
                      :fn isolates-nested-item-payloads-and-projections})
 (table.insert tests {:name "isolates-nested-status-and-update-payloads"
-                     :fn isolates-nested-status-and-update-payloads})
+                      :fn isolates-nested-status-and-update-payloads})
+(table.insert tests {:name "isolates-returned-events-from-stored-history"
+                     :fn isolates-returned-events-from-stored-history})
 
 (local main
   (fn []

@@ -161,23 +161,26 @@
     (when run
       (project-session run))))
 
+(fn append-isolated-event [store run-id event]
+  (deep-copy (store:append-event run-id event)))
+
 (fn append-session-created [store run-id data]
   (assert-store store)
   (assert-run-id run-id)
   (local payload (table-or-empty data))
-  (store:append-event run-id {:kind KIND_SESSION_CREATED
-                              :data (deep-copy payload)
-                              :created-at payload.created-at}))
+  (append-isolated-event store run-id {:kind KIND_SESSION_CREATED
+                                       :data (deep-copy payload)
+                                       :created-at payload.created-at}))
 
 (fn append-status [store run-id status data]
   (assert-store store)
   (assert-run-id run-id)
   (assert status "append-status requires status")
   (local payload (table-or-empty data))
-  (store:append-event run-id {:kind KIND_STATUS_CHANGED
-                              :status status
-                              :data (deep-copy payload)
-                              :created-at payload.created-at}))
+  (append-isolated-event store run-id {:kind KIND_STATUS_CHANGED
+                                       :status status
+                                       :data (deep-copy payload)
+                                       :created-at payload.created-at}))
 
 (fn append-item [store run-id item]
   (assert-store store)
@@ -186,17 +189,17 @@
   (local session (current-session-if-readable store run-id))
   (when (and session (item-index session.items item.id))
     (error (.. "duplicate agent item id: " item.id)))
-  (store:append-event run-id {:kind KIND_ITEM_APPENDED
-                              :item (deep-copy item)
-                              :created-at item.created-at}))
+  (append-isolated-event store run-id {:kind KIND_ITEM_APPENDED
+                                       :item (deep-copy item)
+                                       :created-at item.created-at}))
 
 (fn append-upsert [store run-id item]
   (assert-store store)
   (assert-run-id run-id)
   (assert-item item)
-  (store:append-event run-id {:kind KIND_ITEM_UPSERTED
-                              :item (deep-copy item)
-                              :created-at (if item.updated-at item.updated-at item.created-at)}))
+  (append-isolated-event store run-id {:kind KIND_ITEM_UPSERTED
+                                       :item (deep-copy item)
+                                       :created-at (if item.updated-at item.updated-at item.created-at)}))
 
 (fn append-update [store run-id item-id updates]
   (assert-store store)
@@ -206,10 +209,10 @@
   (local session (current-session-if-readable store run-id))
   (when (and session (not (item-index session.items item-id)))
     (error (.. "missing agent item id for update: " item-id)))
-  (store:append-event run-id {:kind KIND_ITEM_UPDATED
-                              :item-id item-id
-                              :updates (deep-copy updates)
-                              :created-at updates.updated-at}))
+  (append-isolated-event store run-id {:kind KIND_ITEM_UPDATED
+                                       :item-id item-id
+                                       :updates (deep-copy updates)
+                                       :created-at updates.updated-at}))
 
 (fn session-summary [session]
   {:id session.id
