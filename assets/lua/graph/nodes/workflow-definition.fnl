@@ -64,6 +64,11 @@
   (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.load-run-from-graph requires graph:add-edge"))
 
+(fn assert-start-graph-dependencies [self]
+  (assert self.graph "WorkflowDefinitionNode.start-workflow-from-graph requires a graph map")
+  (assert self.graph.load-by-key "WorkflowDefinitionNode.start-workflow-from-graph requires graph:load-by-key")
+  (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge"))
+
 (fn rollback-created-step! [self result cause]
   (local rollback-errors [])
   (when (and result result.step result.step.id)
@@ -132,14 +137,13 @@
   (set node.code-store options.code-store)
   (set node.start-workflow-from-graph
        (fn [self input context-opts]
-         (local run-input (if (= input nil) {} input))
-         (local run (self.workflow-runner:start-run self.workflow-definition-id
-                                                    run-input
-                                                    (graph-context self.graph context-opts)))
-         (local run-node (and self.graph self.graph.load-by-key
-                              (self.graph:load-by-key (.. "workflow-run:" run.id))))
-          (when (and run-node self.graph self.graph.add-edge)
-            (self.graph:add-edge (GraphEdge {:source self :target run-node :label "run"})))
+          (assert-start-graph-dependencies self)
+          (local run-input (if (= input nil) {} input))
+          (local run (self.workflow-runner:start-run self.workflow-definition-id
+                                                     run-input
+                                                     (graph-context self.graph context-opts)))
+          (local run-node (load-required-node self.graph (run-key run.id)))
+          (add-visible-edge self.graph self run-node "run")
           run))
   (set node.create-step-from-graph
         (fn [self opts]

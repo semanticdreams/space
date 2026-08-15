@@ -127,7 +127,6 @@
   (assert (string.find (tostring text) needle 1 true) message))
 
 (local graph-discovery-files ["assets/lua/graph/node-base.fnl" "assets/lua/graph/core.fnl" "assets/lua/graph/map.fnl" "assets/lua/graph/nodes/workflows.fnl" "assets/lua/graph/nodes/workflow-definition.fnl" "assets/lua/graph/nodes/workflow-step.fnl" "assets/lua/graph/nodes/workflow-run.fnl" "assets/lua/graph/nodes/workflow-run-step.fnl" "assets/lua/graph/nodes/workflow-run-event.fnl"])
-
 (fn graph-discovery-has-no-relationship-hook-leftovers []
   (local relationship-hook-marker (.. "get" "-edges"))
   (local graph-api-marker (.. "self." "tri" "gger"))
@@ -985,32 +984,32 @@
   (with-runtime graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes-case))
 
 (fn start-definition-node-creates-visible-run-node-and-definition-run-edge-case [runtime]
-  (local definition (seed-definition-for-authoring runtime))
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-map"}))
-  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
-  (local run (node:start-workflow-from-graph {:prompt "go"} {}))
-  (assert run "starting workflow from graph should return run")
-  (assert (runtime.store:get-run run.id) "run should be durable immediately")
-  (assert (map:lookup (.. "workflow-run:" run.id)) "run node should be visible in active graph map")
-  (assert-edge-target map.edges (.. "workflow-run:" run.id) "definition-to-run edge should be inserted in graph map")
-  (map:drop))
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (local run (node:start-workflow-from-graph {:prompt "go"} {}))
+  (assert run "starting workflow from graph should return run") (assert (runtime.store:get-run run.id) "run should be durable immediately") (assert (map:lookup (.. "workflow-run:" run.id)) "run node should be visible in active graph map")
+  (assert-edge-target map.edges (.. "workflow-run:" run.id) "definition-to-run edge should be inserted in graph map") (map:drop))
 
 (fn start-definition-node-creates-visible-run-node-and-definition-run-edge []
   (with-runtime start-definition-node-creates-visible-run-node-and-definition-run-edge-case))
 
+(fn assert-start-preflight-fails-without-persisting [runtime node graph-value expected-message]
+  (set node.graph graph-value) (local before-started (length runtime.runner.started)) (local before-runs (length (runtime.store:list-runs {:definition-id node.workflow-definition-id}))) (local (ok err) (pcall node.start-workflow-from-graph node {:prompt "go"} {}))
+  (assert (not ok) "Start should fail loudly when graph dependencies are missing") (assert (string.find (tostring err) expected-message 1 true) "Start missing dependency failure should explain the missing graph dependency")
+  (assert (= (length runtime.runner.started) before-started) "Start missing dependency failure should not call the runner") (assert (= (length (runtime.store:list-runs {:definition-id node.workflow-definition-id})) before-runs) "Start missing dependency failure should not persist a workflow run"))
+
+(fn start-definition-node-requires-graph-dependencies-before-persisting-case [runtime]
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-preflight-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (assert-start-preflight-fails-without-persisting runtime node nil "requires a graph map") (assert-start-preflight-fails-without-persisting runtime node {:add-edge (fn [])} "requires graph:load-by-key") (assert-start-preflight-fails-without-persisting runtime node {:load-by-key (fn [])} "requires graph:add-edge") (map:drop))
+
+(fn start-definition-node-fails-when-run-node-cannot-load-case [runtime]
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "start-load-fails-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (set map.load-by-key (fn [_self _key] nil))
+  (local (ok err) (pcall node.start-workflow-from-graph node {:prompt "go"} {})) (assert (not ok) "Start should fail loudly when the run node cannot load")
+  (assert (string.find (tostring err) "failed to load graph node" 1 true) "Start run-node load failure should explain that the graph node could not load") (assert (= (length runtime.runner.started) 1) "Start should call the runner before loading the new run node") (map:drop))
+
 (fn start-context-captures-graph-map-and-selected-node-keys-case [runtime]
-  (local definition (seed-definition-for-authoring runtime))
-  (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"}))
-  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
-  (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
-  (set map.selected_node_keys [node.key (.. "workflow-step:" definition.id ":step-a")])
-  (node:start-workflow-from-graph {:prompt "go"} {})
-  (local started (. runtime.runner.started 1))
-  (assert (= started.context.graph-map-id "context-map") "run context should include active graph map id")
-  (assert (= (. started.context.graph-node-keys 1) node.key) "run context should include first selected node key")
-  (assert (= (. started.context.graph-node-keys 2) (.. "workflow-step:" definition.id ":step-a"))
-          "run context should include selected workflow step key")
-  (map:drop))
+  (local definition (seed-definition-for-authoring runtime)) (local map (GraphMap.GraphMap {:graph runtime.graph :id "context-map"})) (local node (map:load-by-key (.. "workflow-definition:" definition.id))) (map:load-by-key (.. "workflow-step:" definition.id ":step-a"))
+  (set map.selected_node_keys [node.key (.. "workflow-step:" definition.id ":step-a")]) (node:start-workflow-from-graph {:prompt "go"} {}) (local started (. runtime.runner.started 1))
+  (assert (= started.context.graph-map-id "context-map") "run context should include active graph map id") (assert (= (. started.context.graph-node-keys 1) node.key) "run context should include first selected node key")
+  (assert (= (. started.context.graph-node-keys 2) (.. "workflow-step:" definition.id ":step-a")) "run context should include selected workflow step key") (map:drop))
 
 (fn start-context-captures-graph-map-and-selected-node-keys []
   (with-runtime start-context-captures-graph-map-and-selected-node-keys-case))
@@ -1182,6 +1181,7 @@
 (table.insert tests {:name "graph remove edge deletes canonical workflow edge" :fn graph-remove-edge-deletes-canonical-workflow-edge})
 (table.insert tests {:name "graph remove derived workflow edge with caller opts clears domain and indexes" :fn graph-remove-derived-workflow-edge-with-caller-opts-clears-domain-and-indexes})
 (table.insert tests {:name "start definition node creates visible run node and definition run edge" :fn start-definition-node-creates-visible-run-node-and-definition-run-edge})
+(table.insert tests {:name "start definition node requires graph dependencies before persisting" :fn (fn [] (with-runtime start-definition-node-requires-graph-dependencies-before-persisting-case))}) (table.insert tests {:name "start definition node fails when run node cannot load" :fn (fn [] (with-runtime start-definition-node-fails-when-run-node-cannot-load-case))})
 (table.insert tests {:name "start context captures graph map and selected node keys" :fn start-context-captures-graph-map-and-selected-node-keys})
 (table.insert tests {:name "graph code entity edits feed cached workflow executor" :fn graph-code-entity-edits-feed-cached-workflow-executor})
 (table.insert tests {:name "template-helper-creates-durable-workflow-step-and-code" :fn template-helper-creates-durable-workflow-step-and-code})
