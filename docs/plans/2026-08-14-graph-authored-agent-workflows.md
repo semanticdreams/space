@@ -513,21 +513,24 @@ Workflow key schemes:
 
 - [ ] **Step 1: Extend graph tests with loader/node failures**
 
-In `assets/lua/tests/test-workflow-graph.fnl`, add these failing tests:
+In `assets/lua/tests/test-workflow-graph.fnl`, add these failing tests. The
+original implicit edge-expansion assertions in this task are superseded by the
+explicit graph discovery contract: related workflow records are materialized
+only when a user selects browse/search rows or invokes explicit preview actions.
 
 ```fennel
 (fn workflow-key-loaders-resolve-all-workflow-keys [])
 (fn workflow-key-loaders-return-nil-for-missing-records [])
-(fn workflow-definition-node-expands-to-step-code-and-run-edges [])
-(fn workflow-run-node-expands-to-definition-run-step-and-event-edges [])
+(fn workflow-definition-browse-materializes-selected-runs [])
+(fn workflow-run-actions-materialize-selected-details [])
 (fn workflow-status-color-mapping-covers-all-statuses [])
 ```
 
 Assertions:
 - `graph:create-node-by-key "workflows"` returns a root node;
 - definition, step, run, run-step, and event keys resolve only when store records exist;
-- a definition node edge list includes step nodes, code-entity nodes, canonical workflow step edges, and definition-to-run edges;
-- a run node edge list includes its definition edge always and run-step/event detail edges only when details are expanded;
+- a definition preview browse/search lists runs for that selected definition and materializes only the selected run into the active graph map;
+- a run preview exposes explicit controls for details, steps, and events, materializing only the selected records and their visible display edges;
 - color mapping covers pending, ready/running, waiting, failed, succeeded, skipped, and cancelled.
 
 - [ ] **Step 2: Run tests and verify they fail for missing loaders**
