@@ -4,6 +4,7 @@
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
 (local AgentSessionGraphNode (require :graph/nodes/agent-session))
+(local {:WorkflowsNode WorkflowsNode} (require :graph/nodes/workflows))
 
 (local _main (require :main))
 
@@ -257,6 +258,59 @@
   (runtime.store:upsert-run-step run.id "step-b" {:status :waiting :wait {:kind :human-input}})
   (local event (runtime.store:append-event run.id {:id "event-started" :kind :step-started :step-id "step-a"}))
   {:definition definition :run (runtime.store:get-run run.id) :event event})
+
+(fn workflows-root-show-existing-loads-definition-and-run-nodes-case [runtime]
+  (local seeded (seed-definition-with-run runtime))
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "existing-workflows-map"}))
+  (local root (map:load-by-key "workflows"))
+  (assert root "workflows root should load through key loader")
+  (local action (action-named root.actions "Show Existing Workflows"))
+  (assert action "workflows root should expose Show Existing Workflows action")
+  (assert root.load-existing-workflows "workflows root should expose load-existing-workflows")
+  (local loaded (root:load-existing-workflows))
+  (assert (= loaded.definition-count 1) "Show Existing Workflows should report loaded definitions")
+  (assert (= loaded.run-count 1) "Show Existing Workflows should report loaded runs")
+  (local definition-key (.. "workflow-definition:" seeded.definition.id))
+  (local run-key (.. "workflow-run:" seeded.run.id))
+  (assert (map:lookup definition-key) "Show Existing Workflows should load existing definition node")
+  (assert (map:lookup run-key) "Show Existing Workflows should load existing run node")
+  (assert-edge-target map.edges definition-key "Show Existing Workflows should add root-to-definition edge")
+  (assert-edge-target map.edges run-key "Show Existing Workflows should add root-to-run edge")
+  (map:drop))
+
+(fn workflows-root-show-existing-loads-definition-and-run-nodes []
+  (with-runtime workflows-root-show-existing-loads-definition-and-run-nodes-case))
+
+(fn workflows-root-show-existing-requires-graph-before-empty-store-listing-case [runtime]
+  (local root (WorkflowsNode {:store runtime.store}))
+  (local (ok result) (pcall (fn [] (root:load-existing-workflows))))
+  (assert (not ok) "Show Existing Workflows should require a graph map even when the store is empty")
+  (assert (string.find (tostring result) "requires a graph map" 1 true)
+          "Show Existing Workflows missing graph failure should mention graph map"))
+
+(fn workflows-root-show-existing-requires-graph-before-empty-store-listing []
+  (with-runtime workflows-root-show-existing-requires-graph-before-empty-store-listing-case))
+
+(fn workflows-preview-shows-existing-counts-and-action-case [runtime]
+  (seed-definition-with-run runtime)
+  (local map (GraphMap.GraphMap {:graph runtime.graph :id "existing-workflows-preview-map"}))
+  (local root (map:load-by-key "workflows"))
+  (local Preview (require :graph/view/previews/workflows))
+  (local widget ((Preview root {:node root}) (make-preview-ctx)))
+  (assert widget.summary-text "workflows preview should expose existing workflow summary text")
+  (local summary (text-widget-string widget.summary-text))
+  (assert-contains summary "Definitions: 1" "workflows preview should show definition count")
+  (assert-contains summary "Runs: 1" "workflows preview should show run count")
+  (assert widget.show-existing-button "workflows preview should expose Show Existing Workflows button")
+  (widget.show-existing-button:on-click {:source :test})
+  (assert (map:lookup "workflow-definition:wf-demo") "Show Existing preview button should load definition node")
+  (assert (map:lookup (.. "workflow-run:" (. (runtime.store:list-runs {}) 1 :id)))
+          "Show Existing preview button should load run node")
+  (widget:drop)
+  (map:drop))
+
+(fn workflows-preview-shows-existing-counts-and-action []
+  (with-runtime workflows-preview-shows-existing-counts-and-action-case))
 
 (fn seed-agent-session-run [runtime]
   (local definition (runtime.store:create-definition {:id "wf-agent-session-graph"
@@ -1007,9 +1061,15 @@
 (table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes"
                      :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
 (table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
-                     :fn workflows-preview-builds-with-new-workflow-action})
+                      :fn workflows-preview-builds-with-new-workflow-action})
+(table.insert tests {:name "workflows-root-show-existing-loads-definition-and-run-nodes"
+                       :fn workflows-root-show-existing-loads-definition-and-run-nodes})
+(table.insert tests {:name "workflows-root-show-existing-requires-graph-before-empty-store-listing"
+                       :fn workflows-root-show-existing-requires-graph-before-empty-store-listing})
+(table.insert tests {:name "workflows-preview-shows-existing-counts-and-action"
+                       :fn workflows-preview-shows-existing-counts-and-action})
 (table.insert tests {:name "workflow definition node expands to step code and run edges"
-                      :fn workflow-definition-node-expands-to-step-code-and-run-edges})
+                       :fn workflow-definition-node-expands-to-step-code-and-run-edges})
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"
                      :fn workflow-run-node-expands-to-definition-run-step-and-event-edges})
 (table.insert tests {:name "workflow status color mapping covers all statuses"
