@@ -2,6 +2,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local GraphAuthoring (require :workflows/graph-authoring))
+(local WorkflowStepNodePreview (require :graph/view/previews/workflow-step))
 
 (local STEP_GREEN (glm.vec4 0.18 0.58 0.34 1))
 (local STEP_GREEN_ACCENT (glm.vec4 0.28 0.72 0.46 1))
@@ -41,6 +42,18 @@
       (set edge._opts opts))
     (table.insert edges edge)))
 
+(fn load-required-node [graph key]
+  (assert graph "WorkflowStepNode requires a graph map for node loading")
+  (assert graph.load-by-key "WorkflowStepNode requires graph:load-by-key")
+  (local node (graph:load-by-key key))
+  (assert node (.. "WorkflowStepNode failed to load graph node: " key))
+  node)
+
+(fn add-visible-edge [graph source target label]
+  (assert graph "WorkflowStepNode requires a graph map for edge creation")
+  (assert graph.add-edge "WorkflowStepNode requires graph:add-edge")
+  (graph:add-edge (GraphEdge {:source source :target target :label label})))
+
 (fn edge-label [edge]
   (if edge.kind edge.kind "workflow"))
 
@@ -58,10 +71,11 @@
   (local step (find-step definition step-id))
   (local label (step-label step step-id))
   (local node (GraphNode {:key (step-key definition-id step-id)
-                         :label label
-                         :color STEP_GREEN
-                         :sub-color STEP_GREEN_ACCENT
-                         :size 7.5}))
+                          :label label
+                          :color STEP_GREEN
+                          :sub-color STEP_GREEN_ACCENT
+                          :preview WorkflowStepNodePreview
+                          :size 7.5}))
   (set node.workflow-definition-id definition-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)
@@ -72,8 +86,21 @@
        (fn [_self edge edge-opts]
          (GraphAuthoring.delete-authored-edge edge edge-opts)))
   (set node.get-step (fn [self]
-                       (find-step (self.workflow-store:get-definition self.workflow-definition-id)
-                                  self.workflow-step-id)))
+                        (find-step (self.workflow-store:get-definition self.workflow-definition-id)
+                                   self.workflow-step-id)))
+  (set node.show-code-from-graph
+       (fn [self]
+         (local current-step (assert (self:get-step)
+                                     "WorkflowStepNode.show-code-from-graph requires an existing workflow step"))
+         (local code-entity-id (assert current-step.code-entity-id
+                                       "WorkflowStepNode.show-code-from-graph requires step.code-entity-id"))
+         (local code-node (load-required-node self.graph (.. "code-entity:" code-entity-id)))
+         (add-visible-edge self.graph self code-node "code")
+         code-node))
+  (set node.actions [{:name "Show Code"
+                      :icon "code"
+                      :fn (fn [_button _event]
+                            (node:show-code-from-graph))}])
   (set node.get-edges
        (fn [self]
          (local current (self.workflow-store:get-definition self.workflow-definition-id))

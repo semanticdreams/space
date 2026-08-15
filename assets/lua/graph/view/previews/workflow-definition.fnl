@@ -22,6 +22,15 @@
   (fn [_button _event]
     (start-from-preview target)))
 
+(fn create-step-from-preview [target]
+  (assert (and target target.create-step-from-graph)
+          "Workflow definition preview requires create-step-from-graph")
+  (target:create-step-from-graph {}))
+
+(fn new-step-click-handler [target]
+  (fn [_button _event]
+    (create-step-from-preview target)))
+
 (fn build-content [target build-ctx]
   (local view {})
   (local label (if (and target target.label) target.label target.key target.key "Workflow"))
@@ -30,23 +39,32 @@
     ((Button {:text "Start"
               :variant :ghost
               :padding [0.25 0.2]
-              :on-click (start-click-handler target)})
+               :on-click (start-click-handler target)})
+     build-ctx))
+  (local new-step-button
+    ((Button {:text "New Step"
+              :variant :ghost
+              :padding [0.25 0.2]
+              :on-click (new-step-click-handler target)})
      build-ctx))
   (local flex
     ((Flex {:axis 2
             :xalign :stretch
-            :yspacing 0.25
-            :children [(FlexChild (existing-widget title) 0)
-                       (FlexChild (existing-widget start-button) 0)]})
+             :yspacing 0.25
+             :children [(FlexChild (existing-widget title) 0)
+                        (FlexChild (existing-widget start-button) 0)
+                        (FlexChild (existing-widget new-step-button) 0)]})
      build-ctx))
   (set view.layout flex.layout)
   (set view.title title)
   (set view.start-button start-button)
+  (set view.new-step-button new-step-button)
   (set view.drop
-       (fn [_self]
-         (title:drop)
-         (start-button:drop)
-         (flex:drop)))
+        (fn [_self]
+          (title:drop)
+          (start-button:drop)
+          (new-step-button:drop)
+          (flex:drop)))
   view)
 
 (fn WorkflowDefinitionNodePreview [node opts]
