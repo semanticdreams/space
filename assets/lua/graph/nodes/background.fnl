@@ -10,13 +10,14 @@
 (fn M.BackgroundNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "BackgroundNode requires :world-id"))
+  (local activity-id (assert options.activity-id "BackgroundNode requires :activity-id"))
   (local world-manager (assert options.world-manager "BackgroundNode requires :world-manager"))
   (local background-record
     (BackgroundState.normalize-complete-state
       (or options.background-record
-          (WorldData.get-background world-manager world-id))
+           (WorldData.get-background world-manager world-id activity-id))
       (.. "BackgroundNode[" world-id "]")))
-  (local key (or options.key (.. "background:" world-id)))
+  (local key (or options.key (.. "activity-background:" world-id ":" activity-id)))
   (local node (GraphNode {:key key
                           :label "background"
                           :color (glm.vec4 0.18 0.18 0.24 1)
@@ -24,6 +25,7 @@
                           :size 8.0
                           :view BackgroundNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.background-record (BackgroundState.clone-state background-record))
   (set node.changed (Signal))
@@ -33,20 +35,20 @@
   (set node.apply-values
        (fn [self next-background]
          (local updated
-           (WorldData.update-background self.world-manager self.world-id next-background))
+            (WorldData.update-background self.world-manager self.world-id self.activity-id next-background))
          (when updated
            (set self.background-record (BackgroundState.clone-state updated)))
          updated))
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [_payload]
-           (local entry (WorldData.resolve-world-entry world-manager world-id))
-           (if entry
-               (do
-                 (set node.background-record
-                      (BackgroundState.clone-state
-                        (WorldData.get-background world-manager world-id)))
+        (world-manager.changed:connect
+          (fn [_payload]
+            (local scene-state (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene"))
+            (if scene-state
+                (do
+                  (set node.background-record
+                       (BackgroundState.clone-state
+                          (WorldData.get-background world-manager world-id activity-id)))
                  (node.changed:emit node.background-record))
                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))

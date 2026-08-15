@@ -198,8 +198,9 @@
                                        :active-world-id "test-world"}))
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
   (local node (SkyboxNode {:world-id "test-world"
-                            :world-manager manager
-                            :asset-path-resolver asset-path-resolver}))
+                             :activity-id "sandbox"
+                             :world-manager manager
+                             :asset-path-resolver asset-path-resolver}))
   (local builder (SkyboxNodeView node))
   (local view (builder ctx))
   {:state state
@@ -245,9 +246,10 @@
 (fn skybox-node-has-correct-key []
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
   (local node (SkyboxNode {:world-id "test-world-123"
+                           :activity-id "sandbox"
                            :world-manager (make-world-manager {:id "test-world-123"})
                            :asset-path-resolver asset-path-resolver}))
-  (assert (= node.key "skybox:test-world-123") "SkyboxNode key should include world-id")
+  (assert (= node.key "activity-skybox:test-world-123:sandbox") "SkyboxNode key should include world-id and activity-id")
   (assert (= node.label "skybox") "SkyboxNode label should be 'skybox'")
   (node:drop))
 
@@ -257,11 +259,37 @@
       (local graph (Graph {:with-start false}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})
                                        :asset-path-resolver asset-path-resolver})
-      (local result (graph:load-by-key "skybox:test-world"))
+      (local result (graph:load-by-key "activity-skybox:test-world:sandbox"))
       (assert result "skybox loader should create node")
-      (assert (= result.key "skybox:test-world") "skybox key should match")
+      (assert (= result.key "activity-skybox:test-world:sandbox") "skybox key should match")
       (result:drop)
       (graph:drop))))
+
+(fn skybox-node-isolates-activity-state []
+  (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox {:scene {:panels []
+                                                        :terrains []
+                                                        :lights (LightSystemModule.default-state)
+                                                        :skybox (make-skybox-state {:name "lake" :brightness 0.1})
+                                                        :background {:color [0 0 0]}
+                                                        :containment {:enabled? false}}}
+                                      :graph {:scene {:panels []
+                                                      :terrains []
+                                                      :lights (LightSystemModule.default-state)
+                                                      :skybox (make-skybox-state {:name "desert" :brightness 0.6})
+                                                      :background {:color [0 0 0]}
+                                                      :containment {:enabled? false}}}}}})
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry (make-world-entry {:id "test-world" :state state})}))
+  (local graph-node (SkyboxNode {:world-id "test-world" :activity-id "graph" :world-manager manager :asset-path-resolver asset-path-resolver}))
+  (local sandbox-node (SkyboxNode {:world-id "test-world" :activity-id "sandbox" :world-manager manager :asset-path-resolver asset-path-resolver}))
+  (assert (= (. (. (graph-node:get-record) :default) :name) "desert") "graph skybox should read graph session")
+  (assert (= (. (. (sandbox-node:get-record) :default) :name) "lake") "sandbox skybox should read sandbox session")
+  (graph-node:drop)
+  (sandbox-node:drop))
 
 (fn skybox-node-available-items-use-injected-resolver []
   (local previous-app app)
@@ -271,6 +299,7 @@
       (fn []
         (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
         (local node (SkyboxNode {:world-id "test-world"
+                                 :activity-id "sandbox"
                                  :world-manager (make-world-manager {:id "test-world"})
                                  :asset-path-resolver asset-path-resolver}))
         (local items (node:available-items))
@@ -400,7 +429,9 @@
 (table.insert tests {:name "skybox node has correct key"
                      :fn skybox-node-has-correct-key})
 (table.insert tests {:name "graph key loaders load skybox node"
-                     :fn graph-key-loaders-load-skybox-node})
+                      :fn graph-key-loaders-load-skybox-node})
+(table.insert tests {:name "skybox node isolates activity state"
+                     :fn skybox-node-isolates-activity-state})
 (table.insert tests {:name "skybox node available items use injected resolver"
                      :fn skybox-node-available-items-use-injected-resolver})
 (table.insert tests {:name "skybox node view builds"
@@ -461,7 +492,7 @@
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   ;; Call update-skybox with the complete state containing a by-theme override.
   (local result
-    (WorldData.update-skybox manager "test-world" skybox-with-override))
+    (WorldData.update-skybox manager "test-world" "sandbox" skybox-with-override))
   (assert result "update-skybox should return normalized skybox state")
   ;; Verify the canonical session state now contains the complete policy.
   (local sandbox-scene

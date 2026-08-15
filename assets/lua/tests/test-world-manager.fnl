@@ -1499,7 +1499,7 @@
       (assert (= (. archive-map.nodes 1) "mystery:inactive"))
       true)))
 
-(fn home-world-load-state-errors-on-stale-terrain-persistence-refs []
+(fn home-world-load-state-allows-graph-manager-to-prune-stale-legacy-terrain-topology []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -1524,9 +1524,8 @@
                                    :scale_factor 1.0
                                    :panels [{:kind "graph-node-view"
                                              :node-key "terrain-tool:world-a:terrain-canvas:resize-terrain"}]}
-                          :scene {:panels [{:kind "graph-node-cube"
-                                            :node-key "terrain:world-a:terrain-scene"}]
-                                  :terrains [{:id "terrain-live"
+                          :scene {:panels []
+                                   :terrains [{:id "terrain-live"
                                               :kind "heightfield-terrain"
                                               :options {:position [-160 -100 -160]
                                                         :rotation [1 0 0 0]
@@ -1545,25 +1544,30 @@
                                :name "home"
                                :type "home"
                                :dir world-dir}))
-      (local (ok err) (pcall (fn [] (world:init {}))))
-      (local err-text (tostring err))
-      (assert (not ok)
-              "Expected load-state to fail fast on stale terrain persistence refs")
-      (assert (string.find err-text "HomeWorld.load%-state world%-a found stale terrain graph refs")
-              (.. "Expected load-state stale terrain persistence error prefix, got: " err-text))
-      (assert (string.find err-text "terrain:world%-a:terrain%-stale")
-              (.. "Expected load-state stale terrain graph error to include terrain node key, got: "
-                  err-text))
-      (assert (string.find err-text "terrain%-editor:world%-a:terrain%-stale")
-              "Expected load-state stale terrain graph error to include terrain editor key")
-      (assert (string.find err-text "terrain%-tool:world%-a:terrain%-stale:resize%-terrain")
-              "Expected load-state stale terrain graph error to include terrain tool key")
-      (assert (not (string.find err-text "terrain%-tool:world%-a:terrain%-canvas:resize%-terrain"))
-              "Stale terrain graph error should not include removed canvas graph-node-view key")
-      (assert (not (string.find err-text "terrain%-editor:world%-a:terrain%-hud"))
-              "Stale terrain graph error should not include removed hud graph-node-view key")
-      (assert (string.find err-text "terrain:world%-a:terrain%-scene")
-              "Expected load-state stale terrain graph error to include scene graph-node-cube key")
+      (world:init {})
+      (local Graph (require :graph/init))
+      (local GraphMapManager (require :graph/map-manager))
+      (local graph (Graph {:with-start false}))
+      (graph:register-key-loader "start"
+        (fn [_key]
+          (Graph.GraphNode {:key "start"})))
+      (graph:register-key-loader "legacy"
+        (fn [key]
+          (Graph.GraphNode {:key key})))
+      (local manager (GraphMapManager.GraphMapManager {:graph graph
+                                                       :state world.state.graph}))
+      (local captured (manager:capture-state))
+      (local main-map (. captured.maps 1))
+      (assert (= (length main-map.nodes) 2)
+              "Stale legacy terrain graph topology should be pruned after manager hydration")
+      (assert (= (. main-map.nodes 1) "legacy:keep"))
+      (assert (= (. main-map.nodes 2) "start"))
+      (assert (= (length main-map.edges) 1)
+              "Edges with pruned migrated terrain endpoints should be pruned")
+      (assert (= (. main-map.edges 1 :source) "legacy:keep"))
+      (assert (= (. main-map.edges 1 :target) "start"))
+      (manager:drop)
+      (graph:drop)
       true)))
 
 (fn home-world-load-state-errors-on-cross-world-terrain-refs []
@@ -1739,8 +1743,8 @@
                       :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
 (table.insert tests {:name "HomeWorld does not resurrect pruned active map keys"
                      :fn home-world-does-not-resurrect-pruned-active-map-keys})
-(table.insert tests {:name "HomeWorld load-state errors on stale terrain persistence refs"
-                     :fn home-world-load-state-errors-on-stale-terrain-persistence-refs})
+(table.insert tests {:name "HomeWorld load-state lets graph manager prune stale legacy terrain topology"
+                     :fn home-world-load-state-allows-graph-manager-to-prune-stale-legacy-terrain-topology})
 (table.insert tests {:name "HomeWorld load-state errors on cross-world terrain refs"
                      :fn home-world-load-state-errors-on-cross-world-terrain-refs})
 (table.insert tests {:name "HomeWorld removes graph-node-view panels from target state"

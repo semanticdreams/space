@@ -15,18 +15,34 @@
         out)
       value))
 
+(fn remove-from-graph [node]
+  (when (and node.graph node.graph.remove-nodes)
+    (node.graph:remove-nodes [node] {:cause "shared-delete"})))
+
+(fn refresh-terrain-editor-node [node]
+  (if (not (WorldData.resolve-activity-surface-state node.world-manager node.world-id node.activity-id "scene"))
+      (remove-from-graph node)
+      (do
+        (local current (WorldData.find-terrain node.world-manager node.world-id node.activity-id node.terrain-id))
+        (if (and current (= current.kind "perlin-terrain"))
+            (do
+              (set node.terrain-record (clone-table current.record))
+              (node.changed:emit node.terrain-record))
+            (remove-from-graph node)))))
+
 (fn M.PerlinTerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "PerlinTerrainNode requires :world-id"))
+  (local activity-id (assert options.activity-id "PerlinTerrainNode requires :activity-id"))
   (local world-manager (assert options.world-manager "PerlinTerrainNode requires :world-manager"))
   (local terrain-id (assert options.terrain-id "PerlinTerrainNode requires :terrain-id"))
   (local resolved (or options.terrain-entry
-                      (WorldData.find-terrain world-manager world-id terrain-id)
+                       (WorldData.find-terrain world-manager world-id activity-id terrain-id)
                       {}))
   (local terrain-record (or options.terrain-record resolved.record {}))
   (assert (= (or terrain-record.kind resolved.kind) "perlin-terrain")
           "PerlinTerrainNode requires a perlin-terrain record")
-  (local key (or options.key (.. "terrain-editor:" world-id ":" terrain-id)))
+  (local key (or options.key (.. "activity-terrain-editor:" world-id ":" activity-id ":" terrain-id)))
   (local node (GraphNode {:key key
                            :label "perlin terrain"
                            :color (glm.vec4 0.42 0.62 0.7 1)
@@ -34,6 +50,7 @@
                            :size 8.0
                            :view PerlinTerrainNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.terrain-id terrain-id)
   (set node.terrain-kind "perlin-terrain")
@@ -45,7 +62,7 @@
   (set node.update-record
        (fn [self updater]
          (local updated
-           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id updater))
+            (WorldData.update-terrain-record self.world-manager self.world-id self.activity-id self.terrain-id updater))
          (when updated
            (set self.terrain-record updated)
            (self.changed:emit updated))
@@ -74,7 +91,7 @@
              (set record.options.zpower validated.zpower)))))
   (set node.remove-terrain
        (fn [self]
-         (WorldData.remove-terrain self.world-manager self.world-id self.terrain-id)))
+          (WorldData.remove-terrain self.world-manager self.world-id self.activity-id self.terrain-id)))
   (set node.actions
         [{:name "Delete Terrain"
          :fn (fn [_button _event]
@@ -84,14 +101,8 @@
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
-         (fn [_payload]
-           (local current (WorldData.find-terrain world-manager world-id terrain-id))
-           (if (and current (= current.kind "perlin-terrain"))
-               (do
-                 (set node.terrain-record (clone-table (or current.record {})))
-                 (node.changed:emit node.terrain-record))
-                (when (and node.graph node.graph.remove-nodes)
-                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
+          (fn [_payload]
+            (refresh-terrain-editor-node node))))
   (set node.drop
        (fn [self]
          (when changed-handler

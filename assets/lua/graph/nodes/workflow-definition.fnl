@@ -103,6 +103,9 @@
 (fn edge-label [edge]
   (if edge.kind edge.kind "workflow"))
 
+(fn step-key [definition-id step-id]
+  (.. "workflow-step:" definition-id ":" step-id))
+
 (fn cached-or-resolved-step-node [step-nodes graph definition-id step-id]
   (local cached (. step-nodes step-id))
   (if cached

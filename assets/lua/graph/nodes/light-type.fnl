@@ -9,14 +9,18 @@
 
 (local M {})
 
+(fn light-node-key [self light-id]
+  (.. "activity-light:" self.world-id ":" self.activity-id ":" self.type-key ":" light-id))
+
 (fn M.LightTypeNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "LightTypeNode requires :world-id"))
+  (local activity-id (assert options.activity-id "LightTypeNode requires :activity-id"))
   (local world-manager (assert options.world-manager "LightTypeNode requires :world-manager"))
   (local type-key (assert options.type-key "LightTypeNode requires :type-key"))
   (local spec (assert (LightSystemModule.type-spec type-key)
                       (.. "LightTypeNode unsupported type " (tostring type-key))))
-  (local key (or options.key (.. "light-type:" world-id ":" type-key)))
+  (local key (or options.key (.. "activity-light-type:" world-id ":" activity-id ":" type-key)))
   (local node (GraphNode {:key key
                           :label spec.label
                           :color (glm.vec4 0.78 0.68 0.28 1)
@@ -24,13 +28,14 @@
                           :size 7.5
                           :view LightTypeNodeView}))
   (set node.world-id world-id)
+  (set node.activity-id activity-id)
   (set node.world-manager world-manager)
   (set node.type-key type-key)
   (set node.light-spec spec)
   (set node.items-changed (Signal))
   (set node.collect-items
        (fn [self]
-         (WorldData.list-lights self.world-manager self.world-id self.type-key)))
+          (WorldData.list-lights self.world-manager self.world-id self.activity-id self.type-key)))
   (set node.emit-items
        (fn [self]
          (local items (self:collect-items))
@@ -58,11 +63,13 @@
          (local graph self.graph)
          (when (and graph entry entry.light-id)
            (local light-node
-             (LightNode {:world-id self.world-id
-                         :world-manager self.world-manager
-                         :type-key self.type-key
-                         :light-id entry.light-id
-                         :light-record entry.record}))
+              (LightNode {:world-id self.world-id
+                           :activity-id self.activity-id
+                           :world-manager self.world-manager
+                          :type-key self.type-key
+                          :light-id entry.light-id
+                          :light-record entry.record
+                          :key (light-node-key self entry.light-id)}))
            (graph:add-edge (GraphEdge {:source self
                                        :target light-node})))))
   (set node.add-light
@@ -71,7 +78,7 @@
                  "Ambient light is a required singleton and cannot be added")
          (assert (self:can-add-light?)
                  (self:limit-error-text))
-         (WorldData.add-light self.world-manager self.world-id self.type-key)))
+          (WorldData.add-light self.world-manager self.world-id self.activity-id self.type-key)))
   (set node.actions
        [{:name "Refresh"
          :icon "refresh"
@@ -79,13 +86,13 @@
                (node:emit-items))}])
   (var changed-handler nil)
   (set changed-handler
-       (world-manager.changed:connect
-         (fn [payload]
-           (if (WorldData.resolve-world-entry world-manager world-id)
-               (do
-                 (local items (node:collect-items))
-                 (node.items-changed:emit items))
-               (when (and node.graph node.graph.remove-nodes)
+        (world-manager.changed:connect
+          (fn [payload]
+            (if (WorldData.resolve-activity-surface-state world-manager world-id activity-id "scene")
+                (do
+                  (local items (node:collect-items))
+                  (node.items-changed:emit items))
+                (when (and node.graph node.graph.remove-nodes)
                   (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]

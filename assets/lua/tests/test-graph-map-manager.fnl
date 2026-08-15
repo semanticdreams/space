@@ -6,6 +6,38 @@
 
 (local tests [])
 
+(fn table-has-value? [items value]
+    (var found? false)
+    (local source (if items items []))
+    (each [_ item (ipairs source) &until found?]
+        (when (= item value)
+            (set found? true)))
+    found?)
+
+(fn assert-has-value [items value context]
+    (assert (table-has-value? items value)
+            (.. context " should include " value)))
+
+(fn assert-lacks-value [items value context]
+    (assert (not (table-has-value? items value))
+            (.. context " should not include " value)))
+
+(fn register-canonical-activity-loaders [graph]
+    (each [_ scheme (ipairs ["activity-background"
+                             "activity-skybox"
+                             "activity-lights"
+                             "activity-terrains"
+                             "activity-scene-panels"
+                             "activity-light-type"
+                             "activity-light"
+                             "activity-terrain"
+                             "activity-terrain-editor"
+                             "activity-terrain-tool"
+                             "activity-scene-panel"])]
+        (graph:register-key-loader scheme
+            (fn [key]
+                (Graph.GraphNode {:key key})))))
+
 (fn manager-creates-default-map-from-empty-state []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "start"
@@ -39,6 +71,116 @@
     (assert (= (active:edge-count) 1) "Active map should have edge from legacy state")
     (manager:drop)
     (graph:drop))
+
+(fn manager-migrates-legacy-activity-category-keys []
+    (local graph (Graph {:with-start false}))
+    (register-canonical-activity-loaders graph)
+    (local legacy-keys ["background:w1" "skybox:w1" "lights:w1" "terrains:w1" "scene-panels:w1"])
+    (local state {:active_map_id "main"
+                  :maps [{:id "main" :name "Main" :nodes legacy-keys :edges []}]})
+    (local manager (GraphMapManager.GraphMapManager {:graph graph :state state}))
+    (local captured (manager:capture-state))
+    (local main-map (. captured.maps 1))
+    (each [_ key (ipairs ["activity-background:w1:sandbox"
+                         "activity-skybox:w1:sandbox"
+                         "activity-lights:w1:sandbox"
+                         "activity-terrains:w1:sandbox"
+                         "activity-scene-panels:w1:sandbox"])]
+        (assert-has-value main-map.nodes key "Migrated category nodes"))
+    (each [_ key (ipairs legacy-keys)]
+        (assert-lacks-value main-map.nodes key "Migrated category nodes"))
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-migrates-legacy-activity-detail-keys []
+    (local graph (Graph {:with-start false}))
+    (register-canonical-activity-loaders graph)
+    (local legacy-keys ["light-type:w1:point"
+                        "light:w1:point:p1"
+                        "terrain:w1:t1"
+                        "terrain-editor:w1:t1"
+                        "terrain-tool:w1:t1:resize-terrain"
+                        "scene-panel:w1:2"])
+    (local state {:active_map_id "main"
+                  :maps [{:id "main" :name "Main" :nodes legacy-keys :edges []}]})
+    (local manager (GraphMapManager.GraphMapManager {:graph graph :state state}))
+    (local captured (manager:capture-state))
+    (local main-map (. captured.maps 1))
+    (each [_ key (ipairs ["activity-light-type:w1:sandbox:point"
+                         "activity-light:w1:sandbox:point:p1"
+                         "activity-terrain:w1:sandbox:t1"
+                         "activity-terrain-editor:w1:sandbox:t1"
+                         "activity-terrain-tool:w1:sandbox:t1:resize-terrain"
+                         "activity-scene-panel:w1:sandbox:2"])]
+        (assert-has-value main-map.nodes key "Migrated detail nodes"))
+    (each [_ key (ipairs legacy-keys)]
+        (assert-lacks-value main-map.nodes key "Migrated detail nodes"))
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-migrates-legacy-activity-edges-and-metadata []
+    (var temp-counter 0)
+    (local dir (fs.join-path "/tmp/space/tests" "graph-map-metadata"
+                             (.. "legacy-activity-migration-" (os.time) "-" (do
+                                                                               (set temp-counter (+ temp-counter 1))
+                                                                               temp-counter))))
+    (when (fs.exists dir) (fs.remove-all dir))
+    (fs.create-dirs dir)
+    (local metadata-dir (fs.join-path dir "graph" "maps" "main"))
+    (fs.create-dirs metadata-dir)
+    (local metadata-path (fs.join-path metadata-dir "metadata.json"))
+    (JsonUtils.write-json! metadata-path
+                           {:positions {"terrains:w1" [1 2 3]
+                                        "terrain:w1:t1" [4 5 6]}
+                            :presentations {"terrains:w1" :expanded}
+                            :sizes {"terrain:w1:t1" [7 8]}
+                            :panels [{:kind "graph-node-view"
+                                      :node-key "terrain:w1:t1"
+                                      :graph-map-id "main"}]
+                            :extra_panels [{:kind "graph-node-cube"
+                                            :node-key "terrains:w1"
+                                            :graph-map-id "main"}]})
+    (local graph (Graph {:with-start false}))
+    (register-canonical-activity-loaders graph)
+    (local manager (GraphMapManager.GraphMapManager
+                     {:graph graph
+                      :data-dir dir
+                      :state {:active_map_id "main"
+                              :maps [{:id "main" :name "Main"
+                                      :nodes ["terrains:w1" "terrain:w1:t1"]
+                                      :edges [{:source "terrains:w1" :target "terrain:w1:t1"}]}]}}))
+    (local captured (manager:capture-state))
+    (local main-map (. captured.maps 1))
+    (assert-has-value main-map.nodes "activity-terrains:w1:sandbox" "Migrated metadata test nodes")
+    (assert-has-value main-map.nodes "activity-terrain:w1:sandbox:t1" "Migrated metadata test nodes")
+    (local main-edges (if main-map.edges main-map.edges []))
+    (assert (= (length main-edges) 1)
+            "Migrated map should keep edge after endpoint migration")
+    (assert (= (. main-map.edges 1 :source) "activity-terrains:w1:sandbox")
+            "Migrated edge source should use canonical activity key")
+    (assert (= (. main-map.edges 1 :target) "activity-terrain:w1:sandbox:t1")
+            "Migrated edge target should use canonical activity key")
+    (local meta (json.loads (fs.read-file metadata-path)))
+    (assert (. meta.positions "activity-terrains:w1:sandbox")
+            "Migrated metadata should rewrite category position key")
+    (assert (. meta.positions "activity-terrain:w1:sandbox:t1")
+            "Migrated metadata should rewrite detail position key")
+    (assert (= (. meta.positions "terrains:w1") nil)
+            "Migrated metadata should remove legacy category position key")
+    (assert (= (. meta.positions "terrain:w1:t1") nil)
+            "Migrated metadata should remove legacy detail position key")
+    (assert (. meta.presentations "activity-terrains:w1:sandbox")
+            "Migrated metadata should rewrite presentation key")
+    (assert (. meta.sizes "activity-terrain:w1:sandbox:t1")
+            "Migrated metadata should rewrite size key")
+    (assert (= (. meta.panels 1 :node-key) "activity-terrain:w1:sandbox:t1")
+            "Migrated panel metadata should rewrite node-key")
+    (assert (= (. meta.extra_panels 1 :node-key) "activity-terrains:w1:sandbox")
+            "Migrated extra panel metadata should rewrite node-key")
+    (manager:drop)
+    (graph:drop)
+    (fs.remove-all dir)
+    true)
 
 (fn manager-migration-skips-legacy-derived-link-edges []
     (var temp-counter 0)
@@ -1065,6 +1207,12 @@
 (table.insert tests {:name "GraphMapManager rejects duplicate map ids" :fn manager-rejects-duplicate-map-ids})
 (table.insert tests {:name "GraphMapManager creates default map from empty state" :fn manager-creates-default-map-from-empty-state})
 (table.insert tests {:name "GraphMapManager migrates legacy state" :fn manager-migrates-legacy-state})
+(table.insert tests {:name "GraphMapManager migrates legacy activity category keys"
+                     :fn manager-migrates-legacy-activity-category-keys})
+(table.insert tests {:name "GraphMapManager migrates legacy activity detail keys"
+                     :fn manager-migrates-legacy-activity-detail-keys})
+(table.insert tests {:name "GraphMapManager migrates legacy activity edges and metadata"
+                     :fn manager-migrates-legacy-activity-edges-and-metadata})
 (table.insert tests {:name "GraphMapManager migration skips legacy derived link edges" :fn manager-migration-skips-legacy-derived-link-edges})
 (table.insert tests {:name "GraphMapManager migration skips identity-resolved legacy derived link edges" :fn manager-migration-skips-identity-resolved-legacy-derived-link-edges})
 (table.insert tests {:name "GraphMapManager migration preserves metadata legacy link-overlap edge"
