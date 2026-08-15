@@ -92,7 +92,7 @@
 (local AgentBuiltinUnits (require :llm/presets/builtins/units))
 (local AgentBuiltinRepo (require :llm/presets/builtins/repo))
 (local AgentRegistry (require :llm/agent/registry))
-(local AgentRunner (require :llm/agent/runner))
+(local WorkflowAgentRunner (require :llm/agent/workflow-runner))
 (local AgentToolSurface (require :llm/agent/tool-surface))
 (local AgentApprovals (require :llm/agent/approvals))
 (local AgentMcpSync (require :llm/agent/mcp-sync))
@@ -1901,16 +1901,15 @@
           (table.concat parts "\n")))))
   (when (not app.agent-runner)
     (set app.agent-runner
-         (AgentRunner.AgentRunner
-           {:data-dir (fs.join-path app.user-data-dir "agent-sessions")
-            :registry app.agent-registry
+         (WorkflowAgentRunner.WorkflowAgentRunner
+           {:workflow-store app.workflow-store :workflow-runner app.workflow-runner
+             :code-store app.code-store :registry app.agent-registry
+             :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")
             :deps {:app app
                    :presets app.agent-presets
                    :tools app.agent-tool-surface
                    :approvals app.agent-approvals
-                   :agents app.agent-registry
-                   :providers app.agent-providers
-                   :artifact-root (fs.join-path app.user-data-dir "agent-artifacts")
+                   :agents app.agent-registry :providers app.agent-providers
                    :opencode-mcp-bridge app.agent-opencode-mcp-bridge}})))
 
   ;; Rebuild HUD to show agent panel now that runner is available

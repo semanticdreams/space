@@ -269,6 +269,7 @@
   (assert (= (. controller.state.sessions 1 :status) :idle)
           "turn completion should refresh the active session status"))
 
+
 (fn test-controller-live-update-notifies []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
@@ -907,7 +908,7 @@
 (table.insert tests {:name "controller send returns turn handle"
                      :fn test-controller-send-text})
 (table.insert tests {:name "controller send loads user message"
-                     :fn test-controller-send-loads_user_message})
+                      :fn test-controller-send-loads_user_message})
 (table.insert tests {:name "controller live update notifies"
                      :fn test-controller-live-update-notifies})
 (table.insert tests {:name "transcript auto-scrolls only from live edge"
@@ -964,7 +965,65 @@
 (fn main []
   (local runner (require :tests/runner))
   (runner.run-tests {:name "agent-panel"
-                     :tests tests}))
+                      :tests tests}))
+
+(fn workflow-panel-agent-run [_agent _input _session ctx]
+  (ctx.turn:finish {:ok true}))
+
+(fn workflow-panel-registry-get [_self id]
+  {:id id
+   :name "Workflow Test Agent"
+   :run workflow-panel-agent-run})
+
+(fn make-workflow-panel-runner []
+  (local fs (require :fs))
+  (local Uuid (require :uuid))
+  (local {: WorkflowStore} (require :workflows/store))
+  (local {: WorkflowRunner} (require :workflows/runner))
+  (local {: WorkflowCodeExecutor} (require :workflows/code-executor))
+  (local {: CodeEntityStore} (require :entities/code))
+  (local {: WorkflowAgentRunner} (require :llm/agent/workflow-runner))
+  (local dir (fs.join-path "/tmp/space/tests/agent-panel-workflow-runner" (Uuid.v4)))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (fs.create-dirs dir)
+  (local workflow-store (WorkflowStore {:base-dir dir}))
+  (local code-store (CodeEntityStore {:base-dir dir}))
+  (local executor (WorkflowCodeExecutor {:code-store code-store :app {}}))
+  (local workflow-runner (WorkflowRunner {:store workflow-store :executor executor :app {}}))
+  (WorkflowAgentRunner {:workflow-store workflow-store
+                        :workflow-runner workflow-runner
+                        :code-store code-store
+                        :registry {:get workflow-panel-registry-get}
+                        :artifact-root (fs.join-path dir "agent-artifacts")
+                        :deps {}}))
+
+(fn test-controller-send-loads-user-message-with-workflow-runner []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-workflow-panel-runner))
+  (local presets (make-presets-stub))
+  (local controller (AgentPanelController {:runner runner
+                                           :registry registry
+                                           :approvals approvals
+                                           :presets presets}))
+  (controller:init)
+  (local handle (controller:send "draw a workflow circle"))
+  (assert handle "workflow-backed send should return a turn handle")
+  (assert (= (length controller.state.items) 1)
+          "workflow-backed send should refresh the appended user message")
+  (assert (= (. controller.state.items 1 :content) "draw a workflow circle")
+          "workflow-backed send should expose submitted content")
+  (assert (= (. controller.state.sessions 1 :status) :idle)
+          "workflow-backed completed turn should project idle status")
+  (assert (= (. controller.state.sessions 1 :item-count) 1)
+          "workflow-backed session summary should expose item count")
+  (runner:drop))
+
+(table.insert tests {:name "controller send loads user message with workflow runner"
+                     :fn test-controller-send-loads-user-message-with-workflow-runner})
 
 {:tests tests
- :main main}
+  :main main}
