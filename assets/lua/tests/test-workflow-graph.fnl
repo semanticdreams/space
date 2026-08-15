@@ -4,6 +4,7 @@
 (local Templates (require :workflows/templates))
 (local WorkflowEvents (require :llm/agent/workflow-events))
 (local AgentSessionGraphNode (require :graph/nodes/agent-session))
+(local {:WorkflowsNode WorkflowsNode} (require :graph/nodes/workflows))
 
 (local _main (require :main))
 
@@ -279,6 +280,16 @@
 
 (fn workflows-root-show-existing-loads-definition-and-run-nodes []
   (with-runtime workflows-root-show-existing-loads-definition-and-run-nodes-case))
+
+(fn workflows-root-show-existing-requires-graph-before-empty-store-listing-case [runtime]
+  (local root (WorkflowsNode {:store runtime.store}))
+  (local (ok result) (pcall (fn [] (root:load-existing-workflows))))
+  (assert (not ok) "Show Existing Workflows should require a graph map even when the store is empty")
+  (assert (string.find (tostring result) "requires a graph map" 1 true)
+          "Show Existing Workflows missing graph failure should mention graph map"))
+
+(fn workflows-root-show-existing-requires-graph-before-empty-store-listing []
+  (with-runtime workflows-root-show-existing-requires-graph-before-empty-store-listing-case))
 
 (fn workflows-preview-shows-existing-counts-and-action-case [runtime]
   (seed-definition-with-run runtime)
@@ -1052,9 +1063,11 @@
 (table.insert tests {:name "workflows-preview-builds-with-new-workflow-action"
                       :fn workflows-preview-builds-with-new-workflow-action})
 (table.insert tests {:name "workflows-root-show-existing-loads-definition-and-run-nodes"
-                      :fn workflows-root-show-existing-loads-definition-and-run-nodes})
+                       :fn workflows-root-show-existing-loads-definition-and-run-nodes})
+(table.insert tests {:name "workflows-root-show-existing-requires-graph-before-empty-store-listing"
+                       :fn workflows-root-show-existing-requires-graph-before-empty-store-listing})
 (table.insert tests {:name "workflows-preview-shows-existing-counts-and-action"
-                      :fn workflows-preview-shows-existing-counts-and-action})
+                       :fn workflows-preview-shows-existing-counts-and-action})
 (table.insert tests {:name "workflow definition node expands to step code and run edges"
                        :fn workflow-definition-node-expands-to-step-code-and-run-edges})
 (table.insert tests {:name "workflow run node expands to definition run step and event edges"

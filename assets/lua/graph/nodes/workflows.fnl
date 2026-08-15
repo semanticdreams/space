@@ -44,6 +44,11 @@
   (assert store.list-runs "WorkflowsNode.load-existing-workflows requires workflow-store:list-runs")
   (store:list-runs {}))
 
+(fn assert-existing-workflows-graph [graph]
+  (assert graph "WorkflowsNode.load-existing-workflows requires a graph map")
+  (assert graph.load-by-key "WorkflowsNode.load-existing-workflows requires graph:load-by-key")
+  (assert graph.add-edge "WorkflowsNode.load-existing-workflows requires graph:add-edge"))
+
 (fn load-workflow-record-node [graph key]
   (assert graph "WorkflowsNode.load-existing-workflows requires a graph map")
   (assert graph.load-by-key "WorkflowsNode.load-existing-workflows requires graph:load-by-key")
@@ -80,9 +85,10 @@
           (add-visible-edge self.graph step-node code-node "code")
           result))
   (set node.load-existing-workflows
-       (fn [self]
-         (local definitions (list-required-definitions self.workflow-store))
-         (local runs (list-required-runs self.workflow-store))
+        (fn [self]
+          (assert-existing-workflows-graph self.graph)
+          (local definitions (list-required-definitions self.workflow-store))
+          (local runs (list-required-runs self.workflow-store))
          (local loaded-definitions [])
          (local loaded-runs [])
          (each [_ definition (ipairs definitions)]
