@@ -131,6 +131,89 @@
 (fn rejects-update-for-missing-item-id []
   (with-temp-store assert-missing-update-is-rejected))
 
+(fn assert-reserved-context-and-created-fields-do-not-own-projection []
+  (local run {:id "run-owned"
+              :status :running
+              :context {:id "legacy-context"
+                        :workflow-run-id "legacy-workflow"
+                        :items [{:id "cached-item" :content "cached"}]
+                        :agent-id "agent-alpha"
+                        :data {:topic "context"}}
+              :events [{:kind WorkflowEvents.KIND_SESSION_CREATED
+                        :data {:id "legacy-event"
+                               :workflow-run-id "event-workflow"
+                               :items [{:id "cached-event" :content "cached"}]
+                               :agent-id "agent-beta"
+                               :data {:topic "created"}}
+                        :created-at "2026-08-15T00:00:00Z"}]
+              :created-at "2026-08-14T00:00:00Z"
+              :updated-at "2026-08-14T00:00:00Z"})
+  (local session (WorkflowEvents.project-session run))
+  (assert (= session.id "run-owned") "run id must remain projection-owned")
+  (assert (= session.workflow-run-id "run-owned") "workflow run id must remain projection-owned")
+  (assert (= session.legacy-session-id "legacy-context") "legacy id should be audit metadata")
+  (assert (= session.legacy-workflow-run-id "legacy-workflow") "legacy workflow id should be audit metadata")
+  (assert (= (length session.items) 0) "metadata items must not become transcript items")
+  (assert (= session.data.topic "created") "non-reserved session data should still project")
+  (assert (= session.agent-id "agent-beta") "session-created agent id should still project"))
+
+(fn preserves-run-identity-and-items-against-reserved-metadata []
+  (assert-reserved-context-and-created-fields-do-not-own-projection))
+
+(fn assert-appended-session-created-payload-is-isolated [store run]
+  (local payload {:agent-id "agent-beta"
+                  :data {:nested {:value "before"}}
+                  :created-at "2026-08-15T00:00:00Z"})
+  (WorkflowEvents.append-session-created store run.id payload)
+  (set payload.data.nested.value "after")
+  (local first-session (get-projected-session store run.id))
+  (assert (= first-session.data.nested.value "before") "appended session-created data should be immutable event history")
+  (set first-session.data.nested.value "projected-mutation")
+  (local second-session (get-projected-session store run.id))
+  (assert (= second-session.data.nested.value "before") "projected session data should be isolated copies"))
+
+(fn isolates-nested-session-created-payloads-and-projections []
+  (with-temp-store assert-appended-session-created-payload-is-isolated))
+
+(fn assert-appended-item-payload-is-isolated [store run]
+  (local item {:id "tool-args" :type :tool-call :arguments {:path {:value "before"}}})
+  (WorkflowEvents.append-item store run.id item)
+  (set item.arguments.path.value "after")
+  (local first-session (get-projected-session store run.id))
+  (local first-item (. first-session.items 1))
+  (assert (= first-item.arguments.path.value "before") "appended item data should be immutable event history")
+  (set first-item.arguments.path.value "projected-mutation")
+  (local second-session (get-projected-session store run.id))
+  (local second-item (. second-session.items 1))
+  (assert (= second-item.arguments.path.value "before") "projected item data should be isolated copies"))
+
+(fn isolates-nested-item-payloads-and-projections []
+  (with-temp-store assert-appended-item-payload-is-isolated))
+
+(fn assert-status-and-update-payloads-are-isolated [store run]
+  (WorkflowEvents.append-item store run.id {:id "tool-update" :type :tool-call :status :running})
+  (local status-data {:details {:value "status-before"} :created-at "2026-08-15T00:00:01Z"})
+  (local updates {:status :done :details {:value "update-before"} :updated-at "2026-08-15T00:00:02Z"})
+  (WorkflowEvents.append-status store run.id :running status-data)
+  (WorkflowEvents.append-update store run.id "tool-update" updates)
+  (set status-data.details.value "status-after")
+  (set updates.details.value "update-after")
+  (local stored-run (store:get-run run.id))
+  (local status-event (. stored-run.events 2))
+  (local update-event (. stored-run.events 3))
+  (assert (= status-event.data.details.value "status-before") "stored status event data should be isolated")
+  (assert (= update-event.updates.details.value "update-before") "stored update event data should be isolated")
+  (local first-session (WorkflowEvents.project-session stored-run))
+  (local first-item (. first-session.items 1))
+  (assert (= first-item.details.value "update-before") "projected update data should use stored event history")
+  (set first-item.details.value "projected-mutation")
+  (local second-session (get-projected-session store run.id))
+  (local second-item (. second-session.items 1))
+  (assert (= second-item.details.value "update-before") "projected update data should be isolated copies"))
+
+(fn isolates-nested-status-and-update-payloads []
+  (with-temp-store assert-status-and-update-payloads-are-isolated))
+
 (table.insert tests {:name "projects-session-created-event-to-sidebar-session-shape"
                      :fn projects-session-created-event-to-sidebar-session-shape})
 (table.insert tests {:name "projects-appended-message-items-in-order"
@@ -144,7 +227,15 @@
 (table.insert tests {:name "rejects-duplicate-append-item-id"
                      :fn rejects-duplicate-append-item-id})
 (table.insert tests {:name "rejects-update-for-missing-item-id"
-                     :fn rejects-update-for-missing-item-id})
+                      :fn rejects-update-for-missing-item-id})
+(table.insert tests {:name "preserves-run-identity-and-items-against-reserved-metadata"
+                     :fn preserves-run-identity-and-items-against-reserved-metadata})
+(table.insert tests {:name "isolates-nested-session-created-payloads-and-projections"
+                     :fn isolates-nested-session-created-payloads-and-projections})
+(table.insert tests {:name "isolates-nested-item-payloads-and-projections"
+                     :fn isolates-nested-item-payloads-and-projections})
+(table.insert tests {:name "isolates-nested-status-and-update-payloads"
+                     :fn isolates-nested-status-and-update-payloads})
 
 (local main
   (fn []

@@ -7,11 +7,45 @@
 (fn table-or-empty [value]
   (if (= (type value) "table") value {}))
 
-(fn shallow-copy [value]
-  (local result {})
-  (each [k v (pairs (table-or-empty value))]
-    (tset result k v))
-  result)
+(fn deep-copy [value]
+  (if (not (= (type value) "table"))
+      value
+      (do
+        (local result {})
+        (each [k v (pairs value)]
+          (tset result k (deep-copy v)))
+        result)))
+
+(fn reserved-projection-key? [key]
+  (if (= key :id)
+      true
+      (= key :workflow-run-id)
+      true
+      (= key :items)
+      true
+      (= key :agent-id)
+      true
+      (= key :status)
+      true
+      (= key :data)
+      true
+      (= key :created-at)
+      true
+      (= key :updated-at)
+      true
+      false))
+
+(fn copy-projection-metadata! [session metadata]
+  (each [k v (pairs (table-or-empty metadata))]
+    (if (= k :id)
+        (when (not session.legacy-session-id)
+          (set session.legacy-session-id v))
+        (= k :workflow-run-id)
+        (when (not session.legacy-workflow-run-id)
+          (set session.legacy-workflow-run-id v))
+        (not (reserved-projection-key? k))
+        (tset session k (deep-copy v))))
+  session)
 
 (fn assert-store [store]
   (assert store "workflow event helper requires store")
@@ -64,28 +98,18 @@
                   :agent-id context.agent-id
                   :status (or context.status run.status)
                   :items []
-                  :data (shallow-copy context.data)
-                  :created-at run.created-at
-                  :updated-at run.updated-at})
-  (each [k v (pairs context)]
-    (when (and (not (= k :agent-id))
-               (not (= k :status))
-               (not (= k :data)))
-      (tset session k v)))
-  session)
+                   :data (deep-copy (table-or-empty context.data))
+                   :created-at run.created-at
+                   :updated-at run.updated-at})
+  (copy-projection-metadata! session context))
 
 (fn apply-session-created! [session event]
   (local data (table-or-empty event.data))
   (when data.agent-id
     (set session.agent-id data.agent-id))
   (when data.data
-    (set session.data (shallow-copy data.data)))
-  (each [k v (pairs data)]
-    (when (and (not (= k :agent-id))
-               (not (= k :data))
-               (not (= k :created-at))
-               (not (= k :updated-at)))
-      (tset session k v)))
+    (set session.data (deep-copy data.data)))
+  (copy-projection-metadata! session data)
   (when event.created-at
     (set session.created-at event.created-at))
   session)
@@ -94,15 +118,15 @@
   (assert-item item)
   (when (item-index session.items item.id)
     (error (.. "duplicate agent item id: " item.id)))
-  (table.insert session.items (shallow-copy item))
+  (table.insert session.items (deep-copy item))
   session)
 
 (fn upsert-projected-item! [session item]
   (assert-item item)
   (local index (item-index session.items item.id))
   (if index
-      (tset session.items index (shallow-copy item))
-      (table.insert session.items (shallow-copy item)))
+      (tset session.items index (deep-copy item))
+      (table.insert session.items (deep-copy item)))
   session)
 
 (fn update-projected-item! [session item-id updates]
@@ -111,7 +135,7 @@
   (local index (item-index session.items item-id))
   (when (not index)
     (error (.. "missing agent item id for update: " item-id)))
-  (merge-into! (. session.items index) updates)
+  (merge-into! (. session.items index) (deep-copy updates))
   session)
 
 (fn project-session [run]
@@ -142,7 +166,7 @@
   (assert-run-id run-id)
   (local payload (table-or-empty data))
   (store:append-event run-id {:kind KIND_SESSION_CREATED
-                              :data payload
+                              :data (deep-copy payload)
                               :created-at payload.created-at}))
 
 (fn append-status [store run-id status data]
@@ -152,7 +176,7 @@
   (local payload (table-or-empty data))
   (store:append-event run-id {:kind KIND_STATUS_CHANGED
                               :status status
-                              :data payload
+                              :data (deep-copy payload)
                               :created-at payload.created-at}))
 
 (fn append-item [store run-id item]
@@ -163,7 +187,7 @@
   (when (and session (item-index session.items item.id))
     (error (.. "duplicate agent item id: " item.id)))
   (store:append-event run-id {:kind KIND_ITEM_APPENDED
-                              :item (shallow-copy item)
+                              :item (deep-copy item)
                               :created-at item.created-at}))
 
 (fn append-upsert [store run-id item]
@@ -171,7 +195,7 @@
   (assert-run-id run-id)
   (assert-item item)
   (store:append-event run-id {:kind KIND_ITEM_UPSERTED
-                              :item (shallow-copy item)
+                              :item (deep-copy item)
                               :created-at (if item.updated-at item.updated-at item.created-at)}))
 
 (fn append-update [store run-id item-id updates]
@@ -184,7 +208,7 @@
     (error (.. "missing agent item id for update: " item-id)))
   (store:append-event run-id {:kind KIND_ITEM_UPDATED
                               :item-id item-id
-                              :updates (shallow-copy updates)
+                              :updates (deep-copy updates)
                               :created-at updates.updated-at}))
 
 (fn session-summary [session]
