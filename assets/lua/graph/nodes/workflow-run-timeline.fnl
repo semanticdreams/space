@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local WorkflowRunTimelinePreview (require :graph/view/previews/workflow-run-timeline))
 
 (local TIMELINE_PURPLE (glm.vec4 0.48 0.32 0.82 1))
@@ -42,24 +43,6 @@
   (assert graph.add-edge "WorkflowRunTimelineNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
-(fn graph-map? [graph]
-  (and graph
-       graph.graph
-       (not (= graph.graph graph))
-       graph.nodes
-       graph.edges
-       graph.edge-map
-       graph.lookup
-       graph.load-by-key
-       graph.add-edge
-       graph.node-added
-       graph.edge-added
-       graph.node-removed
-       graph.edge-removed
-       graph.node-added.emit
-       graph.edge-added.emit
-       graph.graph.register-key-loader))
-
 (fn loader-graph [graph]
   (if (and graph graph.graph graph.graph.has-key-loader-for-key)
       graph.graph
@@ -99,9 +82,9 @@
            [event (event-label event)])))
   (set node.load-event-from-graph
         (fn [self event-or-id]
-          (local action "WorkflowRunTimelineNode.load-event-from-graph")
-          (assert (graph-map? self.graph) (.. action " requires a graph map"))
-          (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
+           (local action "WorkflowRunTimelineNode.load-event-from-graph")
+           (GraphMapContext.assert-graph-map self.graph action)
+           (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
           (assert self.graph.add-edge (.. action " requires graph:add-edge"))
           (local events (current-events self action))
           (local id (event-id event-or-id action))

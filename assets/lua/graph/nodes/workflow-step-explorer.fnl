@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local WorkflowStepExplorerPreview (require :graph/view/previews/workflow-step-explorer))
 
 (local EXPLORER_ORANGE (glm.vec4 0.82 0.46 0.18 1))
@@ -56,7 +57,7 @@
           (.. action " requires graph loader for " label)))
 
 (fn assert-step-graph-dependencies [self action]
-  (assert self.graph (.. action " requires a graph map"))
+  (GraphMapContext.assert-graph-map self.graph action)
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 

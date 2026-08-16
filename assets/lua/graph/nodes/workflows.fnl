@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local WorkflowTemplates (require :workflows/templates))
 (local WorkflowsNodePreview (require :graph/view/previews/workflows))
 
@@ -20,7 +21,7 @@
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
 (fn assert-graph-load-and-edge [graph action]
-  (assert graph (.. action " requires a graph map"))
+  (GraphMapContext.assert-graph-map graph action)
   (assert graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert graph.add-edge (.. action " requires graph:add-edge")))
 
@@ -129,9 +130,9 @@
          (icollect [_ definition (ipairs (list-required-definitions self.workflow-store))]
            [definition (definition-label definition)])))
   (set node.load-definition-from-graph
-       (fn [self definition-or-id]
-         (assert self.graph "WorkflowsNode.load-definition-from-graph requires a graph map")
-         (assert self.graph.load-by-key "WorkflowsNode.load-definition-from-graph requires graph:load-by-key")
+        (fn [self definition-or-id]
+          (GraphMapContext.assert-graph-map self.graph "WorkflowsNode.load-definition-from-graph")
+          (assert self.graph.load-by-key "WorkflowsNode.load-definition-from-graph requires graph:load-by-key")
          (assert self.graph.add-edge "WorkflowsNode.load-definition-from-graph requires graph:add-edge")
          (local id (assert (definition-id definition-or-id)
                            "WorkflowsNode.load-definition-from-graph requires a workflow definition id"))

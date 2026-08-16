@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local WorkflowRunNodePreview (require :graph/view/previews/workflow-run))
 
 (local STATUS_COLORS
@@ -64,24 +65,6 @@
   (assert graph.add-edge "WorkflowRunNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
-(fn graph-map? [graph]
-  (and graph
-       graph.graph
-       (not (= graph.graph graph))
-       graph.nodes
-       graph.edges
-       graph.edge-map
-       graph.lookup
-       graph.load-by-key
-       graph.add-edge
-       graph.node-added
-       graph.edge-added
-       graph.node-removed
-       graph.edge-removed
-       graph.node-added.emit
-       graph.edge-added.emit
-       graph.graph.register-key-loader))
-
 (fn loader-graph [graph]
   (if (and graph graph.graph graph.graph.has-key-loader-for-key)
       graph.graph
@@ -99,7 +82,7 @@
   (assert self.workflow-store.get-run (.. action " requires workflow store:get-run"))
   (assert self.workflow-store.list-run-steps (.. action " requires workflow store:list-run-steps"))
   (assert self.workflow-store.list-events (.. action " requires workflow store:list-events"))
-  (assert (graph-map? self.graph) (.. action " requires a graph map"))
+  (GraphMapContext.assert-graph-map self.graph action)
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 

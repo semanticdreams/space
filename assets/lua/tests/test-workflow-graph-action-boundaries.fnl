@@ -124,13 +124,26 @@
     (assert (not (string.find key "workflow-run-event:" 1 true)) (.. message " should not leave stale run-event graph nodes")))
   (assert (= (graph:edge-count) before-edge-count) (.. message " should not add graph edges")))
 
-(fn assert-no-shared-graph-materializer-topology [graph before-edge-count message]
+(fn capture-node-keys [graph]
+  (local keys {})
   (each [key _ (pairs graph.nodes)]
-    (assert (not (string.find key "workflow-step:" 1 true)) (.. message " should not leave stale step graph nodes"))
-    (assert (not (string.find key "workflow-step-explorer:" 1 true)) (.. message " should not leave stale step explorer graph nodes"))
-    (assert (not (string.find key "workflow-run-step:" 1 true)) (.. message " should not leave stale run-step graph nodes"))
-    (assert (not (string.find key "workflow-run-event:" 1 true)) (.. message " should not leave stale run-event graph nodes")))
+    (set (. keys key) true))
+  keys)
+
+(fn assert-no-shared-graph-materializer-topology [graph before-edge-count before-keys message]
+  (each [key _ (pairs graph.nodes)]
+    (assert (. before-keys key) (.. message " should not leave newly materialized shared graph node: " key)))
   (assert (= (graph:edge-count) before-edge-count) (.. message " should not add graph edges")))
+
+(fn assert-shared-graph-domain-unchanged [runtime definition-id before message]
+  (assert (= (length (runtime.store:list-definitions)) before.definitions)
+          (.. message " should not persist workflow definitions"))
+  (assert (= (length (runtime.code-store:list-entities)) before.code)
+          (.. message " should not persist code entities"))
+  (assert (= (length (runtime.store:list-runs {:definition-id definition-id})) before.runs)
+          (.. message " should not persist workflow runs"))
+  (assert (= (length (. (runtime.store:get-definition definition-id) :steps)) before.steps)
+          (.. message " should not persist workflow steps")))
 
 (fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph-case [runtime]
   (local definition (seed-definition runtime))
@@ -253,16 +266,41 @@
 (fn graph-materializing-methods-require-mounted-graph-map-case [runtime]
   (local seeded (seed-run runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition
+                                                          :workflows
                                                           :workflow-step
                                                           :workflow-step-explorer
                                                           :workflow-run
                                                           :workflow-run-step
                                                           :workflow-run-timeline
-                                                          :workflow-run-event]))
+                                                          :workflow-run-event
+                                                          :code-entity]))
+  (local root-node (graph:load-by-key "workflows"))
   (local definition-node (graph:load-by-key (.. "workflow-definition:" seeded.definition.id)))
+  (local step-node (graph:load-by-key (.. "workflow-step:" seeded.definition.id ":step-a")))
   (local run-node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local explorer-node (graph:load-by-key (.. "workflow-step-explorer:" seeded.definition.id)))
   (local timeline-node (graph:load-by-key (.. "workflow-run-timeline:" seeded.run.id)))
   (local before-edges (graph:edge-count))
+  (local before-keys (capture-node-keys graph))
+  (local before {:definitions (length (runtime.store:list-definitions))
+                 :code (length (runtime.code-store:list-entities))
+                 :runs (length (runtime.store:list-runs {:definition-id seeded.definition.id}))
+                 :steps (length (. (runtime.store:get-definition seeded.definition.id) :steps))})
+  (assert-requires-mounted-graph-map
+    (fn [] (root-node:create-workflow-from-graph {:name "Shared Graph Leak"}))
+    "WorkflowsNode.create-workflow-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (root-node:load-definition-from-graph seeded.definition.id))
+    "WorkflowsNode.load-definition-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:start-workflow-from-graph {:prompt "go"} {}))
+    "WorkflowDefinitionNode.start-workflow-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:create-step-from-graph {:step-name "Shared Graph Step"}))
+    "WorkflowDefinitionNode.create-step-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:load-run-from-graph seeded.run.id))
+    "WorkflowDefinitionNode.load-run-from-graph")
   (assert-requires-mounted-graph-map
     (fn [] (definition-node:load-step-from-graph "step-a"))
     "WorkflowDefinitionNode.load-step-from-graph")
@@ -273,6 +311,15 @@
     (fn [] (definition-node:open-step-explorer-from-graph))
     "WorkflowDefinitionNode.open-step-explorer-from-graph")
   (assert-requires-mounted-graph-map
+    (fn [] (step-node:show-code-from-graph))
+    "WorkflowStepNode.show-code-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (explorer-node:load-step-from-graph "step-a"))
+    "WorkflowStepExplorerNode.load-step-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (explorer-node:reveal-all-steps-from-graph))
+    "WorkflowStepExplorerNode.reveal-all-steps-from-graph")
+  (assert-requires-mounted-graph-map
     (fn [] (run-node:load-run-steps-from-graph))
     "WorkflowRunNode.load-run-steps-from-graph")
   (assert-requires-mounted-graph-map
@@ -281,11 +328,45 @@
   (assert-requires-mounted-graph-map
     (fn [] (timeline-node:load-event-from-graph "event-a"))
     "WorkflowRunTimelineNode.load-event-from-graph")
-  (assert-no-shared-graph-materializer-topology graph before-edges "shared Graph materializers")
+  (assert-no-shared-graph-materializer-topology graph before-edges before-keys "shared Graph materializers")
+  (assert-shared-graph-domain-unchanged runtime seeded.definition.id before "shared Graph materializers")
   (graph:drop))
 
 (fn graph-materializing-methods-require-mounted-graph-map []
   (with-runtime graph-materializing-methods-require-mounted-graph-map-case))
+
+(fn selection-aware-start-validates-active-selection-case [runtime]
+  (local definition (seed-definition runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-step :workflow-run]))
+  (local map (GraphMap.GraphMap {:graph graph :id "selection-start-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local before-runs (length (runtime.store:list-runs {:definition-id definition.id})))
+  (local (empty-ok empty-err) (pcall node.start-workflow-with-selection-from-graph node {:prompt "go"} {}))
+  (assert (not empty-ok) "selection-aware Start should fail loudly with no active selection")
+  (assert (string.find (tostring empty-err) "requires selected graph nodes" 1 true)
+          "empty selection failure should explain selected graph node requirement")
+  (set map.selected_node_keys [node.key])
+  (local (invalid-ok invalid-err) (pcall node.start-workflow-with-selection-from-graph node {:prompt "go"} {}))
+  (assert (not invalid-ok) "selection-aware Start should reject unsupported selected node types")
+  (assert (string.find (tostring invalid-err) "unsupported selected graph node" 1 true)
+          "unsupported selection failure should identify unsupported selected nodes")
+  (assert (= (length (runtime.store:list-runs {:definition-id definition.id})) before-runs)
+          "invalid selection-aware Start should not persist workflow runs")
+  (local step-key (.. "workflow-step:" definition.id ":step-a"))
+  (map:load-by-key step-key)
+  (set map.selected_node_keys [step-key])
+  (local run (node:start-workflow-with-selection-from-graph {:prompt "go"} {}))
+  (assert (= (. run.context :graph-map-id) "selection-start-map")
+          "selection-aware Start should persist graph map id in run context")
+  (assert (= (. run.context :graph-node-keys 1) step-key)
+          "selection-aware Start should persist selected node keys in run context")
+  (assert (map:lookup (.. "workflow-run:" run.id))
+          "selection-aware Start should load the created run into the graph map")
+  (map:drop)
+  (graph:drop))
+
+(fn selection-aware-start-validates-active-selection []
+  (with-runtime selection-aware-start-validates-active-selection-case))
 
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
@@ -297,6 +378,7 @@
 (table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-timeline-shared-graph-event-load-requires-graph-map" :fn workflow-run-timeline-shared-graph-event-load-requires-graph-map})
 (table.insert tests {:name "graph-materializing-methods-require-mounted-graph-map" :fn graph-materializing-methods-require-mounted-graph-map})
+(table.insert tests {:name "selection-aware-start-validates-active-selection" :fn selection-aware-start-validates-active-selection})
 
 (local main
   (fn []

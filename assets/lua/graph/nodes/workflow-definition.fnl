@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local WorkflowTemplates (require :workflows/templates))
 (local WorkflowDefinitionNodePreview (require :graph/view/previews/workflow-definition))
 
@@ -77,7 +78,7 @@
   run)
 
 (fn assert-create-step-graph-dependencies [self]
-  (assert self.graph "WorkflowDefinitionNode.create-step-from-graph requires a graph map")
+  (GraphMapContext.assert-graph-map self.graph "WorkflowDefinitionNode.create-step-from-graph")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.create-step-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.create-step-from-graph requires graph:add-edge")
   (assert self.workflow-store.delete-step
@@ -91,24 +92,6 @@
       (if (and graph graph.has-key-loader-for-key)
           graph
           nil)))
-
-(fn graph-map? [graph]
-  (and graph
-       graph.graph
-       (not (= graph.graph graph))
-       graph.nodes
-       graph.edges
-       graph.edge-map
-       graph.lookup
-       graph.load-by-key
-       graph.add-edge
-       graph.node-added
-       graph.edge-added
-       graph.node-removed
-       graph.edge-removed
-       graph.node-added.emit
-       graph.edge-added.emit
-       graph.graph.register-key-loader))
 
 (fn assert-graph-loader [graph key action label]
   (local provider (loader-graph graph))
@@ -124,12 +107,12 @@
                        "code-entity"))
 
 (fn assert-load-run-graph-dependencies [self]
-  (assert (graph-map? self.graph) "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
+  (GraphMapContext.assert-graph-map self.graph "WorkflowDefinitionNode.load-run-from-graph")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.load-run-from-graph requires graph:add-edge"))
 
 (fn assert-step-graph-dependencies [self action]
-  (assert (graph-map? self.graph) (.. action " requires a graph map"))
+  (GraphMapContext.assert-graph-map self.graph action)
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 
@@ -146,7 +129,7 @@
                        "workflow-step-explorer"))
 
 (fn assert-start-graph-dependencies [self]
-  (assert self.graph "WorkflowDefinitionNode.start-workflow-from-graph requires a graph map")
+  (GraphMapContext.assert-graph-map self.graph "WorkflowDefinitionNode.start-workflow-from-graph")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.start-workflow-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.start-workflow-from-graph requires graph:add-edge")
   (local provider (loader-graph self.graph))
@@ -213,6 +196,32 @@
     (set out.graph-node-keys (copy-array graph.selected_node_keys)))
   out)
 
+(fn accepted-selection-key? [key]
+  (if (not (= (type key) :string))
+      false
+      (= key "workflows")
+      false
+      (= (string.sub key 1 20) "workflow-definition:")
+      false
+      (= (string.sub key 1 23) "workflow-step-explorer:")
+      false
+      (= (string.sub key 1 22) "workflow-run-timeline:")
+      false
+      (string.find key ":" 1 true)
+      true
+      false))
+
+(fn selected-graph-node-keys [graph action]
+  (GraphMapContext.assert-graph-map graph action)
+  (local selected (copy-array graph.selected_node_keys))
+  (assert (> (length selected) 0) (.. action " requires selected graph nodes"))
+  (each [_ key (ipairs selected)]
+    (assert (accepted-selection-key? key)
+            (.. action " unsupported selected graph node: " (tostring key)))
+    (assert (graph:lookup key)
+            (.. action " selected graph node is not visible in this graph map: " (tostring key))))
+  selected)
+
 (fn definition-label [definition definition-id]
   (if (and definition (> (string.len (if definition.name definition.name "")) 0))
       definition.name
@@ -267,15 +276,20 @@
   (set node.workflow-runner runner)
   (set node.code-store options.code-store)
   (set node.start-workflow-from-graph
-       (fn [self input context-opts]
-          (assert-start-graph-dependencies self)
-          (local run-input (if (= input nil) {} input))
-          (local run (self.workflow-runner:start-run self.workflow-definition-id
+        (fn [self input context-opts]
+           (assert-start-graph-dependencies self)
+           (local run-input (if (= input nil) {} input))
+           (local run (self.workflow-runner:start-run self.workflow-definition-id
                                                      run-input
                                                      (graph-context self.graph context-opts)))
-          (local run-node (load-required-node self.graph (run-key run.id)))
-          (add-visible-edge self.graph self run-node "run")
-          run))
+           (local run-node (load-required-node self.graph (run-key run.id)))
+           (add-visible-edge self.graph self run-node "run")
+           run))
+  (set node.start-workflow-with-selection-from-graph
+       (fn [self input context-opts]
+         (local action "WorkflowDefinitionNode.start-workflow-with-selection-from-graph")
+         (selected-graph-node-keys self.graph action)
+         (self:start-workflow-from-graph input context-opts)))
   (set node.create-step-from-graph
         (fn [self opts]
            (assert self.workflow-store "WorkflowDefinitionNode.create-step-from-graph requires workflow store")
@@ -326,10 +340,14 @@
          (add-visible-edge self.graph self explorer-node "steps")
          explorer-node))
   (set node.actions [{:name "Start Run"
-                         :icon "play_arrow"
-                         :fn (fn [_button _event]
-                               (node:start-workflow-from-graph {} {}))}
-                      {:name "New Step"
+                          :icon "play_arrow"
+                          :fn (fn [_button _event]
+                                (node:start-workflow-from-graph {} {}))}
+                       {:name "Start With Selection"
+                        :icon "play_circle"
+                        :fn (fn [_button _event]
+                              (node:start-workflow-with-selection-from-graph {} {}))}
+                       {:name "New Step"
                        :icon "add"
                        :fn (fn [_button _event]
                              (node:create-step-from-graph {}))}
