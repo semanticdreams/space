@@ -1,6 +1,5 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Text (require :text))
-(local PreviewSummary (require :workflows/preview-summary))
 
 (fn resolve-target [node options]
   (if node node (assert options.node "WorkflowRunEventNodePreview requires node")))
@@ -43,12 +42,24 @@
         (set found true))))
   found)
 
+(fn append-field [parts label value]
+  (when (not (= value nil))
+    (table.insert parts (.. label ": " (tostring value)))))
+
+(fn compact-summary [event]
+  (local parts [])
+  (append-field parts "Event" event.id)
+  (append-field parts "Kind" event.kind)
+  (append-field parts "Step" event.step-id)
+  (append-field parts "Created At" event.created-at)
+  (table.concat parts " · "))
+
 (fn build-content [target build-ctx]
   (local view {})
   (local label (if (and target target.label) target.label target.key target.key "Workflow run event"))
   (local title ((Text {:text (tostring label)}) build-ctx))
   (local event (current-event target))
-  (local summary (PreviewSummary.run-event-summary event))
+  (local summary (compact-summary event))
   (local summary-text ((Text {:text summary}) build-ctx))
   (local payload-hint
     (when (has-payload-details? event)

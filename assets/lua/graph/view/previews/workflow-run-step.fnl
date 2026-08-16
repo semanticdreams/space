@@ -1,6 +1,5 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Text (require :text))
-(local PreviewSummary (require :workflows/preview-summary))
 
 (fn resolve-target [node options]
   (if node node (assert options.node "WorkflowRunStepNodePreview requires node")))
@@ -29,12 +28,22 @@
       true
       (not (= run-step.error nil))))
 
+(fn append-field [parts label value]
+  (when (not (= value nil))
+    (table.insert parts (.. label ": " (tostring value)))))
+
+(fn compact-summary [run-step]
+  (local parts [])
+  (append-field parts "Status" run-step.status)
+  (append-field parts "Attempt" run-step.attempt)
+  (table.concat parts " · "))
+
 (fn build-content [target build-ctx]
   (local view {})
   (local label (if (and target target.label) target.label target.key target.key "Workflow run step"))
   (local title ((Text {:text (tostring label)}) build-ctx))
   (local run-step (current-run-step target))
-  (local summary (PreviewSummary.run-step-summary run-step))
+  (local summary (compact-summary run-step))
   (local summary-text ((Text {:text summary}) build-ctx))
   (local payload-hint
     (when (has-payload-details? run-step)
