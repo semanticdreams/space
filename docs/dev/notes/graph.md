@@ -12,7 +12,7 @@ tags:
 
 **Graph core persists only user-materialized topology** — which visible node keys exist and which visible edge connections exist (`graph:capture-state` / `graph:restore-state`). Owning systems persist the actual object data. There is no "full graph state backup" that captures domain data; `capture-state` stores node keys and edge source/target keys only.
 
-Related objects become graph-visible only through explicit preview, view, search-row, or action controls. A node may offer actions such as `Show Code`, `Show Details`, `Start`, or a searchable picker that loads a selected key into the current graph map and adds any display edge needed for that user-visible relationship. Graph code should not rely on hidden relationship expansion hooks to bulk-materialize neighboring records.
+Related objects become graph-visible only through explicit preview, view, search-row, or action controls. A node may offer actions such as `Show Code`, `Open Timeline`, `Show Run Steps`, `Reveal Failed Steps`, `Start`, or a searchable picker that loads a selected key into the current graph map and adds any display edge needed for that user-visible relationship. Dense records such as logs, JSON, inputs, outputs, and errors belong in payload panels or full node views rather than generic detail toggles. Graph code should not rely on hidden relationship expansion hooks to bulk-materialize neighboring records.
 
 ### Canonical terminology
 
