@@ -36,6 +36,16 @@ Related objects become graph-visible only through explicit preview, view, search
 - `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
 - `graph/view/`: owns visual/interactive systems (ForceLayout, points, labels, selection, movables, persistence metadata). Graph nodes do not track view instances.
 
+### Preview vs UX node vs full view
+
+Previews expose compact state, high-frequency local actions, and short search/list controls. They are appropriate for status summaries, small action rows, revealing one selected related node, opening a focused UX node, or opening a full view/panel.
+
+UX-purpose graph nodes expose one focused operation/detail surface and own no domain records. They are graph-addressable adapters over owning stores or systems, such as workflow step explorers or run timelines, and they materialize related topology only through explicit user actions.
+
+Full node views and panels handle dense content, long payloads, and editor-style interactions. Source code, logs, JSON, Fennel forms, multiline errors, inputs, and outputs belong in these views rather than in single-line preview labels.
+
+Graph-selection actions must read active `GraphMap` selection, validate accepted node types, and fail loudly or display explicit graph-native status on invalid selection. Destructive actions must be explicit graph actions rather than confirmation-dialog flows.
+
 ## Extracted
 - Graph model: `graph/core` owns nodes/edges, add/remove/replace, and emits signals (`node-added`, `node-removed`, `node-replaced`, `edge-added`, `edge-removed`).
 - Graph view: `graph/view` (`GraphView`) owns ForceLayout, points, labels, selection, movables, persistence, and node dialogs. It listens to graph signals and can be dropped/recreated without touching the graph model.
