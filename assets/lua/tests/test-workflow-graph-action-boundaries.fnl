@@ -113,6 +113,11 @@
     (assert (not (string.find key "workflow-run-timeline:" 1 true)) (.. message " should not leave stale timeline graph nodes")))
   (assert (= (map:edge-count) before-edge-count) (.. message " should not add graph edges")))
 
+(fn assert-no-run-event-topology [graph before-edge-count message]
+  (each [key _ (pairs graph.nodes)]
+    (assert (not (string.find key "workflow-run-event:" 1 true)) (.. message " should not leave stale run-event graph nodes")))
+  (assert (= (graph:edge-count) before-edge-count) (.. message " should not add graph edges")))
+
 (fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph-case [runtime]
   (local definition (seed-definition runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-step]))
@@ -217,6 +222,20 @@
 (fn workflow-run-open-timeline-without-loader-does-not-materialize []
   (with-runtime workflow-run-open-timeline-without-loader-does-not-materialize-case))
 
+(fn workflow-run-timeline-shared-graph-event-load-requires-graph-map-case [runtime]
+  (local seeded (seed-run runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-run-timeline :workflow-run-event]))
+  (local timeline (graph:load-by-key (.. "workflow-run-timeline:" seeded.run.id)))
+  (local before-edges (graph:edge-count))
+  (local (ok err) (pcall timeline.load-event-from-graph timeline "event-a"))
+  (assert (not ok) "Timeline event load from shared Graph should fail loudly")
+  (assert (string.find (tostring err) "requires a graph map" 1 true) "shared Graph failure should explain graph map requirement")
+  (assert-no-run-event-topology graph before-edges "failed shared Graph timeline event load")
+  (graph:drop))
+
+(fn workflow-run-timeline-shared-graph-event-load-requires-graph-map []
+  (with-runtime workflow-run-timeline-shared-graph-event-load-requires-graph-map-case))
+
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
@@ -225,6 +244,7 @@
 (table.insert tests {:name "definition-open-step-explorer-without-loader-does-not-materialize" :fn definition-open-step-explorer-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-show-steps-without-run-step-loader-does-not-materialize" :fn workflow-run-show-steps-without-run-step-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
+(table.insert tests {:name "workflow-run-timeline-shared-graph-event-load-requires-graph-map" :fn workflow-run-timeline-shared-graph-event-load-requires-graph-map})
 
 (local main
   (fn []

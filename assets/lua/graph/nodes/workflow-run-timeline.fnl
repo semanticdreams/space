@@ -42,6 +42,24 @@
   (assert graph.add-edge "WorkflowRunTimelineNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn graph-map? [graph]
+  (and graph
+       graph.graph
+       (not (= graph.graph graph))
+       graph.nodes
+       graph.edges
+       graph.edge-map
+       graph.lookup
+       graph.load-by-key
+       graph.add-edge
+       graph.node-added
+       graph.edge-added
+       graph.node-removed
+       graph.edge-removed
+       graph.node-added.emit
+       graph.edge-added.emit
+       graph.graph.register-key-loader))
+
 (fn loader-graph [graph]
   (if (and graph graph.graph graph.graph.has-key-loader-for-key)
       graph.graph
@@ -80,19 +98,19 @@
          (icollect [_ event (ipairs events)]
            [event (event-label event)])))
   (set node.load-event-from-graph
-       (fn [self event-or-id]
-         (local action "WorkflowRunTimelineNode.load-event-from-graph")
-         (assert self.graph (.. action " requires a graph map"))
-         (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
-         (assert self.graph.add-edge (.. action " requires graph:add-edge"))
-         (local events (current-events self action))
-         (local id (event-id event-or-id action))
-         (local event (find-event events id))
-         (assert event (.. action " event " (tostring id) " does not belong to workflow run " (tostring self.workflow-run-id)))
-         (assert-graph-loader self.graph (event-key self.workflow-run-id id) action "workflow-run-event")
-         (local event-node (load-required-node self.graph (event-key self.workflow-run-id id) action))
-         (add-visible-edge self.graph self event-node "event")
-         event-node))
+        (fn [self event-or-id]
+          (local action "WorkflowRunTimelineNode.load-event-from-graph")
+          (assert (graph-map? self.graph) (.. action " requires a graph map"))
+          (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
+          (assert self.graph.add-edge (.. action " requires graph:add-edge"))
+          (local events (current-events self action))
+          (local id (event-id event-or-id action))
+          (local event (find-event events id))
+          (assert event (.. action " event " (tostring id) " does not belong to workflow run " (tostring self.workflow-run-id)))
+          (assert-graph-loader self.graph (event-key self.workflow-run-id id) action "workflow-run-event")
+          (local event-node (load-required-node self.graph (event-key self.workflow-run-id id) action))
+          (add-visible-edge self.graph self event-node "event")
+          event-node))
   node)
 
 (fn register-loader [graph opts]
