@@ -52,16 +52,16 @@
   (local status (if (and run run.status) run.status :pending))
   (.. "Workflow run " run-id " (" (tostring status) ")"))
 
-(fn load-required-node [graph key]
-  (assert graph "WorkflowRunNode.load-details-from-graph requires a graph map")
-  (assert graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
+(fn load-required-node [graph key action]
+  (assert graph (.. action " requires a graph map"))
+  (assert graph.load-by-key (.. action " requires graph:load-by-key"))
   (local node (graph:load-by-key key))
-  (assert node (.. "WorkflowRunNode.load-details-from-graph failed to load graph node: " key))
+  (assert node (.. action " failed to load graph node: " key))
   node)
 
 (fn add-visible-edge [graph source target label]
-  (assert graph "WorkflowRunNode.load-details-from-graph requires a graph map")
-  (assert graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge")
+  (assert graph "WorkflowRunNode requires a graph map")
+  (assert graph.add-edge "WorkflowRunNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
 (fn graph-map? [graph]
@@ -82,25 +82,58 @@
        graph.edge-added.emit
        graph.graph.register-key-loader))
 
-(fn assert-detail-dependencies [self]
-  (assert self.workflow-store "WorkflowRunNode.load-details-from-graph requires workflow store")
-  (assert self.workflow-store.get-run "WorkflowRunNode.load-details-from-graph requires workflow store:get-run")
-  (assert self.workflow-store.list-run-steps "WorkflowRunNode.load-details-from-graph requires workflow store:list-run-steps")
-  (assert self.workflow-store.list-events "WorkflowRunNode.load-details-from-graph requires workflow store:list-events")
-  (assert (graph-map? self.graph) "WorkflowRunNode.load-details-from-graph requires a graph map")
-  (assert self.graph.load-by-key "WorkflowRunNode.load-details-from-graph requires graph:load-by-key")
-  (assert self.graph.add-edge "WorkflowRunNode.load-details-from-graph requires graph:add-edge"))
+(fn loader-graph [graph]
+  (if (and graph graph.graph graph.graph.has-key-loader-for-key)
+      graph.graph
+      (if (and graph graph.has-key-loader-for-key)
+          graph
+          nil)))
 
-(fn event-key [run-id event-id]
-  (.. "workflow-run-event:" run-id ":" event-id))
+(fn assert-graph-loader [graph key action label]
+  (local provider (loader-graph graph))
+  (assert (and provider (provider:has-key-loader-for-key key))
+          (.. action " requires graph loader for " label)))
+
+(fn assert-run-dependencies [self action]
+  (assert self.workflow-store (.. action " requires workflow store"))
+  (assert self.workflow-store.get-run (.. action " requires workflow store:get-run"))
+  (assert self.workflow-store.list-run-steps (.. action " requires workflow store:list-run-steps"))
+  (assert self.workflow-store.list-events (.. action " requires workflow store:list-events"))
+  (assert (graph-map? self.graph) (.. action " requires a graph map"))
+  (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
+  (assert self.graph.add-edge (.. action " requires graph:add-edge")))
+
+(fn current-run [self action]
+  (local current (self.workflow-store:get-run self.workflow-run-id))
+  (assert current (.. action " missing workflow run: " (tostring self.workflow-run-id)))
+  current)
 
 (fn run-step-key [run-id step-id]
   (.. "workflow-run-step:" run-id ":" step-id))
 
-(fn make-toggle-action [node]
-  {:name (if node.details-expanded? "Hide Details" "Show Details")
-   :icon (if node.details-expanded? "visibility_off" "visibility")
-   :fn node.toggle-details-action})
+(fn timeline-key [run-id]
+  (.. "workflow-run-timeline:" run-id))
+
+(fn failed-status? [status]
+  (= (status-key status) :failed))
+
+(fn make-show-run-steps-action [node]
+  {:name "Show Run Steps"
+   :icon "account_tree"
+   :fn (fn [_button _event]
+         (node:load-run-steps-from-graph))})
+
+(fn make-reveal-failed-action [node]
+  {:name "Reveal Failed Steps"
+   :icon "error"
+   :fn (fn [_button _event]
+         (node:reveal-failed-run-steps-from-graph))})
+
+(fn make-open-timeline-action [node]
+  {:name "Open Timeline"
+   :icon "timeline"
+   :fn (fn [_button _event]
+         (node:open-timeline-from-graph))})
 
 (fn make-cancel-action [node]
   {:name "Cancel Run"
@@ -122,10 +155,38 @@
   (and run (cancellable-run-status? run.status)))
 
 (fn run-actions [self]
-  (local actions [(make-toggle-action self)])
+  (local actions [(make-show-run-steps-action self)
+                  (make-reveal-failed-action self)
+                  (make-open-timeline-action self)])
   (when (cancellable-run? self)
     (table.insert actions (make-cancel-action self)))
   actions)
+
+(fn load-run-steps [self opts]
+  (local action "WorkflowRunNode.load-run-steps-from-graph")
+  (assert-run-dependencies self action)
+  (assert-graph-loader self.graph (run-step-key self.workflow-run-id "__preflight__") action "workflow-run-step")
+  (local current (current-run self action))
+  (local run-steps (self.workflow-store:list-run-steps current.id))
+  (local options (or opts {}))
+  (local loaded [])
+  (each [_ run-step (ipairs run-steps)]
+    (when (or (not options.failed-only?) (failed-status? run-step.status))
+      (local step-id (assert run-step.step-id (.. action " requires run step.step-id")))
+      (local step-node (load-required-node self.graph (run-step-key current.id step-id) action))
+      (add-visible-edge self.graph self step-node "run step")
+      (table.insert loaded step-node)))
+  {:run-step-count (length loaded)
+   :run-steps loaded})
+
+(fn open-timeline [self]
+  (local action "WorkflowRunNode.open-timeline-from-graph")
+  (assert-run-dependencies self action)
+  (assert-graph-loader self.graph (timeline-key self.workflow-run-id) action "workflow-run-timeline")
+  (local current (current-run self action))
+  (local timeline-node (load-required-node self.graph (timeline-key current.id) action))
+  (add-visible-edge self.graph self timeline-node "timeline")
+  timeline-node)
 
 (fn WorkflowRunNode [opts]
   (local options (or opts {}))
@@ -142,39 +203,11 @@
   (set node.workflow-run-id run-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)
-  (set node.details-expanded? false)
-  (set node.load-details-from-graph
+  (set node.load-run-steps-from-graph load-run-steps)
+  (set node.reveal-failed-run-steps-from-graph
        (fn [self]
-         (assert-detail-dependencies self)
-         (local current (self.workflow-store:get-run self.workflow-run-id))
-         (assert current (.. "WorkflowRunNode.load-details-from-graph missing workflow run: "
-                            (tostring self.workflow-run-id)))
-         (local run-steps (self.workflow-store:list-run-steps current.id))
-         (local events (self.workflow-store:list-events current.id))
-         (each [_ run-step (ipairs run-steps)]
-           (local step-id (assert run-step.step-id
-                                  "WorkflowRunNode.load-details-from-graph requires run step.step-id"))
-           (local step-node (load-required-node self.graph (run-step-key current.id step-id)))
-           (add-visible-edge self.graph self step-node "run step"))
-         (each [_ event (ipairs events)]
-           (local event-id (assert event.id
-                                  "WorkflowRunNode.load-details-from-graph requires event.id"))
-           (local event-node (load-required-node self.graph (event-key current.id event-id)))
-           (add-visible-edge self.graph self event-node "event"))
-         (set self.details-expanded? true)
-         {:run-step-count (length run-steps)
-          :event-count (length events)}))
-  (set node.show-details (fn [self]
-                            (self:load-details-from-graph)))
-  (set node.hide-details (fn [self]
-                            (set self.details-expanded? false)
-                            true))
-  (set node.toggle-details (fn [self]
-                             (if self.details-expanded?
-                                 (self:hide-details)
-                                  (self:load-details-from-graph))))
-  (set node.toggle-details-action (fn [_button _event]
-                                    (node:toggle-details)))
+         (self:load-run-steps-from-graph {:failed-only? true})))
+  (set node.open-timeline-from-graph open-timeline)
   (set node.cancel-run-action (fn [_button _event]
                                 (node.workflow-runner:cancel-run node.workflow-run-id "cancelled from graph")))
   (set node.actions run-actions)

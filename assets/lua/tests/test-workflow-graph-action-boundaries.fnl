@@ -87,6 +87,13 @@
   (local code (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
   (runtime.store:create-definition {:id "wf-demo" :name "Demo" :steps [{:id "step-a" :name "A" :code-entity-id code.id}] :edges []}))
 
+(fn seed-run [runtime]
+  (local definition (seed-definition runtime))
+  (local run (runtime.store:create-run definition.id {} {}))
+  (runtime.store:upsert-run-step run.id "step-a" {:status :failed :error {:message "boom"}})
+  (runtime.store:append-event run.id {:id "event-a" :kind :step-failed :step-id "step-a"})
+  {:definition definition :run (runtime.store:get-run run.id)})
+
 (fn assert-no-step-or-code-topology [map message]
   (each [key _ (pairs map.nodes)]
     (assert (not (string.find key "workflow-step:" 1 true)) (.. message " should not leave stale step graph nodes"))
@@ -99,6 +106,12 @@
     (assert (not (string.find key "workflow-step-explorer:" 1 true)) (.. message " should not leave stale step explorer graph nodes")))
   (assert (= (map:node-count) 1) (.. message " should leave only the already-loaded definition node"))
   (assert (= (map:edge-count) 0) (.. message " should not leave stale graph edges")))
+
+(fn assert-no-run-step-or-timeline-topology [map before-edge-count message]
+  (each [key _ (pairs map.nodes)]
+    (assert (not (string.find key "workflow-run-step:" 1 true)) (.. message " should not leave stale run-step graph nodes"))
+    (assert (not (string.find key "workflow-run-timeline:" 1 true)) (.. message " should not leave stale timeline graph nodes")))
+  (assert (= (map:edge-count) before-edge-count) (.. message " should not add graph edges")))
 
 (fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph-case [runtime]
   (local definition (seed-definition runtime))
@@ -172,12 +185,46 @@
 (fn definition-open-step-explorer-without-loader-does-not-materialize []
   (with-runtime definition-open-step-explorer-without-loader-does-not-materialize-case))
 
+(fn workflow-run-show-steps-without-run-step-loader-does-not-materialize-case [runtime]
+  (local seeded (seed-run runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-run]))
+  (local map (GraphMap.GraphMap {:graph graph :id "run-steps-missing-loader-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local before-edges (map:edge-count))
+  (local (ok err) (pcall node.load-run-steps-from-graph node))
+  (assert (not ok) "Show Run Steps without workflow-run-step loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader" 1 true) "missing workflow-run-step loader failure should explain the missing graph loader")
+  (assert-no-run-step-or-timeline-topology map before-edges "failed Show Run Steps")
+  (map:drop)
+  (graph:drop))
+
+(fn workflow-run-show-steps-without-run-step-loader-does-not-materialize []
+  (with-runtime workflow-run-show-steps-without-run-step-loader-does-not-materialize-case))
+
+(fn workflow-run-open-timeline-without-loader-does-not-materialize-case [runtime]
+  (local seeded (seed-run runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-run :workflow-run-step]))
+  (local map (GraphMap.GraphMap {:graph graph :id "run-timeline-missing-loader-map"}))
+  (local node (map:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local before-edges (map:edge-count))
+  (local (ok err) (pcall node.open-timeline-from-graph node))
+  (assert (not ok) "Open Timeline without workflow-run-timeline loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader" 1 true) "missing workflow-run-timeline loader failure should explain the missing graph loader")
+  (assert-no-run-step-or-timeline-topology map before-edges "failed Open Timeline")
+  (map:drop)
+  (graph:drop))
+
+(fn workflow-run-open-timeline-without-loader-does-not-materialize []
+  (with-runtime workflow-run-open-timeline-without-loader-does-not-materialize-case))
+
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
 (table.insert tests {:name "definition-new-step-code-load-failure-removes-stale-step-node" :fn definition-new-step-code-load-failure-removes-stale-step-node})
 (table.insert tests {:name "definition-reveal-all-steps-without-step-loader-does-not-materialize" :fn definition-reveal-all-steps-without-step-loader-does-not-materialize})
 (table.insert tests {:name "definition-open-step-explorer-without-loader-does-not-materialize" :fn definition-open-step-explorer-without-loader-does-not-materialize})
+(table.insert tests {:name "workflow-run-show-steps-without-run-step-loader-does-not-materialize" :fn workflow-run-show-steps-without-run-step-loader-does-not-materialize})
+(table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
 
 (local main
   (fn []
