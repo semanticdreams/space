@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
+(local GraphMapContext (require :graph/map-context))
 (local GraphAuthoring (require :workflows/graph-authoring))
 (local WorkflowStepNodePreview (require :graph/view/previews/workflow-step))
 
@@ -37,6 +38,24 @@
   (assert graph.add-edge "WorkflowStepNode requires graph:add-edge")
   (graph:add-edge (GraphEdge {:source source :target target :label label})))
 
+(fn loader-graph [graph]
+  (if (and graph graph.graph graph.graph.has-key-loader-for-key)
+      graph.graph
+      (if (and graph graph.has-key-loader-for-key)
+          graph
+          nil)))
+
+(fn assert-graph-loader [graph key action label]
+  (local provider (loader-graph graph))
+  (assert (and provider (provider:has-key-loader-for-key key))
+          (.. action " requires graph loader for " label)))
+
+(fn assert-show-code-graph-dependencies [self]
+  (local action "WorkflowStepNode.show-code-from-graph")
+  (GraphMapContext.assert-graph-map self.graph action)
+  (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
+  (assert self.graph.add-edge (.. action " requires graph:add-edge")))
+
 (fn step-label [step step-id]
   (if (and step (> (string.len (if step.name step.name "")) 0))
       step.name
@@ -69,12 +88,16 @@
                         (find-step (self.workflow-store:get-definition self.workflow-definition-id)
                                    self.workflow-step-id)))
   (set node.show-code-from-graph
-       (fn [self]
-         (local current-step (assert (self:get-step)
-                                     "WorkflowStepNode.show-code-from-graph requires an existing workflow step"))
-         (local code-entity-id (assert current-step.code-entity-id
-                                       "WorkflowStepNode.show-code-from-graph requires step.code-entity-id"))
-         (local code-node (load-required-node self.graph (.. "code-entity:" code-entity-id)))
+        (fn [self]
+          (assert-show-code-graph-dependencies self)
+          (local current-step (assert (self:get-step)
+                                      "WorkflowStepNode.show-code-from-graph requires an existing workflow step"))
+          (local code-entity-id (assert current-step.code-entity-id
+                                        "WorkflowStepNode.show-code-from-graph requires step.code-entity-id"))
+          (assert-graph-loader self.graph (.. "code-entity:" code-entity-id)
+                               "WorkflowStepNode.show-code-from-graph"
+                               "code-entity")
+          (local code-node (load-required-node self.graph (.. "code-entity:" code-entity-id)))
          (add-visible-edge self.graph self code-node "code")
          code-node))
   (set node.actions [{:name "Show Code"

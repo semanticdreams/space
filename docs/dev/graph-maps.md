@@ -211,6 +211,12 @@ When both endpoints of a link entity are present in a graph map, the map may cre
 
 Workflow display edges follow the same visibility rule: workflow definitions, runs, run steps, and events are loaded only by explicit workflow controls, and workflow-derived display edges are not the canonical workflow topology. The workflow store owns definition edges, run records, run-step records, and event records.
 
+Workflow-derived display edges can be added by explicit actions such as **Reveal All Steps**, **Show Run Steps**, or timeline/event materialization. Mark those edges with `from-workflow-edge` so graph-map capture skips them and the workflow store remains the canonical owner.
+
+UX-purpose nodes such as `workflow-step-explorer:<definition-id>` and `workflow-run-timeline:<run-id>` are graph-map topology only. They own no workflow records; they adapt workflow stores, run records, events, and active graph-map context into a focused surface.
+
+Hidden relationship expansion and graph trigger APIs are forbidden. Workflow topology enters a graph map only through user-directed controls that say what nodes or edges they materialize.
+
 ## Deleted Or Invalid Objects
 
 Avoid making backing-object deletion scale with the number of graph maps.

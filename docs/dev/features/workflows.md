@@ -49,7 +49,7 @@ The `Workflows` root browse/search surface lists workflow definitions only. Runs
 7. Use `New Step` on the definition for additional steps.
 8. Connect workflow step nodes; those connections create canonical workflow edges.
 9. Click `Start` / `Start Run` on the workflow definition to create and reveal a run node in the active graph map.
-10. Open the run node, use `Show Details`, and inspect the explicitly materialized run-step and event previews.
+10. Open the run node, use granular inspection actions such as `Open Timeline`, `Show Run Steps`, and `Reveal Failed Steps`, then inspect long inputs, outputs, errors, logs, or event bodies in payload panels/full node views.
 
 Workflow data remains in `WorkflowStore`: definitions, steps, edges, runs, run steps, and events are owned there. Fennel source bodies remain in `CodeEntityStore`. Graph nodes and actions adapt those stores into the current interaction context, and graph maps only provide visibility, selection, and interaction context; they do not own workflow data or code bodies.
 

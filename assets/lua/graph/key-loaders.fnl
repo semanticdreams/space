@@ -61,6 +61,7 @@
 (local {:register-loader register-workflow-run-loader} (require :graph/nodes/workflow-run))
 (local {:register-loader register-workflow-run-step-loader} (require :graph/nodes/workflow-run-step))
 (local {:register-loader register-workflow-run-event-loader} (require :graph/nodes/workflow-run-event))
+(local {:register-loader register-workflow-run-timeline-loader} (require :graph/nodes/workflow-run-timeline))
 
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
@@ -326,9 +327,10 @@
     (when workflow-runner
       (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
       (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
-    (register-workflow-step-loader graph {:store workflow-store})
+    (register-workflow-step-loader graph {:store workflow-store}) ((. (require :graph/nodes/workflow-step-explorer) :register-loader) graph {:store workflow-store})
     (register-workflow-run-step-loader graph {:store workflow-store})
     (register-workflow-run-event-loader graph {:store workflow-store})
+    (register-workflow-run-timeline-loader graph {:store workflow-store})
     ((. (require :graph/nodes/agent-session) :register-loader) graph {:store workflow-store}))
   (register-list-entity-loader graph {:store list-store
                                       :identity-store identity-store})

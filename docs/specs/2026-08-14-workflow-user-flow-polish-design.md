@@ -70,7 +70,11 @@ The documented and supported user path should be:
 7. Use `New Step` on the definition for additional steps.
 8. Connect workflow step nodes; those connections create canonical workflow edges.
 9. Click `Start` / `Start Run` on the workflow definition.
-10. Open the run node, toggle `Show Details`, and inspect run-step and event previews.
+10. Open the run node and use the granular run-inspection actions from the
+    2026-08-16 workflow graph UX design: `Open Timeline`, `Show Run Steps`,
+    `Reveal Failed Steps`, and run-step/event payload panels. The old generic
+    `Show Details` / `Hide Details` toggle flow is superseded and must not be
+    reintroduced except as explicitly deprecated wording.
 
 ## UI Details
 

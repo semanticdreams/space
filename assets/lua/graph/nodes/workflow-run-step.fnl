@@ -1,6 +1,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local WorkflowRunNode (require :graph/nodes/workflow-run))
 (local WorkflowRunStepNodePreview (require :graph/view/previews/workflow-run-step))
+(local WorkflowRunStepNodeView (require :graph/view/views/workflow-run-step))
 
 (fn split-key-parts [text]
   (assert text "split-key-parts requires text")
@@ -22,6 +23,13 @@
 (fn status-tone [status]
   (WorkflowRunNode.status-tone status))
 
+(fn get-run-step [self]
+  (local store (assert self.workflow-store "WorkflowRunStepNode.get-run-step requires workflow store"))
+  (local run-id (assert self.workflow-run-id "WorkflowRunStepNode.get-run-step requires workflow run id"))
+  (local step-id (assert self.workflow-step-id "WorkflowRunStepNode.get-run-step requires workflow step id"))
+  (assert (store:get-run-step run-id step-id)
+          (.. "WorkflowRunStepNode.get-run-step missing run step: " run-id ":" step-id)))
+
 (fn WorkflowRunStepNode [opts]
   (local options (or opts {}))
   (local store (assert options.store "WorkflowRunStepNode requires store"))
@@ -30,13 +38,15 @@
   (local run-step (store:get-run-step run-id step-id))
   (local node (GraphNode {:key (run-step-key run-id step-id)
                           :label (run-step-label run-step step-id)
-                          :color (WorkflowRunNode.status-color (and run-step run-step.status))
-                          :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
-                          :preview WorkflowRunStepNodePreview
-                          :size 7.0}))
+                           :color (WorkflowRunNode.status-color (and run-step run-step.status))
+                           :sub-color (WorkflowRunNode.status-color (and run-step run-step.status))
+                           :preview WorkflowRunStepNodePreview
+                           :view WorkflowRunStepNodeView
+                           :size 7.0}))
   (set node.workflow-run-id run-id)
   (set node.workflow-step-id step-id)
   (set node.workflow-store store)
+  (set node.get-run-step get-run-step)
   node)
 
 (fn parse-key [key]

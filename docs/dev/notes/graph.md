@@ -12,7 +12,7 @@ tags:
 
 **Graph core persists only user-materialized topology** — which visible node keys exist and which visible edge connections exist (`graph:capture-state` / `graph:restore-state`). Owning systems persist the actual object data. There is no "full graph state backup" that captures domain data; `capture-state` stores node keys and edge source/target keys only.
 
-Related objects become graph-visible only through explicit preview, view, search-row, or action controls. A node may offer actions such as `Show Code`, `Show Details`, `Start`, or a searchable picker that loads a selected key into the current graph map and adds any display edge needed for that user-visible relationship. Graph code should not rely on hidden relationship expansion hooks to bulk-materialize neighboring records.
+Related objects become graph-visible only through explicit preview, view, search-row, or action controls. A node may offer actions such as `Show Code`, `Open Timeline`, `Show Run Steps`, `Reveal Failed Steps`, `Start`, or a searchable picker that loads a selected key into the current graph map and adds any display edge needed for that user-visible relationship. Dense records such as logs, JSON, inputs, outputs, and errors belong in payload panels or full node views rather than generic detail toggles. Graph code should not rely on hidden relationship expansion hooks to bulk-materialize neighboring records.
 
 ### Canonical terminology
 
@@ -35,6 +35,16 @@ Related objects become graph-visible only through explicit preview, view, search
 - Activity hierarchy keys expose `world:<world-id>` → `world-activities:<world-id>` → `world-activity:<world-id>:<activity-id>` → `activity-surfaces:<world-id>:<activity-id>` before reaching concrete surface nodes such as scene, HUD, or canvas.
 - `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
 - `graph/view/`: owns visual/interactive systems (ForceLayout, points, labels, selection, movables, persistence metadata). Graph nodes do not track view instances.
+
+### Preview vs UX node vs full view
+
+Previews expose compact state, high-frequency local actions, and short search/list controls. They are appropriate for status summaries, small action rows, revealing one selected related node, opening a focused UX node, or opening a full view/panel.
+
+UX-purpose graph nodes expose one focused operation/detail surface and own no domain records. They are graph-addressable adapters over owning stores or systems, such as workflow step explorers or run timelines, and they materialize related topology only through explicit user actions.
+
+Full node views and panels handle dense content, long payloads, and editor-style interactions. Source code, logs, JSON, Fennel forms, multiline errors, inputs, and outputs belong in these views rather than in single-line preview labels.
+
+Graph-selection actions must read active `GraphMap` selection, validate accepted node types, and fail loudly or display explicit graph-native status on invalid selection. Destructive actions must be explicit graph actions rather than confirmation-dialog flows.
 
 ## Extracted
 - Graph model: `graph/core` owns nodes/edges, add/remove/replace, and emits signals (`node-added`, `node-removed`, `node-replaced`, `edge-added`, `edge-removed`).
