@@ -24,4 +24,41 @@
         (write-json-atomic! path payload))
     true)
 
-{:write-json! write-json!}
+(fn array-table? [value]
+    (var count 0)
+    (var array? true)
+    (each [key _item (pairs value)]
+        (set count (+ count 1))
+        (when (not (and (= (type key) :number)
+                        (= key (math.floor key))
+                        (>= key 1)))
+            (set array? false)))
+    (and array? (= count (length value))))
+
+(fn sorted-keys [value]
+    (local keys [])
+    (each [key _item (pairs value)]
+        (table.insert keys key))
+    (table.sort keys (fn [left right]
+                       (< (tostring left) (tostring right))))
+    keys)
+
+(fn stable-json [value]
+    (if (= (type value) :table)
+        (if (array-table? value)
+            (do
+                (local parts [])
+                (each [_ item (ipairs value)]
+                    (table.insert parts (stable-json item)))
+                (.. "[" (table.concat parts ",") "]"))
+            (do
+                (local parts [])
+                (each [_ key (ipairs (sorted-keys value))]
+                    (table.insert parts (.. (json.dumps (tostring key)) ":" (stable-json (. value key)))))
+                (.. "{" (table.concat parts ",") "}")))
+        (if (= value nil)
+            "null"
+            (json.dumps value))))
+
+{:write-json! write-json!
+ :stable-json stable-json}

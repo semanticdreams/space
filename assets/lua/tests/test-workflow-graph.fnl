@@ -847,7 +847,6 @@
   (assert-contains event-summary "Payload:" "run-event summary should include payload label")
   (assert-contains event-summary "step-a" "run-event summary should include step id")
   (assert-contains event-summary "human-input" "run-event summary should include non-metadata event fields"))
-
 (fn workflow-run-step-preview-builds-summary-case [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local graph runtime.graph)
@@ -866,11 +865,14 @@
   (assert-contains summary "Status:" "workflow run-step preview summary should include status")
   (assert-contains summary "succeeded" "workflow run-step preview summary should include useful status text")
   (assert-contains summary "Output:" "workflow run-step preview summary should include output")
+  (assert widget.payload-hint "workflow run-step preview should expose compact payload panel hint when details exist") (assert-contains (text-widget-string widget.payload-hint) "Open node for payload panel" "workflow run-step preview should direct dense payloads to full view")
   (assert-preview-drops-owned-children widget "workflow run-step preview"))
+(fn workflow-run-step-preview-builds-summary [] (with-runtime workflow-run-step-preview-builds-summary-case))
 
-(fn workflow-run-step-preview-builds-summary []
-  (with-runtime workflow-run-step-preview-builds-summary-case))
-
+(fn workflow-run-step-node-has-payload-view-case [runtime] (local seeded (seed-definition-with-run runtime)) (local node (runtime.graph:load-by-key (.. "workflow-run-step:" seeded.run.id ":step-a"))) (assert node "workflow run-step node should load") (assert node.view "workflow run-step node should expose a full payload view") (assert node.get-run-step "workflow run-step node should expose get-run-step") (assert (= (. (node:get-run-step) :status) :succeeded) "get-run-step should return the current persisted run step"))
+(fn workflow-run-step-node-has-payload-view [] (with-runtime workflow-run-step-node-has-payload-view-case))
+(fn workflow-run-step-view-renders-payload-in-multiline-input-case [runtime] (local seeded (seed-definition-with-run runtime)) (runtime.store:upsert-run-step seeded.run.id "step-a" {:status :succeeded :attempt 3 :output {:answer 42 :detail "complete-output"} :wait {:kind :none} :error {:message "not-present"}}) (local node (runtime.graph:load-by-key (.. "workflow-run-step:" seeded.run.id ":step-a"))) (local View (require :graph/view/views/workflow-run-step)) (assert-missing-build-context-with-fallbacks View node "workflow run-step view should not fall back to opts.ctx or graph.ctx") (local builder (node.view node {:node node})) (assert-missing-build-context builder "workflow run-step view should require direct build context") (local widget (builder (make-preview-ctx))) (each [_ field (ipairs [:title :payload-input :scroll-view :flex])] (assert (. widget field) (.. "workflow run-step view should expose " (tostring field)))) (assert (= widget.payload-input.multiline? true) "workflow run-step payload should be multiline") (local payload-text (widget.payload-input:get-text)) (each [_ needle (ipairs ["Status:" "succeeded" "Attempt:" "3" "Output:" "complete-output" "Wait:" "none" "Error:" "not-present"])] (assert-contains payload-text needle "workflow run-step view should render complete payload fields")) (widget:drop))
+(fn workflow-run-step-view-renders-payload-in-multiline-input [] (with-runtime workflow-run-step-view-renders-payload-in-multiline-input-case))
 (fn workflow-run-event-preview-builds-summary-case [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local graph runtime.graph)
@@ -889,11 +891,13 @@
   (assert-contains summary "Kind:" "workflow run-event preview summary should include kind")
   (assert-contains summary "step-started" "workflow run-event preview summary should include useful kind text")
   (assert-contains summary "Step:" "workflow run-event preview summary should include step id")
-  (assert-preview-drops-owned-children widget "workflow run-event preview"))
+  (assert (not widget.payload-hint) "workflow run-event preview should stay compact without event payload details") (assert-preview-drops-owned-children widget "workflow run-event preview"))
+(fn workflow-run-event-preview-builds-summary [] (with-runtime workflow-run-event-preview-builds-summary-case))
 
-(fn workflow-run-event-preview-builds-summary []
-  (with-runtime workflow-run-event-preview-builds-summary-case))
-
+(fn workflow-run-event-node-has-payload-view-case [runtime] (local seeded (seed-definition-with-run runtime)) (local node (runtime.graph:load-by-key (.. "workflow-run-event:" seeded.run.id ":" seeded.event.id))) (assert node "workflow run-event node should load") (assert node.view "workflow run-event node should expose a full payload view") (assert node.get-event "workflow run-event node should expose get-event") (assert (= (. (node:get-event) :id) seeded.event.id) "get-event should return the current persisted event"))
+(fn workflow-run-event-node-has-payload-view [] (with-runtime workflow-run-event-node-has-payload-view-case))
+(fn workflow-run-event-view-renders-payload-in-multiline-input-case [runtime] (local seeded (seed-definition-with-run runtime)) (local event (runtime.store:append-event seeded.run.id {:id "event-payload" :kind :step-output :step-id "step-a" :created-at 456 :payload {:answer 42 :detail "event-payload-detail"} :notes "extra event notes"})) (local node (runtime.graph:load-by-key (.. "workflow-run-event:" seeded.run.id ":" event.id))) (local preview-widget ((node.preview node {:node node}) (make-preview-ctx))) (assert preview-widget.payload-hint "workflow run-event preview should expose payload panel hint when details exist") (assert-contains (text-widget-string preview-widget.payload-hint) "Open node for payload panel" "workflow run-event preview should direct dense payloads to full view") (preview-widget:drop) (local View (require :graph/view/views/workflow-run-event)) (assert-missing-build-context-with-fallbacks View node "workflow run-event view should not fall back to opts.ctx or graph.ctx") (local builder (node.view node {:node node})) (assert-missing-build-context builder "workflow run-event view should require direct build context") (local widget (builder (make-preview-ctx))) (each [_ field (ipairs [:title :payload-input :scroll-view :flex])] (assert (. widget field) (.. "workflow run-event view should expose " (tostring field)))) (assert (= widget.payload-input.multiline? true) "workflow run-event payload should be multiline") (local payload-text (widget.payload-input:get-text)) (each [_ needle (ipairs ["Event:" "event-payload" "Kind:" "step-output" "Step:" "step-a" "Created At:" "456" "Payload:" "event-payload-detail" "notes" "extra event notes"])] (assert-contains payload-text needle "workflow run-event view should render complete payload fields")) (widget:drop))
+(fn workflow-run-event-view-renders-payload-in-multiline-input [] (with-runtime workflow-run-event-view-renders-payload-in-multiline-input-case))
 (fn seed-definition-for-authoring [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
   (local code-b (runtime.code-store:create-entity {:id "code-b" :name "B" :source "(+ 2 2)"}))
@@ -1171,6 +1175,7 @@
 (table.insert tests {:name "workflow-run-step-and-event-summaries-include-details" :fn workflow-run-step-and-event-summaries-include-details})
 (table.insert tests {:name "workflow-run-step-preview-builds-summary" :fn workflow-run-step-preview-builds-summary})
 (table.insert tests {:name "workflow-run-event-preview-builds-summary" :fn workflow-run-event-preview-builds-summary})
+(table.insert tests {:name "workflow-run-step-node-has-payload-view" :fn workflow-run-step-node-has-payload-view}) (table.insert tests {:name "workflow-run-event-node-has-payload-view" :fn workflow-run-event-node-has-payload-view}) (table.insert tests {:name "workflow-run-step-view-renders-payload-in-multiline-input" :fn workflow-run-step-view-renders-payload-in-multiline-input}) (table.insert tests {:name "workflow-run-event-view-renders-payload-in-multiline-input" :fn workflow-run-event-view-renders-payload-in-multiline-input})
 (table.insert tests {:name "graph step connection creates canonical workflow control edge" :fn graph-step-connection-creates-canonical-workflow-control-edge})
 (table.insert tests {:name "graph map capture skips workflow derived edges" :fn graph-map-capture-skips-workflow-derived-edges})
 (table.insert tests {:name "graph remove edge deletes canonical workflow edge" :fn graph-remove-edge-deletes-canonical-workflow-edge})
