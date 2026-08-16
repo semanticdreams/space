@@ -93,6 +93,13 @@
     (assert (not (string.find key "code-entity:" 1 true)) (.. message " should not leave stale code graph nodes")))
   (assert (= (map:edge-count) 0) (.. message " should not leave stale graph edges")))
 
+(fn assert-no-step-or-explorer-topology [map message]
+  (each [key _ (pairs map.nodes)]
+    (assert (not (string.find key "workflow-step:" 1 true)) (.. message " should not leave stale step graph nodes"))
+    (assert (not (string.find key "workflow-step-explorer:" 1 true)) (.. message " should not leave stale step explorer graph nodes")))
+  (assert (= (map:node-count) 1) (.. message " should leave only the already-loaded definition node"))
+  (assert (= (map:edge-count) 0) (.. message " should not leave stale graph edges")))
+
 (fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph-case [runtime]
   (local definition (seed-definition runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-step]))
@@ -135,10 +142,42 @@
 (fn definition-new-step-code-load-failure-removes-stale-step-node []
   (with-runtime definition-new-step-code-load-failure-removes-stale-step-node-case))
 
+(fn definition-reveal-all-steps-without-step-loader-does-not-materialize-case [runtime]
+  (local definition (seed-definition runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition]))
+  (local map (GraphMap.GraphMap {:graph graph :id "reveal-steps-missing-loader-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local (ok err) (pcall node.reveal-all-steps-from-graph node))
+  (assert (not ok) "Reveal all steps without workflow-step loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader" 1 true) "missing workflow-step loader failure should explain the missing graph loader")
+  (assert-no-step-or-explorer-topology map "failed Reveal All Steps")
+  (map:drop)
+  (graph:drop))
+
+(fn definition-reveal-all-steps-without-step-loader-does-not-materialize []
+  (with-runtime definition-reveal-all-steps-without-step-loader-does-not-materialize-case))
+
+(fn definition-open-step-explorer-without-loader-does-not-materialize-case [runtime]
+  (local definition (seed-definition runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-step]))
+  (local map (GraphMap.GraphMap {:graph graph :id "open-step-explorer-missing-loader-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local (ok err) (pcall node.open-step-explorer-from-graph node))
+  (assert (not ok) "Open step explorer without workflow-step-explorer loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader" 1 true) "missing workflow-step-explorer loader failure should explain the missing graph loader")
+  (assert-no-step-or-explorer-topology map "failed Open Step Explorer")
+  (map:drop)
+  (graph:drop))
+
+(fn definition-open-step-explorer-without-loader-does-not-materialize []
+  (with-runtime definition-open-step-explorer-without-loader-does-not-materialize-case))
+
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
 (table.insert tests {:name "definition-new-step-code-load-failure-removes-stale-step-node" :fn definition-new-step-code-load-failure-removes-stale-step-node})
+(table.insert tests {:name "definition-reveal-all-steps-without-step-loader-does-not-materialize" :fn definition-reveal-all-steps-without-step-loader-does-not-materialize})
+(table.insert tests {:name "definition-open-step-explorer-without-loader-does-not-materialize" :fn definition-open-step-explorer-without-loader-does-not-materialize})
 
 (local main
   (fn []
