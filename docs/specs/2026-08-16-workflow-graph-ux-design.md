@@ -29,6 +29,8 @@ The current gaps are visible in normal workflow use:
 ## Goals
 
 - Define systematic graph UX guidelines for Space graph exposure.
+- Add exhaustive, scenario-based user docs for workflow graph flows so the UX is
+  validated from concrete user goals rather than isolated controls.
 - Make workflow definition nodes useful for both authoring and inspection:
   overview, steps, runs, and actions.
 - Make workflow step nodes useful for editing step code and topology.
@@ -179,6 +181,32 @@ should be explicit and graph-native:
 - surface results through visible topology, status text, or domain events;
 - fail loudly when required data or graph context is missing.
 
+## User-Flow Documentation Requirements
+
+Workflow UX should be documented from a user's functional goal, not from an
+implementation feature list. User docs must live under `docs/user/workflows/`
+and be linked from `docs/user/index.md`.
+
+The workflow user docs should be exhaustive for the workflow system's graph UX
+surface. Each page should describe a complete task with a real goal, starting
+state, graph actions, expected visible results, and how the user knows they are
+done. The pages should demonstrate the full feature set, including workflow
+creation, step discovery, step code editing, graph-authored step edges, running
+workflows, using graph selection as run context, browsing run history,
+inspecting timelines/events/payloads, finding failed steps, surgically editing a
+problem step, re-running after the fix, and canceling/monitoring runs when
+supported.
+
+Good page titles are goal-oriented, for example:
+
+- `Create a help desk workflow from scratch`.
+- `Find and fix the workflow step that caused a failed run`.
+- `Use selected graph nodes as context for a workflow run`.
+- `Inspect a run timeline and payloads without flooding the graph`.
+
+Poor page titles are control-oriented, for example `Inspect workflow step` or
+`Show run details`, because they do not explain the user's goal.
+
 ## Workflow User Flows
 
 ### 1. Discover and create workflows
@@ -305,6 +333,8 @@ The first implementation should establish the pattern without trying to build
 every advanced workflow feature:
 
 1. Add graph UX doctrine docs and update workflow docs.
+   - Create scenario-based user docs under `docs/user/workflows/` and link them
+     from `docs/user/index.md`.
 2. Upgrade workflow definition preview into a structured inspector with steps,
    runs, and actions sections or tabs.
 3. Add explicit step exploration: reveal one step, reveal all steps, and keep
@@ -374,3 +404,5 @@ review or changed risk surface requires it.
 - Selection-aware graph actions have a documented and tested pattern.
 - No hidden relationship expansion or graph trigger API returns.
 - Docs define general graph UX guidelines and workflow-specific flows.
+- User docs include goal-oriented workflow pages that collectively demonstrate
+  every workflow graph feature in the first implementation slice.
