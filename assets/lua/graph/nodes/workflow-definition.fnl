@@ -92,6 +92,24 @@
           graph
           nil)))
 
+(fn graph-map? [graph]
+  (and graph
+       graph.graph
+       (not (= graph.graph graph))
+       graph.nodes
+       graph.edges
+       graph.edge-map
+       graph.lookup
+       graph.load-by-key
+       graph.add-edge
+       graph.node-added
+       graph.edge-added
+       graph.node-removed
+       graph.edge-removed
+       graph.node-added.emit
+       graph.edge-added.emit
+       graph.graph.register-key-loader))
+
 (fn assert-graph-loader [graph key action label]
   (local provider (loader-graph graph))
   (assert (and provider (provider:has-key-loader-for-key key))
@@ -106,12 +124,12 @@
                        "code-entity"))
 
 (fn assert-load-run-graph-dependencies [self]
-  (assert self.graph "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
+  (assert (graph-map? self.graph) "WorkflowDefinitionNode.load-run-from-graph requires a graph map")
   (assert self.graph.load-by-key "WorkflowDefinitionNode.load-run-from-graph requires graph:load-by-key")
   (assert self.graph.add-edge "WorkflowDefinitionNode.load-run-from-graph requires graph:add-edge"))
 
 (fn assert-step-graph-dependencies [self action]
-  (assert self.graph (.. action " requires a graph map"))
+  (assert (graph-map? self.graph) (.. action " requires a graph map"))
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 

@@ -94,6 +94,12 @@
   (runtime.store:append-event run.id {:id "event-a" :kind :step-failed :step-id "step-a"})
   {:definition definition :run (runtime.store:get-run run.id)})
 
+(fn assert-requires-mounted-graph-map [call message]
+  (local (ok err) (pcall call))
+  (assert (not ok) (.. message " should fail loudly without a mounted GraphMap"))
+  (assert (string.find (tostring err) "requires a graph map" 1 true)
+          (.. message " failure should explain graph map requirement")))
+
 (fn assert-no-step-or-code-topology [map message]
   (each [key _ (pairs map.nodes)]
     (assert (not (string.find key "workflow-step:" 1 true)) (.. message " should not leave stale step graph nodes"))
@@ -115,6 +121,14 @@
 
 (fn assert-no-run-event-topology [graph before-edge-count message]
   (each [key _ (pairs graph.nodes)]
+    (assert (not (string.find key "workflow-run-event:" 1 true)) (.. message " should not leave stale run-event graph nodes")))
+  (assert (= (graph:edge-count) before-edge-count) (.. message " should not add graph edges")))
+
+(fn assert-no-shared-graph-materializer-topology [graph before-edge-count message]
+  (each [key _ (pairs graph.nodes)]
+    (assert (not (string.find key "workflow-step:" 1 true)) (.. message " should not leave stale step graph nodes"))
+    (assert (not (string.find key "workflow-step-explorer:" 1 true)) (.. message " should not leave stale step explorer graph nodes"))
+    (assert (not (string.find key "workflow-run-step:" 1 true)) (.. message " should not leave stale run-step graph nodes"))
     (assert (not (string.find key "workflow-run-event:" 1 true)) (.. message " should not leave stale run-event graph nodes")))
   (assert (= (graph:edge-count) before-edge-count) (.. message " should not add graph edges")))
 
@@ -236,6 +250,43 @@
 (fn workflow-run-timeline-shared-graph-event-load-requires-graph-map []
   (with-runtime workflow-run-timeline-shared-graph-event-load-requires-graph-map-case))
 
+(fn graph-materializing-methods-require-mounted-graph-map-case [runtime]
+  (local seeded (seed-run runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition
+                                                          :workflow-step
+                                                          :workflow-step-explorer
+                                                          :workflow-run
+                                                          :workflow-run-step
+                                                          :workflow-run-timeline
+                                                          :workflow-run-event]))
+  (local definition-node (graph:load-by-key (.. "workflow-definition:" seeded.definition.id)))
+  (local run-node (graph:load-by-key (.. "workflow-run:" seeded.run.id)))
+  (local timeline-node (graph:load-by-key (.. "workflow-run-timeline:" seeded.run.id)))
+  (local before-edges (graph:edge-count))
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:load-step-from-graph "step-a"))
+    "WorkflowDefinitionNode.load-step-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:reveal-all-steps-from-graph))
+    "WorkflowDefinitionNode.reveal-all-steps-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:open-step-explorer-from-graph))
+    "WorkflowDefinitionNode.open-step-explorer-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (run-node:load-run-steps-from-graph))
+    "WorkflowRunNode.load-run-steps-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (run-node:open-timeline-from-graph))
+    "WorkflowRunNode.open-timeline-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (timeline-node:load-event-from-graph "event-a"))
+    "WorkflowRunTimelineNode.load-event-from-graph")
+  (assert-no-shared-graph-materializer-topology graph before-edges "shared Graph materializers")
+  (graph:drop))
+
+(fn graph-materializing-methods-require-mounted-graph-map []
+  (with-runtime graph-materializing-methods-require-mounted-graph-map-case))
+
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
@@ -245,6 +296,7 @@
 (table.insert tests {:name "workflow-run-show-steps-without-run-step-loader-does-not-materialize" :fn workflow-run-show-steps-without-run-step-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-timeline-shared-graph-event-load-requires-graph-map" :fn workflow-run-timeline-shared-graph-event-load-requires-graph-map})
+(table.insert tests {:name "graph-materializing-methods-require-mounted-graph-map" :fn graph-materializing-methods-require-mounted-graph-map})
 
 (local main
   (fn []

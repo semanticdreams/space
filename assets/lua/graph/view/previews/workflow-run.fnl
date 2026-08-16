@@ -68,6 +68,7 @@
   (set view.layout flex.layout)
   (set view.title title)
   (set view.status-text status-text)
+  (set view.flex flex)
   (set view.drop
        (fn [_self]
            (title:drop)
