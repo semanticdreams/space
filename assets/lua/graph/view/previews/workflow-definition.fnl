@@ -42,13 +42,35 @@
           "Workflow definition preview requires step-items")
   (target:step-items))
 
+(fn run-created-at [run]
+  (if (and run run.created-at)
+      (tonumber run.created-at)
+      0))
+
+(fn run-id [run]
+  (if (and run run.id)
+      (tostring run.id)
+      ""))
+
+(fn later-run? [candidate current]
+  (local candidate-created-at (run-created-at candidate))
+  (local current-created-at (run-created-at current))
+  (if (not current)
+      true
+      (> candidate-created-at current-created-at)
+      true
+      (and (= candidate-created-at current-created-at)
+           (> (run-id candidate) (run-id current)))
+      true
+      false))
+
 (fn latest-run-status [items]
-  (var status nil)
+  (var latest nil)
   (each [_ item (ipairs (if items items []))]
     (local run (. item 1))
-    (when (and run run.status)
-      (set status run.status)))
-  (if status (tostring status) "none"))
+    (when (and run (later-run? run latest))
+      (set latest run)))
+  (if (and latest latest.status) (tostring latest.status) "none"))
 
 (fn definition-id [target]
   (assert target "Workflow definition preview requires target")
