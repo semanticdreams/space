@@ -5,7 +5,7 @@
 (local RawRectangle (require :raw-rectangle))
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
-(local {: resolve-card-colors} (require :widget-theme-utils))
+(local {: resolve-card-colors : get-button-theme-colors} (require :widget-theme-utils))
 
 (local default-focus-border-width 0.3)
 (local default-selection-border-width 0.5)
@@ -68,7 +68,7 @@
   (local title-text ((. (require :graph/view/utils) :truncate-with-ellipsis) (tostring (or node.label node.key "node")) 42))
   (fn build-header-bar [ctx]
     (fn title-builder [child-ctx]
-      (((require :text) {:text title-text :scale 0.8}) child-ctx))
+      (((require :text) {:text title-text}) child-ctx))
     (fn spacer-builder [_ctx]
       (local layout (Layout {:name "graph-card-header-spacer"
                               :measurer (fn [self] (set self.measure (glm.vec3 0 0 0)))
@@ -161,7 +161,7 @@
     (local selection-outline (make-outline-strips selection-color selection-border-width))
     (local focus-outline (make-outline-strips focus-color focus-border-width))
     (local background ((Rectangle {:color resolved-background}) ctx))
-
+    (local titlebar-theme-colors (get-button-theme-colors ctx :tertiary)) (local titlebar-background ((Rectangle {:color (or (and titlebar-theme-colors titlebar-theme-colors.background) (glm.vec4 0.2 0.2 0.2 1))}) ctx))
     (local card {:node node
                   :_card-size (glm.vec3 default-size.x default-size.y default-size.z)
                   :_header-height 3.0
@@ -172,13 +172,12 @@
                   :on-click nil
                   :on-double-click nil
                   :on-right-click nil})
-
     (set card.position (glm.vec3 position.x position.y position.z))
     (set card.size (math.max default-size.x default-size.y))
     (set card.depth-offset-index depth-offset-index)
     (set card._focus-layer-size 0)
     (set card._selection-layer-size 0)
-    (set card._background background)
+    (set card._background background) (set card.header-titlebar-background titlebar-background)
     (set card._focus-outline focus-outline)
     (set card._selection-outline selection-outline)
     (set card._pointer-target options.pointer-target)
@@ -187,14 +186,15 @@
                                       (math.max min-size.y (math.min resize-max-size.y options.requested-size.y))
                                       0)))
 
+
     (fn card-origin [size]
       (local resolved (or size card._card-size default-size))
       (glm.vec3 (- card.position.x (/ resolved.x 2.0))
                 (- card.position.y (/ resolved.y 2.0))
                 (- card.position.z (/ resolved.z 2.0))))
-
     (local header-bar (build-header-bar ctx))
     (set card.header-bar header-bar) (set card.header-title (. header-bar.children 1 :element)) (set card.header-title-text title-text)
+
 
     (fn measurer [self]
       (header-bar.layout:measurer)
@@ -210,8 +210,8 @@
                            (+ card._header-height child-measure.y)
                            default-size.y))
       (local desired-x (if child-measure
-                           (math.max default-size.x child-measure.x)
-                           default-size.x))
+                             (math.max default-size.x child-measure.x header-bar.layout.measure.x)
+                             (math.max default-size.x header-bar.layout.measure.x)))
       (set card._card-size
            (if card._user-size
                (glm.vec3 (math.max min-size.x (math.min resize-max-size.x card._user-size.x))
@@ -220,8 +220,7 @@
                (glm.vec3 (math.max min-size.x (math.min max-size.x desired-x))
                          (math.max min-size.y (math.min max-size.y desired-y))
                          0)))
-      (set card.size (math.max card._card-size.x card._card-size.y))
-      (set self.measure card._card-size))
+      (set card.size (math.max card._card-size.x card._card-size.y)) (set self.measure card._card-size))
 
     (fn layouter [self]
       (local header-height card._header-height)
@@ -245,6 +244,7 @@
         (set background.layout.rotation (glm.quat 1 0 0 0))
         (set background.layout.depth-offset-index (+ self.depth-offset-index 2))
         (background.layout:layouter true))
+      (when titlebar-background (set titlebar-background.layout.position (+ self.position (glm.vec3 0 (- card._card-size.y header-height) 0))) (set titlebar-background.layout.size (glm.vec3 card._card-size.x header-height 0)) (set titlebar-background.layout.rotation (glm.quat 1 0 0 0)) (set titlebar-background.layout.depth-offset-index (+ self.depth-offset-index 3)) (titlebar-background.layout:layouter true))
       (when (and card.header-bar card.header-bar.layout)
         (local header card.header-bar.layout)
         (set header.position (+ self.position (glm.vec3 0 (- card._card-size.y header-height) 0)))
@@ -283,7 +283,7 @@
            (when culled?
              (focus-outline.set-visible false)
              (selection-outline.set-visible false))))
-    (layout:add-child background.layout)
+    (layout:add-child background.layout) (layout:add-child titlebar-background.layout)
     (layout:add-child header-bar.layout)
     (set card.layout layout)
     (set card._resize-target
@@ -363,12 +363,12 @@
               (focus-outline.drop))
             (when selection-outline
               (selection-outline.drop))
-            (when background
-              (background:drop))
-            (set card._focus-outline nil)
-            (set card._selection-outline nil)
-            (set card._background nil)
-            (layout:drop)))
+             (when background
+               (background:drop)) (when titlebar-background (titlebar-background:drop))
+             (set card._focus-outline nil)
+             (set card._selection-outline nil)
+             (set card._background nil) (set card.header-titlebar-background nil)
+             (layout:drop)))
 
     (local (ok result)
            (pcall
