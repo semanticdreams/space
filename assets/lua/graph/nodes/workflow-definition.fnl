@@ -36,9 +36,41 @@
 (fn run-key [run-id]
   (.. "workflow-run:" run-id))
 
+(fn run-explorer-key [definition-id]
+  (.. "workflow-run-explorer:" definition-id))
+
 (fn run-label [run]
   (local status (if (and run run.status) run.status :pending))
   (.. "Workflow run " run.id " (" (tostring status) ")"))
+
+(fn run-created-at [run]
+  (if (and run run.created-at)
+      (tonumber run.created-at)
+      0))
+
+(fn run-id-string [run]
+  (if (and run run.id)
+      (tostring run.id)
+      ""))
+
+(fn later-run? [candidate current]
+  (local candidate-created-at (run-created-at candidate))
+  (local current-created-at (run-created-at current))
+  (if (not current)
+      true
+      (> candidate-created-at current-created-at)
+      true
+      (and (= candidate-created-at current-created-at)
+           (> (run-id-string candidate) (run-id-string current)))
+      true
+      false))
+
+(fn latest-run-status-from-runs [runs]
+  (var latest nil)
+  (each [_ run (ipairs (if runs runs []))]
+    (when (and run (later-run? run latest))
+      (set latest run)))
+  (if (and latest latest.status) (tostring latest.status) "none"))
 
 (fn step-label [step]
   (local name (if step.step-name step.step-name (if step.name step.name step.id)))
@@ -129,6 +161,12 @@
                        (.. "workflow-step-explorer:" self.workflow-definition-id)
                        action
                        "workflow-step-explorer"))
+
+(fn assert-run-explorer-loader [self action]
+  (assert-graph-loader self.graph
+                       (run-explorer-key self.workflow-definition-id)
+                       action
+                       "workflow-run-explorer"))
 
 (fn assert-start-graph-dependencies [self]
   (GraphMapContext.assert-graph-map self.graph "WorkflowDefinitionNode.start-workflow-from-graph")
@@ -277,14 +315,14 @@
     :icon "add"
     :fn (fn [_button _event]
           (node:create-step-from-graph {}))}
-   {:name "Explore Steps"
-    :icon "manage_search"
-    :fn (fn [_button _event]
-          (node:open-step-explorer-from-graph))}
-   {:name "Reveal Steps"
-    :icon "account_tree"
-    :fn (fn [_button _event]
-          (node:reveal-all-steps-from-graph))}])
+    {:name "Explore Steps"
+     :icon "manage_search"
+     :fn (fn [_button _event]
+           (node:open-step-explorer-from-graph))}
+    {:name "Explore Runs"
+     :icon "history"
+     :fn (fn [_button _event]
+           (node:open-run-explorer-from-graph))}])
 
 (fn clear-changed-on-drop [node]
   (local original-drop node.drop)
@@ -366,8 +404,18 @@
        (fn [self]
          (local definition (current-definition self "WorkflowDefinitionNode.step-items"))
          (local steps (assert definition.steps "WorkflowDefinitionNode.step-items requires definition.steps"))
-         (icollect [_ step (ipairs steps)]
-           [step (step-label step)])))
+          (icollect [_ step (ipairs steps)]
+            [step (step-label step)])))
+  (set node.workflow-summary
+       (fn [self]
+         (local definition (current-definition self "WorkflowDefinitionNode.workflow-summary"))
+         (assert self.workflow-store.list-runs "WorkflowDefinitionNode.workflow-summary requires workflow store:list-runs")
+         (local runs (self.workflow-store:list-runs {:definition-id self.workflow-definition-id}))
+         {:definition-id self.workflow-definition-id
+          :name (if definition.name definition.name self.workflow-definition-id)
+          :step-count (length (or definition.steps []))
+          :run-count (length runs)
+          :latest-run-status (latest-run-status-from-runs runs)}))
   (set node.load-run-from-graph
          (fn [self run-or-id]
            (assert-load-run-graph-dependencies self)
@@ -388,8 +436,15 @@
        (fn [self]
          (assert-step-graph-dependencies self "WorkflowDefinitionNode.open-step-explorer-from-graph")
          (assert-step-explorer-loader self "WorkflowDefinitionNode.open-step-explorer-from-graph")
-         (local explorer-node (load-required-node self.graph (.. "workflow-step-explorer:" self.workflow-definition-id)))
-         (add-visible-edge self.graph self explorer-node "steps")
+          (local explorer-node (load-required-node self.graph (.. "workflow-step-explorer:" self.workflow-definition-id)))
+          (add-visible-edge self.graph self explorer-node "steps")
+          explorer-node))
+  (set node.open-run-explorer-from-graph
+       (fn [self]
+         (assert-step-graph-dependencies self "WorkflowDefinitionNode.open-run-explorer-from-graph")
+         (assert-run-explorer-loader self "WorkflowDefinitionNode.open-run-explorer-from-graph")
+         (local explorer-node (load-required-node self.graph (run-explorer-key self.workflow-definition-id)))
+         (add-visible-edge self.graph self explorer-node "runs")
          explorer-node))
   (set node.actions (workflow-definition-actions node))
   (clear-changed-on-drop node)

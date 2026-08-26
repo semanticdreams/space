@@ -245,6 +245,25 @@
 (fn definition-open-step-explorer-without-loader-does-not-materialize []
   (with-runtime definition-open-step-explorer-without-loader-does-not-materialize-case))
 
+(fn definition-open-run-explorer-without-loader-does-not-materialize-case [runtime]
+  (local definition (seed-definition runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-run]))
+  (local map (GraphMap.GraphMap {:graph graph :id "open-run-explorer-missing-loader-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local (ok err) (pcall node.open-run-explorer-from-graph node))
+  (assert (not ok) "Open run explorer without workflow-run-explorer loader should fail loudly")
+  (assert (string.find (tostring err) "requires graph loader" 1 true)
+          "missing workflow-run-explorer loader failure should explain the missing graph loader")
+  (assert (not (action-named? node.actions "Reveal Steps"))
+          "definition actions should not expose Reveal Steps")
+  (assert (= (map:node-count) 1) "failed Open Run Explorer should leave only the already-loaded definition node")
+  (assert (= (map:edge-count) 0) "failed Open Run Explorer should not leave stale graph edges")
+  (map:drop)
+  (graph:drop))
+
+(fn definition-open-run-explorer-without-loader-does-not-materialize []
+  (with-runtime definition-open-run-explorer-without-loader-does-not-materialize-case))
+
 (fn workflow-run-show-steps-without-run-step-loader-does-not-materialize-case [runtime]
   (local seeded (seed-run runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-run]))
@@ -324,10 +343,11 @@
   (local seeded (seed-run runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition
                                                           :workflows
-                                                          :workflow-step
-                                                          :workflow-step-explorer
-                                                          :workflow-run
-                                                          :workflow-run-step
+                                                           :workflow-step
+                                                           :workflow-step-explorer
+                                                           :workflow-run
+                                                           :workflow-run-explorer
+                                                           :workflow-run-step
                                                           :workflow-run-timeline
                                                           :workflow-run-event
                                                           :code-entity]))
@@ -368,6 +388,9 @@
   (assert-requires-mounted-graph-map
     (fn [] (definition-node:open-step-explorer-from-graph))
     "WorkflowDefinitionNode.open-step-explorer-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (definition-node:open-run-explorer-from-graph))
+    "WorkflowDefinitionNode.open-run-explorer-from-graph")
   (assert-requires-mounted-graph-map
     (fn [] (step-node:show-code-from-graph))
     "WorkflowStepNode.show-code-from-graph")
@@ -435,6 +458,7 @@
 (table.insert tests {:name "definition-new-step-code-load-failure-removes-stale-step-node" :fn definition-new-step-code-load-failure-removes-stale-step-node})
 (table.insert tests {:name "definition-reveal-all-steps-without-step-loader-does-not-materialize" :fn definition-reveal-all-steps-without-step-loader-does-not-materialize})
 (table.insert tests {:name "definition-open-step-explorer-without-loader-does-not-materialize" :fn definition-open-step-explorer-without-loader-does-not-materialize})
+(table.insert tests {:name "definition-open-run-explorer-without-loader-does-not-materialize" :fn definition-open-run-explorer-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-show-steps-without-run-step-loader-does-not-materialize" :fn workflow-run-show-steps-without-run-step-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-timeline-shared-graph-event-load-requires-graph-map" :fn workflow-run-timeline-shared-graph-event-load-requires-graph-map})
