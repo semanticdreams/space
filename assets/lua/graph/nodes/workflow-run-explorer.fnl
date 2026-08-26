@@ -66,6 +66,7 @@
       (assert run-or-id (.. action " requires run id"))))
 
 (fn load-owned-run-record [self run-or-id action]
+  (current-definition self action)
   (assert self.workflow-store (.. action " requires workflow store"))
   (assert self.workflow-store.get-run (.. action " requires workflow store:get-run"))
   (local id (run-id run-or-id action))
