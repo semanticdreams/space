@@ -3,7 +3,7 @@
 Goal: build a small help desk workflow that triages an incoming ticket, drafts a response, and records the result.
 
 1. Open **Start -> Workflows**. The Workflows root shows workflow definitions without expanding every run or step.
-2. Choose **New Workflow**. Name it for the help desk flow. Space creates the workflow definition and materializes the new definition node in the active graph map.
+2. Type the help desk flow name in the **Workflow name** field, then choose **New Workflow**. Space creates the workflow definition and materializes the new definition node in the active graph map.
 3. Find the workflow definition node in the graph. Its preview is the anchor for authoring, running, and inspecting this workflow.
 4. Use **New Step** to add the first triage step. The action materializes the workflow-step node and its linked code entity so the next edit is visible.
 5. On the step node, choose **Show Code**. Open the code entity and edit the step in the code view, for example to classify the ticket by urgency and department.
