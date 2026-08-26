@@ -327,7 +327,7 @@
     (when workflow-runner
       (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
       (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
-    (register-workflow-step-loader graph {:store workflow-store}) ((. (require :graph/nodes/workflow-step-explorer) :register-loader) graph {:store workflow-store})
+    (register-workflow-step-loader graph {:store workflow-store}) ((. (require :graph/nodes/workflow-step-explorer) :register-loader) graph {:store workflow-store}) ((. (require :graph/nodes/workflow-run-explorer) :register-loader) graph {:store workflow-store})
     (register-workflow-run-step-loader graph {:store workflow-store})
     (register-workflow-run-event-loader graph {:store workflow-store})
     (register-workflow-run-timeline-loader graph {:store workflow-store})
