@@ -1224,7 +1224,7 @@
                     "Expanded card should render above graph edges")
             (assert (= state.built-node node) "Expanded card should build the node preview")
             (assert (not full-view-called?) "Expanded card should not build the full node view")
-            (assert card.header-bar "Expanded card should have a header bar")
+            (assert card.header-bar "Expanded card should have a header bar") (assert (= card.header-title.style.scale 1.6) "Expanded card header title should use the normal default text scale")
             (ctx.layout-root:update)
             (assert state.constrained "Expanded card should measure child with constraints")
             (assert (= state.constrained.max.x 52.0)
@@ -4288,8 +4288,8 @@
 (table.insert tests {:name "GraphView open-node reveals and opens"
                      :fn graph-view-open-node-reveals-and-opens})
 (table.insert tests {:name "Graph edge default color uses layout theme color" :fn graph-edge-default-color-uses-layout-theme-color})
-
+(fn graph-titlebar-color= [a b] (and a b (< (math.abs (- a.x b.x)) 1e-4) (< (math.abs (- a.y b.y)) 1e-4) (< (math.abs (- a.z b.z)) 1e-4) (< (math.abs (- a.w b.w)) 1e-4)))
+(fn graph-expanded-card-titlebar-uses-tertiary-surface [] (local ctx (make-ctx)) (set ctx.theme ((require :light-theme))) (local expected-titlebar-color ctx.theme.button.variants.tertiary.background) (local body-color ctx.theme.card.background) (local node (Graph.GraphNode {:key "preview-titlebar-node" :preview (tracked-preview {})})) (local GraphNodePresentation (require :graph/view/presentation)) (local card-builder (GraphNodePresentation.card-builder {:node node :position (glm.vec3 0 0 0) :default-size (glm.vec3 32 18 0) :on-collapse (fn [] nil) :on-open (fn [_] nil) :on-menu (fn [_] nil)})) (local card (card-builder ctx)) (assert card.header-titlebar-background "Expanded card should expose a separate titlebar background surface") (assert (graph-titlebar-color= card.header-titlebar-background.color expected-titlebar-color) "Expanded card titlebar should use the light theme tertiary background") (assert (not (graph-titlebar-color= card.header-titlebar-background.color body-color)) "Expanded card titlebar background should be distinct from the card body") (card:drop))
+(table.insert tests {:name "Graph expanded card titlebar uses tertiary surface" :fn graph-expanded-card-titlebar-uses-tertiary-surface})
 (local main (fn [] (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))}) (runner.run-tests {:name "graph-view" :tests tests})))
-
-
 {:name "graph-view" :tests tests :main main}
