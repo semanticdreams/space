@@ -206,7 +206,7 @@
                                                     (math.max 0 (- effective-max.y card._header-height))
                                                     effective-max.z)}))
       (local child-measure (and child child.measure))
-      (local header-measure-x (or header-bar.layout.measure.x 0))
+      (local header-measure-x header-bar.layout.measure.x)
       (local desired-y (if child-measure
                            (+ card._header-height child-measure.y)
                            default-size.y))
