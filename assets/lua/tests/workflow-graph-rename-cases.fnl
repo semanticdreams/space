@@ -14,7 +14,19 @@
   (assert (= definition.name "Renamed Help Desk")
           "update-name should trim and persist workflow definition name")
   (assert (= node.label "Renamed Help Desk")
-          "update-name should refresh node label")
+           "update-name should refresh node label")
+  (map:drop))
+
+(fn workflow-definition-update-name-emits-changed-case [deps runtime]
+  (local seeded (deps.seed-definition-with-run runtime))
+  (local (map node) (definition-node deps.GraphMap runtime seeded "definition-rename-changed-map"))
+  (assert node.changed "workflow definition node should expose changed signal for label refreshes")
+  (var emitted nil)
+  (local handler (node.changed:connect (fn [payload] (set emitted payload))))
+  (node:update-name "Signal Refresh Name")
+  (assert (= emitted node)
+          "update-name should emit the workflow definition node after renaming")
+  (node.changed:disconnect handler true)
   (map:drop))
 
 (fn workflow-definition-rename-rejects-blank-case [deps runtime]
@@ -26,9 +38,18 @@
           "blank workflow definition name failure should explain validation")
   (local after-definition (runtime.store:get-definition seeded.definition.id))
   (assert (= after-definition.name seeded.definition.name)
-          "blank workflow definition name should not mutate stored name")
+           "blank workflow definition name should not mutate stored name")
   (assert (= node.label seeded.definition.name)
-          "blank workflow definition name should not mutate node label")
+           "blank workflow definition name should not mutate node label")
+  (local (nil-ok nil-err) (pcall (fn [] (node:update-name nil))))
+  (assert (not nil-ok) "nil workflow definition name should fail loudly")
+  (assert (string.find (tostring nil-err) "requires a string name" 1 true)
+          "nil workflow definition name failure should explain validation")
+  (local after-nil-definition (runtime.store:get-definition seeded.definition.id))
+  (assert (= after-nil-definition.name seeded.definition.name)
+          "nil workflow definition name should not mutate stored name")
+  (assert (= node.label seeded.definition.name)
+          "nil workflow definition name should not mutate node label")
   (map:drop))
 
 (fn workflow-definition-view-renames-definition-case [deps runtime]
@@ -102,9 +123,11 @@
   [{:name "workflow-definition-node-exposes-rename-and-view"
     :fn (runtime-test deps workflow-definition-node-exposes-rename-and-view-case)}
    {:name "workflow-definition-rename-rejects-blank"
-    :fn (runtime-test deps workflow-definition-rename-rejects-blank-case)}
+     :fn (runtime-test deps workflow-definition-rename-rejects-blank-case)}
+   {:name "workflow-definition-update-name-emits-changed"
+    :fn (runtime-test deps workflow-definition-update-name-emits-changed-case)}
    {:name "workflow-definition-view-renames-definition"
-    :fn (runtime-test deps workflow-definition-view-renames-definition-case)}
+     :fn (runtime-test deps workflow-definition-view-renames-definition-case)}
    {:name "workflow-definition-view-drops-owned-children"
     :fn (runtime-test deps workflow-definition-view-drops-owned-children-case)}])
 

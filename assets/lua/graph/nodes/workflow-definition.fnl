@@ -5,6 +5,7 @@
 (local WorkflowTemplates (require :workflows/templates))
 (local WorkflowDefinitionNodePreview (require :graph/view/previews/workflow-definition))
 (local WorkflowDefinitionNodeView (require :graph/view/views/workflow-definition))
+(local Signal (require :signal))
 
 (local DEFINITION_BLUE (glm.vec4 0.22 0.4 0.82 1))
 (local DEFINITION_BLUE_ACCENT (glm.vec4 0.32 0.52 0.95 1))
@@ -229,6 +230,7 @@
       definition-id))
 
 (fn trim-text [text]
+  (assert (= (type text) :string) "WorkflowDefinitionNode.update-name requires a string name")
   (string.match (tostring text) "^%s*(.-)%s*$"))
 
 (fn load-step-node-from-definition [self step]
@@ -262,6 +264,37 @@
    :edge-count (length edges)
    :steps loaded-steps})
 
+(fn workflow-definition-actions [node]
+  [{:name "Start Run"
+    :icon "play_arrow"
+    :fn (fn [_button _event]
+          (node:start-workflow-from-graph {} {}))}
+   {:name "Start With Selection"
+    :icon "play_circle"
+    :fn (fn [_button _event]
+          (node:start-workflow-with-selection-from-graph {} {}))}
+   {:name "New Step"
+    :icon "add"
+    :fn (fn [_button _event]
+          (node:create-step-from-graph {}))}
+   {:name "Explore Steps"
+    :icon "manage_search"
+    :fn (fn [_button _event]
+          (node:open-step-explorer-from-graph))}
+   {:name "Reveal Steps"
+    :icon "account_tree"
+    :fn (fn [_button _event]
+          (node:reveal-all-steps-from-graph))}])
+
+(fn clear-changed-on-drop [node]
+  (local original-drop node.drop)
+  (set node.drop
+       (fn [self]
+         (when original-drop
+           (original-drop self))
+         (when self.changed
+           (self.changed:clear)))))
+
 (fn WorkflowDefinitionNode [opts]
   (local options (or opts {}))
   (local store (assert options.store "WorkflowDefinitionNode requires store"))
@@ -280,6 +313,7 @@
   (set node.workflow-store store)
   (set node.workflow-runner runner)
   (set node.code-store options.code-store)
+  (set node.changed (Signal))
   (set node.update-name
        (fn [self new-name]
          (local trimmed (trim-text new-name))
@@ -288,10 +322,11 @@
          (assert self.workflow-store "WorkflowDefinitionNode.update-name requires workflow store")
          (assert self.workflow-store.update-definition
                  "WorkflowDefinitionNode.update-name requires workflow store:update-definition")
-         (current-definition self "WorkflowDefinitionNode.update-name")
-         (local updated (self.workflow-store:update-definition self.workflow-definition-id {:name trimmed}))
-         (set self.label (definition-label updated self.workflow-definition-id))
-         updated))
+          (current-definition self "WorkflowDefinitionNode.update-name")
+          (local updated (self.workflow-store:update-definition self.workflow-definition-id {:name trimmed}))
+          (set self.label (definition-label updated self.workflow-definition-id))
+          (self.changed:emit self)
+          updated))
   (set node.start-workflow-from-graph
         (fn [self input context-opts]
            (assert-start-graph-dependencies self)
@@ -356,26 +391,8 @@
          (local explorer-node (load-required-node self.graph (.. "workflow-step-explorer:" self.workflow-definition-id)))
          (add-visible-edge self.graph self explorer-node "steps")
          explorer-node))
-  (set node.actions [{:name "Start Run"
-                          :icon "play_arrow"
-                          :fn (fn [_button _event]
-                                (node:start-workflow-from-graph {} {}))}
-                       {:name "Start With Selection"
-                        :icon "play_circle"
-                        :fn (fn [_button _event]
-                              (node:start-workflow-with-selection-from-graph {} {}))}
-                       {:name "New Step"
-                       :icon "add"
-                       :fn (fn [_button _event]
-                             (node:create-step-from-graph {}))}
-                      {:name "Explore Steps"
-                       :icon "manage_search"
-                       :fn (fn [_button _event]
-                             (node:open-step-explorer-from-graph))}
-                      {:name "Reveal Steps"
-                       :icon "account_tree"
-                       :fn (fn [_button _event]
-                             (node:reveal-all-steps-from-graph))}])
+  (set node.actions (workflow-definition-actions node))
+  (clear-changed-on-drop node)
   node)
 
 (fn register-loader [graph opts]
