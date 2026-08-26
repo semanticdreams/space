@@ -1263,6 +1263,36 @@
             (graph:drop))))
 
 (fn graph-expanded-card-header-shows-truncated-node-label [] (local ctx (make-ctx)) (local long-label "This graph node label is long enough to be truncated in compact expanded card headers") (local node (Graph.GraphNode {:key "compact-title-node" :label long-label :preview (tracked-preview {})})) (local GraphNodePresentation (require :graph/view/presentation)) (local card-builder (GraphNodePresentation.card-builder {:node node :position (glm.vec3 0 0 0) :default-size (glm.vec3 32 18 0) :on-collapse (fn [] nil) :on-open (fn [_] nil) :on-menu (fn [_] nil)})) (local card (card-builder ctx)) (assert card.header-title "Expanded card should expose a title text widget") (assert card.header-title-text "Expanded card should expose the display title string") (assert (string.find card.header-title-text (string.char 46 46 46) 1 true) "Expanded card display title should truncate long labels with an ellipsis") (assert (= node.label long-label) "Truncation should not mutate the source node label") (assert (= (length card.header-bar.children) 5) "Expanded card header should have title, spacer, and three buttons") (card:drop))
+
+(fn graph-expanded-card-header-actions-stay-inside-long-title-card []
+    (local ctx (make-ctx))
+    (local long-label "This graph node label is long enough to overflow the compact preview header actions")
+    (local state {:measure (glm.vec3 8 6 0)
+                  :constrained-measure (glm.vec3 8 6 0)})
+    (local node (Graph.GraphNode {:key "long-title-narrow-preview"
+                                  :label long-label
+                                  :preview (tracked-preview state)}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 0 0 0)
+                          :default-size (glm.vec3 32 18 0)
+                          :min-size (glm.vec3 24 12 0)
+                          :max-size (glm.vec3 52 34 0)
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (ctx.layout-root:update)
+    (assert (> card.header-bar.layout.measure.x 32)
+            "Test fixture should require more than the compact default width")
+    (local menu-button (. card.header-bar.children 5 :element))
+    (local menu-right-edge (+ menu-button.layout.position.x menu-button.layout.size.x))
+    (local card-right-edge (+ card.layout.position.x card._card-size.x))
+    (assert (<= menu-right-edge (+ card-right-edge 1e-3))
+            (.. "Rightmost header action should stay inside card; button edge "
+                menu-right-edge " card edge " card-right-edge))
+    (card:drop))
 (fn graph-expanded-toggle-preserves-selection []
     (with-temp-data-dir
         (fn [_root]
@@ -3613,6 +3643,8 @@
 (table.insert tests {:name "GraphView expanded card uses preview and measures child"
                       :fn graph-expanded-card-uses-preview-and-measures-child})
 (table.insert tests {:name "Graph expanded card header shows truncated node label" :fn graph-expanded-card-header-shows-truncated-node-label})
+(table.insert tests {:name "Graph expanded card header actions stay inside long-title card"
+                     :fn graph-expanded-card-header-actions-stay-inside-long-title-card})
 (table.insert tests {:name "GraphView expanded toggle preserves selection"
                       :fn graph-expanded-toggle-preserves-selection})
 (table.insert tests {:name "GraphView expanded toggle preserves node center"

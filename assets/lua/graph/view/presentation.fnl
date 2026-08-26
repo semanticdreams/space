@@ -206,12 +206,13 @@
                                                     (math.max 0 (- effective-max.y card._header-height))
                                                     effective-max.z)}))
       (local child-measure (and child child.measure))
+      (local header-measure-x (or header-bar.layout.measure.x 0))
       (local desired-y (if child-measure
                            (+ card._header-height child-measure.y)
                            default-size.y))
       (local desired-x (if child-measure
-                           (math.max default-size.x child-measure.x)
-                           default-size.x))
+                            (math.max default-size.x child-measure.x header-measure-x)
+                            (math.max default-size.x header-measure-x)))
       (set card._card-size
            (if card._user-size
                (glm.vec3 (math.max min-size.x (math.min resize-max-size.x card._user-size.x))
