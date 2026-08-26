@@ -10,20 +10,38 @@ This slice covers creating workflows, discovering steps, editing step code, auth
 
 Workflow definitions expose compact local controls for common authoring and inspection work:
 
-- step search;
-- run search;
 - quick start with **Start**;
 - **New Step**;
-- **Reveal All Steps**;
-- **Open Step Explorer**.
+- **Open Steps**;
+- **Open Runs**.
 
-The preview is an anchor, not a mini-application. It may show concise workflow state and short searchable lists, but dense editing and broad browsing move to code views or UX-purpose nodes.
+The preview is an anchor, not a mini-application. It shows concise workflow state and primary controls; step browsing, run browsing, and bulk step reveal behavior live in UX-purpose explorer nodes. Workflow definitions do not auto-expand related records.
+
+Graph-visible workflow keys include:
+
+```text
+workflows
+workflow-definition:<definition-id>
+workflow-step-explorer:<definition-id>
+workflow-step:<definition-id>:<step-id>
+workflow-run-explorer:<definition-id>
+workflow-run:<run-id>
+workflow-run-step:<run-id>:<step-id>
+workflow-run-timeline:<run-id>
+workflow-run-event:<run-id>:<event-id>
+```
 
 ## Step explorer UX node
 
 `workflow-step-explorer:<definition-id>` owns no workflow data. It is a focused UX-purpose graph node that adapts `WorkflowStore` for one workflow definition and helps users search, reveal, and inspect steps when the definition preview is too small.
 
-The explorer may materialize selected workflow-step nodes or all workflow-step nodes through explicit actions. WorkflowStore remains the owner of workflow steps and canonical workflow edges.
+The explorer may materialize selected workflow-step nodes or all workflow-step nodes through explicit actions. Those selections affect only the active graph map. WorkflowStore remains the owner of workflow steps and canonical workflow edges.
+
+## Run explorer UX node
+
+`workflow-run-explorer:<definition-id>` owns no workflow data. It is a focused UX-purpose graph node that adapts `WorkflowStore` for one workflow definition and helps users search and inspect past runs without embedding run browsing in the definition preview.
+
+Selecting a run from the explorer explicitly materializes only the selected `workflow-run:<run-id>` node in the active graph map. It does not reveal foreign-definition runs, run steps, timeline nodes, or events unless the user invokes explicit controls from the run node.
 
 ## Run inspection
 
@@ -44,7 +62,7 @@ Step code is edited through linked code entity views opened from workflow-step n
 
 ## Action-boundary rules
 
-Workflow graph materialization is explicit and map-local. Actions that add nodes or edges must state what they materialize and must use the active `GraphMap`.
+Workflow graph materialization is explicit and map-local. Actions that add nodes or edges must state what they materialize and must use the active `GraphMap`. Explorer selections explicitly materialize related nodes in that map; definitions and explorers do not trigger hidden relationship expansion.
 
 Selection-aware run actions read active `GraphMap` selection, validate accepted node types, and fail loudly or display explicit status for empty or invalid selections. When selection context is accepted, the created run records the graph-map id and selected node keys when available.
 

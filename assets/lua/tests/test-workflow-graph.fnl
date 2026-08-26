@@ -126,12 +126,13 @@
 (fn assert-contains [text needle message]
   (assert (string.find (tostring text) needle 1 true) message))
 (fn assert-not-contains [text needle message] (assert (not (string.find (tostring text) needle 1 true)) message))
-(local graph-discovery-files ["assets/lua/graph/node-base.fnl" "assets/lua/graph/core.fnl" "assets/lua/graph/map.fnl" "assets/lua/graph/nodes/workflows.fnl" "assets/lua/graph/nodes/workflow-definition.fnl" "assets/lua/graph/nodes/workflow-step.fnl" "assets/lua/graph/nodes/workflow-step-explorer.fnl" "assets/lua/graph/nodes/workflow-run-explorer.fnl" "assets/lua/graph/nodes/workflow-run.fnl" "assets/lua/graph/nodes/workflow-run-step.fnl" "assets/lua/graph/nodes/workflow-run-event.fnl" "assets/lua/graph/nodes/workflow-run-timeline.fnl"])
+(local graph-discovery-files ["lua/graph/node-base.fnl" "lua/graph/core.fnl" "lua/graph/map.fnl" "lua/graph/nodes/workflows.fnl" "lua/graph/nodes/workflow-definition.fnl" "lua/graph/nodes/workflow-step.fnl" "lua/graph/nodes/workflow-step-explorer.fnl" "lua/graph/nodes/workflow-run-explorer.fnl" "lua/graph/nodes/workflow-run.fnl" "lua/graph/nodes/workflow-run-step.fnl" "lua/graph/nodes/workflow-run-event.fnl" "lua/graph/nodes/workflow-run-timeline.fnl"])
+
 (fn graph-discovery-has-no-relationship-hook-leftovers []
   (local relationship-hook-marker (.. "get" "-edges"))
   (local graph-api-marker (.. "self." "tri" "gger"))
   (each [_ path (ipairs graph-discovery-files)]
-    (local source (fs.read-file path))
+    (local source (fs.read-file (app.engine.get-asset-path path)))
     (assert (not (string.find source relationship-hook-marker 1 true)) (.. path " should not contain the removed relationship hook"))
     (assert (not (string.find source graph-api-marker 1 true)) (.. path " should not contain the removed graph materialization API"))))
 
