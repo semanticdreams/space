@@ -273,10 +273,12 @@
   (assert widget "workflows preview should build a widget")
   (assert widget.workflow-name-input "workflows preview should expose workflow name input")
   (assert widget.new-workflow-button "workflows preview should expose a New Workflow button")
+  (assert widget.new-workflow-row "workflows preview should expose New Workflow row")
+  (assert (= (. widget.new-workflow-row.children 1 :element) widget.workflow-name-input) "workflow name input should be a child of New Workflow row")
+  (assert (= (. widget.new-workflow-row.children 2 :element) widget.new-workflow-button) "New Workflow button should be a child of New Workflow row")
   (local before (length (runtime.store:list-definitions))) (widget.workflow-name-input:set-text "Help Desk Intake") (widget.new-workflow-button:on-click {:source :test})
   (assert (= (length (runtime.store:list-definitions)) (+ before 1)) "New Workflow preview button should create a definition")
   (assert (definition-named? runtime.store "Help Desk Intake") "New Workflow preview button should persist the typed workflow name") (widget:drop) (map:drop))
-
 (fn workflows-preview-builds-with-new-workflow-action [] (with-runtime workflows-preview-builds-with-new-workflow-action-case))
 (fn workflows-preview-blank-name-keeps-default-workflow-name-case [runtime] (local map (GraphMap.GraphMap {:graph runtime.graph :id "workflow-preview-blank-name-map"})) (local node (map:load-by-key "workflows")) (local Preview (require :graph/view/previews/workflows)) (local widget ((Preview node {:node node}) (make-preview-ctx))) (assert widget.workflow-name-input "workflows preview should expose workflow name input for blank-name flow") (widget.workflow-name-input:set-text "   ") (widget.new-workflow-button:on-click {:source :test}) (assert (definition-named? runtime.store "Untitled Workflow") "blank workflow name input should preserve default Untitled Workflow behavior") (widget:drop) (map:drop))
 (fn workflows-preview-blank-name-keeps-default-workflow-name [] (with-runtime workflows-preview-blank-name-keeps-default-workflow-name-case))
@@ -294,7 +296,6 @@
   (runtime.store:upsert-run-step run.id "step-b" {:status :failed :error {:message "boom"}})
   (local event (runtime.store:append-event run.id {:id "event-started" :kind :step-started :step-id "step-a"}))
   {:definition definition :run (runtime.store:get-run run.id) :event event})
-
 (fn seed-two-definitions-with-run [runtime]
   (local seeded (seed-definition-with-run runtime))
   (local other (runtime.store:create-definition {:id "wf-other"
@@ -331,7 +332,6 @@
   (assert-edge-target map.edges selected-key "definition search submit should add root-to-definition edge")
   (assert-preview-drops-owned-children widget "workflows preview")
   (map:drop))
-
 (fn workflows-preview-search-selects-one-definition-only []
   (with-runtime workflows-preview-search-selects-one-definition-only-case))
 
@@ -1154,6 +1154,7 @@
 (table.insert tests {:name "workflows-preview-blank-name-keeps-default-workflow-name" :fn workflows-preview-blank-name-keeps-default-workflow-name})
 (table.insert tests {:name "workflows-preview-search-selects-one-definition-only" :fn workflows-preview-search-selects-one-definition-only})
 (table.insert tests {:name "workflows-root-does-not-load-runs-directly" :fn workflows-root-does-not-load-runs-directly})
+(each [_ test (ipairs ((require :tests/workflow-graph-rename-cases) {:with-runtime with-runtime :make-preview-ctx make-preview-ctx :assert-missing-build-context assert-missing-build-context :assert-missing-build-context-with-fallbacks assert-missing-build-context-with-fallbacks :GraphMap GraphMap :seed-definition-with-run seed-definition-with-run}))] (table.insert tests test))
 (table.insert tests {:name "workflow-definition-preview-builds-structured-inspector" :fn workflow-definition-preview-builds-structured-inspector})
 (table.insert tests {:name "workflow-definition-preview-selects-latest-run-by-created-at" :fn workflow-definition-preview-selects-latest-run-by-created-at})
 (table.insert tests {:name "workflow-definition-preview-step-search-reveals-one-step" :fn workflow-definition-preview-step-search-reveals-one-step})

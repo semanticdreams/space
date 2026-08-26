@@ -59,10 +59,17 @@
      build-ctx))
   (local new-workflow-button
     ((Button {:text "New Workflow"
-               :variant :ghost
-               :padding [0.25 0.2]
-               :on-click (new-workflow-click-handler target workflow-name-input)})
-      build-ctx))
+              :variant :ghost
+              :padding [0.25 0.2]
+              :on-click (new-workflow-click-handler target workflow-name-input)})
+     build-ctx))
+  (local new-workflow-row
+    ((Flex {:axis 1
+            :xspacing 0.3
+            :yalign :center
+            :children [(FlexChild (existing-widget workflow-name-input) 1)
+                       (FlexChild (existing-widget new-workflow-button) 0)]})
+     build-ctx))
   (local definition-search
     ((SearchView {:items items
                   :name "workflow-definition-search"
@@ -76,17 +83,17 @@
     ((Flex {:axis 2
             :xalign :stretch
             :yspacing 0.25
-             :children [(FlexChild (existing-widget title) 0)
-                         (FlexChild (existing-widget definition-count-text) 0)
-                         (FlexChild (existing-widget workflow-name-input) 0)
-                         (FlexChild (existing-widget definition-search) 1)
-                         (FlexChild (existing-widget new-workflow-button) 0)]})
+            :children [(FlexChild (existing-widget title) 0)
+                       (FlexChild (existing-widget definition-count-text) 0)
+                       (FlexChild (existing-widget new-workflow-row) 0)
+                       (FlexChild (existing-widget definition-search) 1)]})
      build-ctx))
   (set view.layout flex.layout)
   (set view.title title)
   (set view.summary-text definition-count-text)
   (set view.definition-count-text definition-count-text)
   (set view.workflow-name-input workflow-name-input)
+  (set view.new-workflow-row new-workflow-row)
   (set view.definition-search definition-search)
   (set view.new-workflow-button new-workflow-button)
   (set view.flex flex)
@@ -95,11 +102,10 @@
           (when view.__definition-search-listener
             (definition-search.submitted:disconnect view.__definition-search-listener true)
             (set view.__definition-search-listener nil))
-           (title:drop)
-           (definition-count-text:drop)
-           (workflow-name-input:drop)
-           (definition-search:drop)
-          (new-workflow-button:drop)
+          (title:drop)
+          (definition-count-text:drop)
+          (new-workflow-row:drop)
+          (definition-search:drop)
           (set flex.children [])
           (flex:drop)))
   view)

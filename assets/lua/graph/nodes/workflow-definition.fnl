@@ -4,6 +4,7 @@
 (local GraphMapContext (require :graph/map-context))
 (local WorkflowTemplates (require :workflows/templates))
 (local WorkflowDefinitionNodePreview (require :graph/view/previews/workflow-definition))
+(local WorkflowDefinitionNodeView (require :graph/view/views/workflow-definition))
 
 (local DEFINITION_BLUE (glm.vec4 0.22 0.4 0.82 1))
 (local DEFINITION_BLUE_ACCENT (glm.vec4 0.32 0.52 0.95 1))
@@ -227,6 +228,9 @@
       definition.name
       definition-id))
 
+(fn trim-text [text]
+  (string.match (tostring text) "^%s*(.-)%s*$"))
+
 (fn load-step-node-from-definition [self step]
   (local step-node (load-required-node self.graph (step-key self.workflow-definition-id step.id)))
   (add-visible-edge self.graph self step-node "step")
@@ -269,12 +273,25 @@
                           :label label
                           :color DEFINITION_BLUE
                           :sub-color DEFINITION_BLUE_ACCENT
+                          :view WorkflowDefinitionNodeView
                           :preview WorkflowDefinitionNodePreview
                           :size 8.5}))
   (set node.workflow-definition-id definition-id)
   (set node.workflow-store store)
   (set node.workflow-runner runner)
   (set node.code-store options.code-store)
+  (set node.update-name
+       (fn [self new-name]
+         (local trimmed (trim-text new-name))
+         (assert (> (string.len trimmed) 0)
+                 "WorkflowDefinitionNode.update-name requires a non-empty name")
+         (assert self.workflow-store "WorkflowDefinitionNode.update-name requires workflow store")
+         (assert self.workflow-store.update-definition
+                 "WorkflowDefinitionNode.update-name requires workflow store:update-definition")
+         (current-definition self "WorkflowDefinitionNode.update-name")
+         (local updated (self.workflow-store:update-definition self.workflow-definition-id {:name trimmed}))
+         (set self.label (definition-label updated self.workflow-definition-id))
+         updated))
   (set node.start-workflow-from-graph
         (fn [self input context-opts]
            (assert-start-graph-dependencies self)
