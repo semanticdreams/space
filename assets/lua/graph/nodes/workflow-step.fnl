@@ -56,6 +56,20 @@
   (assert self.graph.load-by-key (.. action " requires graph:load-by-key"))
   (assert self.graph.add-edge (.. action " requires graph:add-edge")))
 
+(fn delete-step-options [opts]
+  (local options {})
+  (local source (if opts opts {}))
+  (each [k v (pairs source)]
+    (set (. options k) v))
+  (set options.delete-dependent-edges? true)
+  options)
+
+(fn assert-delete-step-graph-dependencies [self]
+  (local action "WorkflowStepNode.delete-step-from-graph")
+  (GraphMapContext.assert-graph-map self.graph action)
+  (assert self.graph.remove-nodes (.. action " requires graph:remove-nodes"))
+  (assert self.workflow-store.delete-step (.. action " requires workflow store:delete-step")))
+
 (fn step-label [step step-id]
   (if (and step (> (string.len (if step.name step.name "")) 0))
       step.name
@@ -98,12 +112,26 @@
                                "WorkflowStepNode.show-code-from-graph"
                                "code-entity")
           (local code-node (load-required-node self.graph (.. "code-entity:" code-entity-id)))
-         (add-visible-edge self.graph self code-node "code")
-         code-node))
+          (add-visible-edge self.graph self code-node "code")
+          code-node))
+  (set node.delete-step-from-graph
+       (fn [self opts]
+         (assert-delete-step-graph-dependencies self)
+         (assert (self:get-step)
+                 "WorkflowStepNode.delete-step-from-graph requires an existing workflow step")
+         (local deleted (self.workflow-store:delete-step self.workflow-definition-id
+                                                         self.workflow-step-id
+                                                         (delete-step-options opts)))
+         (self.graph:remove-nodes [self] {:cause "workflow-step-delete"})
+         deleted))
   (set node.actions [{:name "Show Code"
-                      :icon "code"
+                       :icon "code"
+                       :fn (fn [_button _event]
+                             (node:show-code-from-graph))}
+                     {:name "Delete Step"
+                      :icon "delete"
                       :fn (fn [_button _event]
-                            (node:show-code-from-graph))}])
+                            (node:delete-step-from-graph))}])
   node)
 
 (fn parse-key [key]
