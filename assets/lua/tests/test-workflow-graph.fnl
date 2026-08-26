@@ -142,13 +142,15 @@
 
 (fn text-widget-string [widget]
   (codepoints->text (widget:get-codepoints)))
+(fn definition-named? [workflow-store name] (var found? false) (each [_ definition (ipairs (workflow-store:list-definitions))] (when (= definition.name name) (set found? true))) found?)
 
 (fn assert-preview-drops-owned-children [widget message]
-  (local dropped {:title 0 :summary 0 :flex 0 :definition-search 0})
+  (local dropped {:title 0 :summary 0 :flex 0 :definition-search 0 :workflow-name-input 0})
   (local original-title-drop widget.title.drop)
   (local original-summary-drop widget.summary-text.drop)
   (local original-flex-drop widget.flex.drop)
   (local original-definition-search-drop (and widget.definition-search widget.definition-search.drop))
+  (local original-workflow-name-input-drop (and widget.workflow-name-input widget.workflow-name-input.drop))
   (set widget.title.drop
        (fn [self]
          (set dropped.title (+ dropped.title 1))
@@ -166,11 +168,13 @@
          (fn [self]
            (set dropped.definition-search (+ dropped.definition-search 1))
            (original-definition-search-drop self))))
+  (when widget.workflow-name-input (set widget.workflow-name-input.drop (fn [self] (set dropped.workflow-name-input (+ dropped.workflow-name-input 1)) (original-workflow-name-input-drop self))))
   (widget:drop)
   (assert (> dropped.title 0) (.. message " should drop title"))
   (assert (> dropped.summary 0) (.. message " should drop summary"))
   (when widget.definition-search
     (assert (> dropped.definition-search 0) (.. message " should drop definition search")))
+  (when widget.workflow-name-input (assert (> dropped.workflow-name-input 0) (.. message " should drop workflow name input")))
   (assert (> dropped.flex 0) (.. message " should drop flex")))
 
 (fn target-node-by-key [targets key]
@@ -267,16 +271,15 @@
   (assert-missing-build-context builder "workflows preview should assert on missing build context")
   (local widget (builder (make-preview-ctx)))
   (assert widget "workflows preview should build a widget")
+  (assert widget.workflow-name-input "workflows preview should expose workflow name input")
   (assert widget.new-workflow-button "workflows preview should expose a New Workflow button")
-  (local before (length (runtime.store:list-definitions)))
-  (widget.new-workflow-button:on-click {:source :test})
-  (assert (= (length (runtime.store:list-definitions)) (+ before 1))
-          "New Workflow preview button should create a definition")
-  (widget:drop)
-  (map:drop))
+  (local before (length (runtime.store:list-definitions))) (widget.workflow-name-input:set-text "Help Desk Intake") (widget.new-workflow-button:on-click {:source :test})
+  (assert (= (length (runtime.store:list-definitions)) (+ before 1)) "New Workflow preview button should create a definition")
+  (assert (definition-named? runtime.store "Help Desk Intake") "New Workflow preview button should persist the typed workflow name") (widget:drop) (map:drop))
 
-(fn workflows-preview-builds-with-new-workflow-action []
-  (with-runtime workflows-preview-builds-with-new-workflow-action-case))
+(fn workflows-preview-builds-with-new-workflow-action [] (with-runtime workflows-preview-builds-with-new-workflow-action-case))
+(fn workflows-preview-blank-name-keeps-default-workflow-name-case [runtime] (local map (GraphMap.GraphMap {:graph runtime.graph :id "workflow-preview-blank-name-map"})) (local node (map:load-by-key "workflows")) (local Preview (require :graph/view/previews/workflows)) (local widget ((Preview node {:node node}) (make-preview-ctx))) (assert widget.workflow-name-input "workflows preview should expose workflow name input for blank-name flow") (widget.workflow-name-input:set-text "   ") (widget.new-workflow-button:on-click {:source :test}) (assert (definition-named? runtime.store "Untitled Workflow") "blank workflow name input should preserve default Untitled Workflow behavior") (widget:drop) (map:drop))
+(fn workflows-preview-blank-name-keeps-default-workflow-name [] (with-runtime workflows-preview-blank-name-keeps-default-workflow-name-case))
 
 (fn seed-definition-with-run [runtime]
   (local code-a (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
@@ -1148,6 +1151,7 @@
 (table.insert tests {:name "workflows-root-new-workflow-creates-and-loads-graph-nodes" :fn workflows-root-new-workflow-creates-and-loads-graph-nodes})
 (table.insert tests {:name "workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-graph-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-preview-builds-with-new-workflow-action" :fn workflows-preview-builds-with-new-workflow-action})
+(table.insert tests {:name "workflows-preview-blank-name-keeps-default-workflow-name" :fn workflows-preview-blank-name-keeps-default-workflow-name})
 (table.insert tests {:name "workflows-preview-search-selects-one-definition-only" :fn workflows-preview-search-selects-one-definition-only})
 (table.insert tests {:name "workflows-root-does-not-load-runs-directly" :fn workflows-root-does-not-load-runs-directly})
 (table.insert tests {:name "workflow-definition-preview-builds-structured-inspector" :fn workflow-definition-preview-builds-structured-inspector})
