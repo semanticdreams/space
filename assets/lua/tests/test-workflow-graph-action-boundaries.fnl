@@ -39,7 +39,8 @@
   (local graph (Graph {:with-start false}))
   (each [_ loader-name (ipairs loader-names)]
     (local module (require (.. :graph/nodes/ loader-name)))
-    (module.register-loader graph {:store runtime.store :runner runtime.runner :code-store runtime.code-store}))
+    (local store (if (= loader-name :code-entity) runtime.code-store runtime.store))
+    (module.register-loader graph {:store store :runner runtime.runner :code-store runtime.code-store}))
   graph)
 
 (fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code-case [runtime]
@@ -85,7 +86,10 @@
 
 (fn seed-definition [runtime]
   (local code (runtime.code-store:create-entity {:id "code-a" :name "A" :source "(+ 1 1)"}))
-  (runtime.store:create-definition {:id "wf-demo" :name "Demo" :steps [{:id "step-a" :name "A" :code-entity-id code.id}] :edges []}))
+  (local code-b (runtime.code-store:create-entity {:id "code-b" :name "B" :source "(+ 2 2)"}))
+  (runtime.store:create-definition {:id "wf-demo" :name "Demo" :steps [{:id "step-a" :name "A" :code-entity-id code.id}
+                                                                        {:id "step-b" :name "B" :code-entity-id code-b.id}]
+                                    :edges [{:id "edge-a-b" :source-step-id "step-a" :target-step-id "step-b"}]}))
 
 (fn seed-run [runtime]
   (local definition (seed-definition runtime))
@@ -130,6 +134,28 @@
     (set (. keys key) true))
   keys)
 
+(fn step-exists? [definition step-id]
+  (var found false)
+  (local steps (assert (and definition definition.steps) "step-exists? requires definition.steps"))
+  (each [_ step (ipairs steps)]
+    (when (= step.id step-id) (set found true)))
+  found)
+
+(fn graph-edge-touches-key? [graph key]
+  (var found false)
+  (each [_ edge (ipairs graph.edges)]
+    (when (if (and edge.source (= edge.source.key key))
+              true
+              (and edge.target (= edge.target.key key)))
+      (set found true)))
+  found)
+
+(fn action-named? [actions name]
+  (var found false)
+  (each [_ action (ipairs actions)]
+    (when (= action.name name) (set found true)))
+  found)
+
 (fn assert-no-shared-graph-materializer-topology [graph before-edge-count before-keys message]
   (each [key _ (pairs graph.nodes)]
     (assert (. before-keys key) (.. message " should not leave newly materialized shared graph node: " key)))
@@ -141,9 +167,11 @@
   (assert (= (length (runtime.code-store:list-entities)) before.code)
           (.. message " should not persist code entities"))
   (assert (= (length (runtime.store:list-runs {:definition-id definition-id})) before.runs)
-          (.. message " should not persist workflow runs"))
+           (.. message " should not persist workflow runs"))
   (assert (= (length (. (runtime.store:get-definition definition-id) :steps)) before.steps)
-          (.. message " should not persist workflow steps")))
+          (.. message " should not persist workflow steps"))
+  (assert (= (length (. (runtime.store:get-definition definition-id) :edges)) before.edges)
+          (.. message " should not mutate workflow edges")))
 
 (fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph-case [runtime]
   (local definition (seed-definition runtime))
@@ -263,6 +291,35 @@
 (fn workflow-run-timeline-shared-graph-event-load-requires-graph-map []
   (with-runtime workflow-run-timeline-shared-graph-event-load-requires-graph-map-case))
 
+(fn workflow-step-delete-removes-domain-step-and-visible-map-node-case [runtime]
+  (local definition (seed-definition runtime))
+  (local run (runtime.store:create-run definition.id {} {}))
+  (runtime.store:upsert-run-step run.id "step-a" {:status :succeeded})
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition :workflow-step :code-entity]))
+  (local map (GraphMap.GraphMap {:graph graph :id "delete-step-map"}))
+  (local definition-node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (definition-node:reveal-all-steps-from-graph)
+  (local step-key (.. "workflow-step:" definition.id ":step-a"))
+  (local step-node (assert (map:lookup step-key) "Delete Step test requires visible step-a"))
+  (step-node:show-code-from-graph)
+  (assert step-node.delete-step-from-graph "workflow step should expose delete-step-from-graph")
+  (assert (action-named? step-node.actions "Delete Step") "workflow step should expose Delete Step action")
+  (local deleted (step-node:delete-step-from-graph))
+  (local reloaded (runtime.store:get-definition definition.id))
+  (assert (= deleted.id "step-a") "Delete Step should return deleted workflow step")
+  (assert (not (step-exists? reloaded "step-a")) "Delete Step should remove workflow step")
+  (assert (= (length reloaded.edges) 0) "Delete Step should remove dependent workflow edges")
+  (assert (not (map:lookup step-key)) "Delete Step should remove visible workflow-step node")
+  (assert (not (graph-edge-touches-key? map step-key)) "Delete Step should remove visible graph edges touching step")
+  (assert (runtime.code-store:get-entity "code-a") "Delete Step should keep linked code entity durable")
+  (local reloaded-run (runtime.store:get-run run.id))
+  (assert (. reloaded-run.steps "step-a") "Delete Step should keep existing run history durable")
+  (map:drop)
+  (graph:drop))
+
+(fn workflow-step-delete-removes-domain-step-and-visible-map-node []
+  (with-runtime workflow-step-delete-removes-domain-step-and-visible-map-node-case))
+
 (fn graph-materializing-methods-require-mounted-graph-map-case [runtime]
   (local seeded (seed-run runtime))
   (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition
@@ -283,9 +340,10 @@
   (local before-edges (graph:edge-count))
   (local before-keys (capture-node-keys graph))
   (local before {:definitions (length (runtime.store:list-definitions))
-                 :code (length (runtime.code-store:list-entities))
-                 :runs (length (runtime.store:list-runs {:definition-id seeded.definition.id}))
-                 :steps (length (. (runtime.store:get-definition seeded.definition.id) :steps))})
+                  :code (length (runtime.code-store:list-entities))
+                  :runs (length (runtime.store:list-runs {:definition-id seeded.definition.id}))
+                  :steps (length (. (runtime.store:get-definition seeded.definition.id) :steps))
+                  :edges (length (. (runtime.store:get-definition seeded.definition.id) :edges))})
   (assert-requires-mounted-graph-map
     (fn [] (root-node:create-workflow-from-graph {:name "Shared Graph Leak"}))
     "WorkflowsNode.create-workflow-from-graph")
@@ -313,6 +371,9 @@
   (assert-requires-mounted-graph-map
     (fn [] (step-node:show-code-from-graph))
     "WorkflowStepNode.show-code-from-graph")
+  (assert-requires-mounted-graph-map
+    (fn [] (step-node:delete-step-from-graph))
+    "WorkflowStepNode.delete-step-from-graph")
   (assert-requires-mounted-graph-map
     (fn [] (explorer-node:load-step-from-graph "step-a"))
     "WorkflowStepExplorerNode.load-step-from-graph")
@@ -377,6 +438,7 @@
 (table.insert tests {:name "workflow-run-show-steps-without-run-step-loader-does-not-materialize" :fn workflow-run-show-steps-without-run-step-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-open-timeline-without-loader-does-not-materialize" :fn workflow-run-open-timeline-without-loader-does-not-materialize})
 (table.insert tests {:name "workflow-run-timeline-shared-graph-event-load-requires-graph-map" :fn workflow-run-timeline-shared-graph-event-load-requires-graph-map})
+(table.insert tests {:name "workflow-step-delete-removes-domain-step-and-visible-map-node" :fn workflow-step-delete-removes-domain-step-and-visible-map-node})
 (table.insert tests {:name "graph-materializing-methods-require-mounted-graph-map" :fn graph-materializing-methods-require-mounted-graph-map})
 (table.insert tests {:name "selection-aware-start-validates-active-selection" :fn selection-aware-start-validates-active-selection})
 
