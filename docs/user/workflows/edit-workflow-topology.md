@@ -4,9 +4,9 @@ Goal: change how an existing workflow moves from one step to the next while keep
 
 1. Open **Start -> Workflows**, search for the existing workflow, and open its workflow definition node.
 2. To rename the existing workflow, open the workflow definition node's full view/panel and edit its workflow name field. The Workflows root **Workflow name** field only names a workflow while creating it with **New Workflow**.
-3. Use step search in the definition preview to reveal one step that you know belongs near the change. The graph materializes only that workflow-step node.
-4. Use **Reveal All Steps** when you need the visual topology. Space materializes all steps for the definition and the visible workflow-derived edges between them.
-5. If the definition preview is too small for the investigation, choose **Open Step Explorer**. The `workflow-step-explorer:<definition-id>` node gives a focused step browsing surface without owning workflow records.
+3. Open a workflow definition node. Use **Open Steps** to browse or reveal steps. Use **Open Runs** to browse past runs. The definition preview stays focused on starting the workflow and creating steps.
+4. From `workflow-step-explorer:<definition-id>`, use step search to reveal one step that you know belongs near the change. The graph materializes only that workflow-step node.
+5. Use **Reveal All Steps** from the step explorer when you need the visual topology. Space materializes all steps for the definition and the visible workflow-derived edges between them.
 6. Connect compatible workflow-step nodes in the graph to create canonical workflow edges. The graph edge is the editing gesture; the workflow store remains the owner of the real workflow topology.
 7. Remove an authored step edge from the graph to remove the corresponding canonical workflow edge. Do this deliberately, because edge removal changes the workflow's execution path.
 8. To delete a workflow step from the workflow definition, open that workflow-step node and choose **Delete Step**. This removes the step and its dependent workflow edges from the workflow definition, then removes the visible step node and visible edges touching it from the current graph map.

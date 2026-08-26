@@ -18,7 +18,19 @@ Definitions use `wf-...` ids and contain metadata plus executable step records a
 
 Runs use `wfr-...` ids and record definition id/version, status, input/output, context, current steps, nested run steps, and events. Run steps are addressed by run id plus step id. Events use `event-...` ids.
 
-Graph-visible keys include `workflows`, `workflow-definition:<id>`, `workflow-step:<definition-id>:<step-id>`, `workflow-run:<run-id>`, `workflow-run-step:<run-id>:<step-id>`, and `workflow-run-event:<run-id>:<event-id>`.
+Graph-visible workflow keys include:
+
+```text
+workflows
+workflow-definition:<definition-id>
+workflow-step-explorer:<definition-id>
+workflow-step:<definition-id>:<step-id>
+workflow-run-explorer:<definition-id>
+workflow-run:<run-id>
+workflow-run-step:<run-id>:<step-id>
+workflow-run-timeline:<run-id>
+workflow-run-event:<run-id>:<event-id>
+```
 
 ## Executable step contract
 
@@ -36,20 +48,22 @@ Workflow discovery is explicit and hierarchical:
 Workflows root -> selected workflow definition -> selected workflow run -> run details
 ```
 
-The `Workflows` root browse/search surface lists workflow definitions only. Runs are browsed from a selected workflow definition, and run steps/events are materialized from an explicit run detail control. This avoids root-level fan-out of all runs and keeps graph-map topology limited to records the user has chosen to reveal.
+The `Workflows` root browse/search surface lists workflow definitions only. Workflow definitions do not auto-expand into steps, runs, run steps, or events. Definition controls open focused explorer nodes, and explorer selections explicitly materialize the selected related nodes in the active graph map. Run steps/events are materialized from explicit run detail controls. This avoids root-level fan-out and keeps graph-map topology limited to records the user has chosen to reveal.
 
 ## Graph user flow
 
 1. Open Graph.
 2. From `start`, search/select `Workflows`.
 3. Browse/search workflow definitions from the `Workflows` root, or invoke `New Workflow`.
-4. Open a workflow definition to browse/search that definition's runs and to reveal its steps.
-5. Use `Show Code` on a step to open the linked `code-entity:<id>` node.
-6. Edit the Fennel code entity if desired.
-7. Use `New Step` on the definition for additional steps.
-8. Connect workflow step nodes; those connections create canonical workflow edges.
-9. Click `Start` / `Start Run` on the workflow definition to create and reveal a run node in the active graph map.
-10. Open the run node, use granular inspection actions such as `Open Timeline`, `Show Run Steps`, and `Reveal Failed Steps`, then inspect long inputs, outputs, errors, logs, or event bodies in payload panels/full node views.
+4. Open a workflow definition for a compact summary plus **Start**, **New Step**, **Open Steps**, and **Open Runs** controls.
+5. Use **Open Steps** to browse/search steps or reveal all steps through `workflow-step-explorer:<definition-id>`.
+6. Use **Open Runs** to browse/search past runs through `workflow-run-explorer:<definition-id>`; selecting a run materializes only that run node in the active graph map.
+7. Use `Show Code` on a step to open the linked `code-entity:<id>` node.
+8. Edit the Fennel code entity if desired.
+9. Use `New Step` on the definition for additional steps.
+10. Connect workflow step nodes; those connections create canonical workflow edges.
+11. Click `Start` / `Start Run` on the workflow definition to create and reveal a run node in the active graph map.
+12. Open the run node, use granular inspection actions such as `Open Timeline`, `Show Run Steps`, and `Reveal Failed Steps`, then inspect long inputs, outputs, errors, logs, or event bodies in payload panels/full node views.
 
 Workflow data remains in `WorkflowStore`: definitions, steps, edges, runs, run steps, and events are owned there. Fennel source bodies remain in `CodeEntityStore`. Graph nodes and actions adapt those stores into the current interaction context, and graph maps only provide visibility, selection, and interaction context; they do not own workflow data or code bodies.
 
