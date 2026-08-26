@@ -245,6 +245,8 @@
       false
       (= (string.sub key 1 23) "workflow-step-explorer:")
       false
+      (= (string.sub key 1 22) "workflow-run-explorer:")
+      false
       (= (string.sub key 1 22) "workflow-run-timeline:")
       false
       (string.find key ":" 1 true)

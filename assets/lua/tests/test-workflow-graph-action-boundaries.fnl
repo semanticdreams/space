@@ -452,6 +452,30 @@
 (fn selection-aware-start-validates-active-selection []
   (with-runtime selection-aware-start-validates-active-selection-case))
 
+(fn selection-aware-start-rejects-workflow-run-explorer-selection-case [runtime]
+  (local definition (seed-definition runtime))
+  (local graph (make-graph-with-workflow-loaders runtime [:workflow-definition
+                                                          :workflow-step
+                                                          :workflow-run
+                                                          :workflow-run-explorer]))
+  (local map (GraphMap.GraphMap {:graph graph :id "selection-start-run-explorer-map"}))
+  (local node (map:load-by-key (.. "workflow-definition:" definition.id)))
+  (local run-explorer-key (.. "workflow-run-explorer:" definition.id))
+  (map:load-by-key run-explorer-key)
+  (local before-runs (length (runtime.store:list-runs {:definition-id definition.id})))
+  (set map.selected_node_keys [run-explorer-key])
+  (local (ok err) (pcall node.start-workflow-with-selection-from-graph node {:prompt "go"} {}))
+  (assert (not ok) "selection-aware Start should reject workflow-run-explorer selections")
+  (assert (string.find (tostring err) "unsupported selected graph node" 1 true)
+          "workflow-run-explorer selection failure should identify unsupported selected nodes")
+  (assert (= (length (runtime.store:list-runs {:definition-id definition.id})) before-runs)
+          "workflow-run-explorer selection should not persist workflow runs")
+  (map:drop)
+  (graph:drop))
+
+(fn selection-aware-start-rejects-workflow-run-explorer-selection []
+  (with-runtime selection-aware-start-rejects-workflow-run-explorer-selection-case))
+
 (table.insert tests {:name "workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-required-loaders-does-not-persist-workflow-or-code})
 (table.insert tests {:name "workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code" :fn workflows-root-new-workflow-without-definition-loader-does-not-persist-workflow-or-code})
 (table.insert tests {:name "definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph" :fn definition-new-step-without-code-loader-does-not-persist-or-leave-stale-graph})
@@ -465,6 +489,7 @@
 (table.insert tests {:name "workflow-step-delete-removes-domain-step-and-visible-map-node" :fn workflow-step-delete-removes-domain-step-and-visible-map-node})
 (table.insert tests {:name "graph-materializing-methods-require-mounted-graph-map" :fn graph-materializing-methods-require-mounted-graph-map})
 (table.insert tests {:name "selection-aware-start-validates-active-selection" :fn selection-aware-start-validates-active-selection})
+(table.insert tests {:name "selection-aware-start-rejects-workflow-run-explorer-selection" :fn selection-aware-start-rejects-workflow-run-explorer-selection})
 
 (local main
   (fn []
