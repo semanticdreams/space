@@ -61,16 +61,17 @@
      build-ctx))
 
 (fn FsNodeView [node opts]
-    (local options (or opts {}))
-    (local target (or node options.node))
-    (local items (or options.items []))
+    (local options (if opts opts {}))
+    (local target (if node node options.node))
+    (local items (if options.items options.items []))
 
     (fn build [ctx]
-        (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
+        (local build-ctx (if ctx ctx options.ctx))
         (assert build-ctx "FsNodeView requires a build context")
         (local view {})
-        (local panel-target (or options.target
-                                (and build-ctx build-ctx.panel-target)))
+        (local panel-target (if options.target
+                                options.target
+                                build-ctx.panel-target))
         (local resolved-path (resolve-target-path target))
         (local file-mode (file-mode? resolved-path))
         (local edit-enabled? file-mode)
@@ -80,8 +81,10 @@
                   "FsNodeView ripgrep action requires panel target:add-panel-child")
           (when resolved-path
             (FsRipgrepDialog.open-panel {:target panel-target
-                                         :path resolved-path
-                                         :label (or target.label resolved-path)})))
+                                          :path resolved-path
+                                          :label (if target.label
+                                                     target.label
+                                                     resolved-path)})))
 
         (local edit-button (make-edit-button build-ctx file-mode edit-enabled? resolved-path))
         (local ripgrep-button (make-ripgrep-button build-ctx file-mode resolved-path open-ripgrep-panel))

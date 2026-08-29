@@ -72,6 +72,7 @@
 (local LlmStore (require :llm/conversations/store))
 (local Kernels (require :kernels))
 (local fs (require :fs))
+(local FileTypes (require :graph/file-types))
 
 (local M {})
 
@@ -367,14 +368,9 @@
       (fn [path key]
         (FsFileViewerNode {:path path :key key})))))
 
-(fn cpp-module-path? [path]
-  (if (string.match path "%.cpp$") true
-      (string.match path "%.cc$") true
-      (string.match path "%.cxx$") true
-      (string.match path "%.h$") true
-      (string.match path "%.hpp$") true
-      (string.match path "%.hh$") true
-      false))
+(fn path-module-kind? [path expected-kind]
+  (local classification (FileTypes.classify path))
+  (= classification.module-kind expected-kind))
 
 (fn register-module-loaders [graph]
   (graph:register-key-loader "code-dir"
@@ -384,12 +380,12 @@
   (graph:register-key-loader "fnl-module"
     (existing-path-loader "fnl-module:" :file
       (fn [path key]
-        (when (string.match path "%.fnl$")
+        (when (path-module-kind? path :fnl)
           (FnlModuleNode {:path path :key key})))))
   (graph:register-key-loader "cpp-module"
     (existing-path-loader "cpp-module:" :file
       (fn [path key]
-        (when (cpp-module-path? path)
+        (when (path-module-kind? path :cpp)
           (CppModuleNode {:path path :key key})))))
   (graph:register-key-loader "text-module"
     (existing-path-loader "text-module:" :file

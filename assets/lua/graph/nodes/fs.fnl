@@ -167,10 +167,10 @@
 
     (set node.path-stat
          (fn [self current-path]
-             (local raw-path (self:resolve-path current-path))
-             (local resolved-path (and raw-path fs.absolute (fs.absolute raw-path)))
-             (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
-             (values resolved-path stat)))
+              (local raw-path (self:resolve-path current-path))
+              (local resolved-path (and raw-path fs.absolute (fs.absolute raw-path)))
+              (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
+              (values raw-path stat resolved-path)))
 
     (set node.build-directory-items
          (fn [self current-path]
@@ -190,13 +190,13 @@
              (build-file-interaction-items current-path)))
 
     (set node.build-items
-         (fn [self current-path]
-             (local (resolved-path stat) (self:path-stat current-path))
-             (if (and stat stat.exists stat.is-dir)
-                 (self:build-directory-items resolved-path)
-                 (and stat stat.exists stat.is-file)
-                 (self:build-file-interactions resolved-path)
-                 (error "FsNode path is not a directory or regular file"))))
+          (fn [self current-path]
+              (local (listing-path stat resolved-path) (self:path-stat current-path))
+              (if (and stat stat.exists stat.is-dir)
+                  (self:build-directory-items listing-path)
+                  (and stat stat.exists stat.is-file)
+                  (self:build-file-interactions resolved-path)
+                  (error "FsNode path is not a directory or regular file"))))
 
     (set node.emit-items
          (fn [self]

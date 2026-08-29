@@ -4441,6 +4441,85 @@
       (assert (= (graph:edge-count) 3))
       (graph:drop))))
 
+(fn fs-node-uppercase-module-interactions-restore-through-key-loaders []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local source-graph (Graph {:with-start false}))
+      (GraphKeyLoaders.register source-graph {})
+      (local file-cases
+        [{:name "MAIN.FNL"
+          :label "Open as Fennel Module"
+          :prefix "fnl-module:"
+          :content "(local x 1)\n"}
+         {:name "MAIN.CPP"
+          :label "Open as C++ Module"
+          :prefix "cpp-module:"
+          :content "int main() { return 0; }\n"}])
+      (each [_ file-case (ipairs file-cases)]
+        (local path (fs.join-path root file-case.name))
+        (fs.write-file path file-case.content)
+        (local node (FsNode {:path path}))
+        (source-graph:add-node node {:position (glm.vec3 0 0 0)})
+        (local interaction (find-search-row (node:emit-items) file-case.label))
+        (assert interaction (.. file-case.name " should expose module interaction"))
+        (node:open-entry interaction)
+        (local module-key (.. file-case.prefix (fs.absolute path)))
+        (assert (source-graph:lookup module-key)
+                (.. file-case.name " should add module node before persistence")))
+      (local state (source-graph:capture-state))
+      (local restored-graph (Graph {:with-start false}))
+      (GraphKeyLoaders.register restored-graph {})
+      (restored-graph:restore-state state)
+      (each [_ file-case (ipairs file-cases)]
+        (local module-key (.. file-case.prefix (fs.absolute (fs.join-path root file-case.name))))
+        (assert (restored-graph:lookup module-key)
+                (.. file-case.name " module key should restore through key loader")))
+      (assert (= (restored-graph:edge-count) 2)
+              "Restored uppercase module graph should preserve edges")
+      (restored-graph:drop)
+      (source-graph:drop))))
+
+(fn fs-node-relative-directory-open-entry-preserves-relative-child-key []
+  (local relative-root "assets/lua/tests/data/fs-node-relative-dir")
+  (local absolute-root (fs.absolute relative-root))
+  (when (fs.exists absolute-root)
+    (fs.remove-all absolute-root))
+  (fs.create-dirs absolute-root)
+  (fs.write-file (fs.join-path absolute-root "child.txt") "hello")
+  (local graph (Graph {:with-start false}))
+  (local node (FsNode {:path relative-root}))
+  (graph:add-node node {:position (glm.vec3 0 0 0)})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local entry (find-search-row (node:emit-items) "child.txt"))
+        (assert entry "Relative directory should list child file")
+        (assert (= entry.path (fs.join-path relative-root "child.txt"))
+                "Directory entry path should preserve relative parent style")
+        (node:open-entry entry)
+        (local expected-key (.. "fs:" (fs.join-path relative-root "child.txt")))
+        (assert (graph:lookup expected-key)
+                (.. "Opening relative child should add " expected-key)))))
+  (graph:drop)
+  (fs.remove-all absolute-root)
+  (when (not ok)
+    (error err)))
+
+(fn fs-node-view-requires-explicit-build-context []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local node (FsNode {:path root}))
+      (local fallback-ctx (make-ctx))
+      (local graph (Graph {:with-start false}))
+      (set graph.ctx fallback-ctx)
+      (graph:add-node node {:position (glm.vec3 0 0 0)})
+      (local builder (node.view node))
+      (local (ok err) (pcall builder))
+      (assert (not ok) "FsNodeView should reject missing explicit build context")
+      (assert (string.find (tostring err) "FsNodeView requires a build context" 1 true)
+              (.. "Expected build context error, got: " (tostring err)))
+      (graph:drop))))
+
 (fn fs-node-unknown-file-shows-only-external-editor []
   (with-fs-interaction-test-dir
     (fn [root]
@@ -4481,9 +4560,15 @@
 (table.insert tests {:name "FsNode relative text viewer interaction uses absolute key"
                      :fn fs-node-relative-text-viewer-uses-absolute-key})
 (table.insert tests {:name "FsNode module interactions preserve key formats"
-                     :fn fs-node-module-interactions-preserve-key-formats})
+                      :fn fs-node-module-interactions-preserve-key-formats})
+(table.insert tests {:name "FsNode uppercase module interactions restore through key loaders"
+                     :fn fs-node-uppercase-module-interactions-restore-through-key-loaders})
+(table.insert tests {:name "FsNode relative directory open-entry preserves relative child key"
+                     :fn fs-node-relative-directory-open-entry-preserves-relative-child-key})
+(table.insert tests {:name "FsNodeView requires explicit build context"
+                     :fn fs-node-view-requires-explicit-build-context})
 (table.insert tests {:name "FsNode unknown file shows only external editor"
-                     :fn fs-node-unknown-file-shows-only-external-editor})
+                      :fn fs-node-unknown-file-shows-only-external-editor})
 (table.insert tests {:name "FsNode directory listing behavior remains unchanged"
                      :fn fs-node-directory-listing-behavior-remains-unchanged})
 
