@@ -6,6 +6,7 @@
 (local EntitiesNode (require :graph/nodes/entities))
 (local FnlModuleNode (require :graph/nodes/fnl-module))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
+(local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local HackerNewsStoryListNode (require :graph/nodes/hackernews-story-list))
 (local HackerNewsStoryNode (require :graph/nodes/hackernews-story))
@@ -62,7 +63,6 @@
 (local {:register-loader register-workflow-run-step-loader} (require :graph/nodes/workflow-run-step))
 (local {:register-loader register-workflow-run-event-loader} (require :graph/nodes/workflow-run-event))
 (local {:register-loader register-workflow-run-timeline-loader} (require :graph/nodes/workflow-run-timeline))
-
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
 (local IdentityStore (require :entities/identity))
@@ -374,10 +374,10 @@
       (fn [id _key]
         (ClassNode {:id id :name id}))))
 
-  (graph:register-key-loader "fs"
-    (existing-any-path-loader "fs:"
-      (fn [path key]
-        (FsNode {:path path :key key}))))
+  (graph:register-key-loader "fs" (existing-any-path-loader "fs:" (fn [path key] (FsNode {:path path :key key}))))
+  (graph:register-key-loader "fs-file-viewer"
+    (existing-path-loader "fs-file-viewer:" :file
+      (fn [path key] (FsFileViewerNode {:path path :key key}))))
 
   (graph:register-key-loader "code-dir"
     (existing-path-loader "code-dir:" :dir

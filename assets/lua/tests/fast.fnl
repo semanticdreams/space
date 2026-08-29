@@ -158,6 +158,7 @@
     :tests.test-cgltf
     :tests.test-graph-core
     :tests.test-graph-file-types
+    :tests.test-fs-file-viewer
     :tests.test-workflow-store
     :tests.test-workflow-code-executor
     :tests.test-workflow-runner
