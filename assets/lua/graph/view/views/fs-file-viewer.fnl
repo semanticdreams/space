@@ -106,12 +106,9 @@
   (set ctx.fs_file_viewer_content_button nil)
   (set ctx.fs_file_viewer_content_text nil))
 
-(fn FsFileViewerNodeView [node opts]
-  (local options (if (= opts nil) {} opts))
+(fn FsFileViewerNodeView [node _opts]
   (fn build [ctx]
-    (var build-ctx (if ctx ctx (and node node.graph node.graph.ctx)))
-    (when (and (= build-ctx nil) options.ctx)
-      (set build-ctx options.ctx))
+    (local build-ctx ctx)
     (assert build-ctx "FsFileViewerNodeView requires a build context")
     (local content-text ((Text {:text ""}) build-ctx))
     (local metadata-text ((Text {:text (metadata-label nil)}) build-ctx))

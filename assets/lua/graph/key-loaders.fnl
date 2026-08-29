@@ -301,6 +301,246 @@
   (register-activity-scene-child-loaders graph world-manager)
   (register-activity-terrain-action-loaders graph world-manager))
 
+(fn register-workflow-key-loaders [graph workflow-store workflow-runner code-store]
+  (when workflow-store
+    (register-workflows-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
+    (when workflow-runner
+      (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
+      (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
+    (register-workflow-step-loader graph {:store workflow-store}) ((. (require :graph/nodes/workflow-step-explorer) :register-loader) graph {:store workflow-store}) ((. (require :graph/nodes/workflow-run-explorer) :register-loader) graph {:store workflow-store})
+    (register-workflow-run-step-loader graph {:store workflow-store})
+    (register-workflow-run-event-loader graph {:store workflow-store})
+    (register-workflow-run-timeline-loader graph {:store workflow-store})
+    ((. (require :graph/nodes/agent-session) :register-loader) graph {:store workflow-store})))
+
+(fn register-store-backed-loaders [graph stores]
+  (register-string-entity-loader graph {:store stores.string-store})
+  (register-code-entity-loader graph {:store stores.code-store})
+  (register-list-entity-loader graph {:store stores.list-store
+                                      :identity-store stores.identity-store})
+  (register-link-entity-loader graph {:store stores.link-store})
+  (register-identity-loader graph {:store stores.identity-store})
+  (register-notebook-loader graph {:store stores.notebook-store
+                                   :identity-store stores.identity-store
+                                   :string-store stores.string-store}))
+
+(fn register-list-category-loaders [graph stores]
+  (graph:register-key-loader "string-entity-list"
+    (exact-key-loader "string-entity-list"
+      (fn [] (StringEntityListNode {:store stores.string-store}))))
+  (graph:register-key-loader "list-entity-list"
+    (exact-key-loader "list-entity-list"
+      (fn [] (ListEntityListNode {:store stores.list-store}))))
+  (graph:register-key-loader "link-entity-list"
+    (exact-key-loader "link-entity-list"
+      (fn [] (LinkEntityListNode {:store stores.link-store}))))
+  (graph:register-key-loader "entities"
+    (exact-key-loader "entities"
+      (fn [] (EntitiesNode {}))))
+  (graph:register-key-loader "notebooks"
+    (exact-key-loader "notebooks"
+      (fn [] (NotebooksNode {:store stores.notebook-store}))))
+  (graph:register-key-loader "kernels"
+    (exact-key-loader "kernels"
+      (fn [] (KernelsNode {:kernels stores.kernels}))))
+  (graph:register-key-loader "start"
+    (exact-key-loader "start"
+      (fn []
+          (local node (StartNode))
+          (set node.auto-focus? true)
+          node)))
+  (graph:register-key-loader "quit"
+    (exact-key-loader "quit"
+      (fn [] (QuitNode {}))))
+  (graph:register-key-loader "class"
+    (prefix-loader "class:"
+      (fn [id _key]
+        (ClassNode {:id id :name id})))))
+
+(fn register-filesystem-loaders [graph]
+  (graph:register-key-loader "fs"
+    (existing-any-path-loader "fs:"
+      (fn [path key]
+        (FsNode {:path path :key key}))))
+  (graph:register-key-loader "fs-file-viewer"
+    (existing-path-loader "fs-file-viewer:" :file
+      (fn [path key]
+        (FsFileViewerNode {:path path :key key})))))
+
+(fn cpp-module-path? [path]
+  (if (string.match path "%.cpp$") true
+      (string.match path "%.cc$") true
+      (string.match path "%.cxx$") true
+      (string.match path "%.h$") true
+      (string.match path "%.hpp$") true
+      (string.match path "%.hh$") true
+      false))
+
+(fn register-module-loaders [graph]
+  (graph:register-key-loader "code-dir"
+    (existing-path-loader "code-dir:" :dir
+      (fn [path key]
+        (CodeDirNode {:path path :root path :key key}))))
+  (graph:register-key-loader "fnl-module"
+    (existing-path-loader "fnl-module:" :file
+      (fn [path key]
+        (when (string.match path "%.fnl$")
+          (FnlModuleNode {:path path :key key})))))
+  (graph:register-key-loader "cpp-module"
+    (existing-path-loader "cpp-module:" :file
+      (fn [path key]
+        (when (cpp-module-path? path)
+          (CppModuleNode {:path path :key key})))))
+  (graph:register-key-loader "text-module"
+    (existing-path-loader "text-module:" :file
+      (fn [path key]
+        (TextModuleNode {:path path :key key}))))
+  (graph:register-key-loader "table"
+    (prefix-loader "table:"
+      (fn [name key]
+        (local tbl (require-table-global name))
+        (when (= (type tbl) :table)
+          (TableNode {:table tbl
+                      :label name
+                      :key key}))))))
+
+(fn register-llm-loaders [graph llm-store]
+  (graph:register-key-loader "llm"
+    (exact-key-loader "llm"
+      (fn [] (LlmNode))))
+  (graph:register-key-loader "llm-provider"
+    (exact-key-loader "llm-provider"
+      (fn [] (LlmProviderNode {}))))
+  (graph:register-key-loader "llm-model"
+    (exact-key-loader "llm-model"
+      (fn [] (LlmModelNode {}))))
+  (graph:register-key-loader "llm-tools"
+    (exact-key-loader "llm-tools"
+      (fn [] (LlmToolsNode {}))))
+  (graph:register-key-loader "llm-conversations"
+    (exact-key-loader "llm-conversations"
+      (fn [] (LlmConversationsNode {:store llm-store}))))
+  (graph:register-key-loader "llm-tool"
+    (prefix-loader "llm-tool:"
+      (fn [name key]
+        (LlmToolNode {:name name :key key}))))
+  (graph:register-key-loader "llm-conversation"
+    (prefix-loader "llm-conversation:"
+      (fn [id key]
+        (local record (llm-store:get-conversation id))
+        (when record
+          (LlmConversationNode {:llm-id id
+                                :store llm-store
+                                :key key})))))
+  (graph:register-key-loader "llm-message"
+    (prefix-loader "llm-message:"
+      (fn [id key]
+        (local record (llm-store:get-item id))
+        (when record
+          (assert (= record.type "message") (.. "llm-message loader expected record.type == message"))
+          (LlmMessageNode {:llm-id id
+                           :store llm-store
+                           :key key})))))
+  (graph:register-key-loader "llm-tool-call"
+    (prefix-loader "llm-tool-call:"
+      (fn [id key]
+        (local record (llm-store:get-item id))
+        (when record
+          (assert (= record.type "tool-call") (.. "llm-tool-call loader expected record.type == tool-call"))
+          (LlmToolCallNode {:llm-id id
+                            :store llm-store
+                            :key key})))))
+  (graph:register-key-loader "llm-tool-result"
+    (prefix-loader "llm-tool-result:"
+      (fn [id key]
+        (local record (llm-store:get-item id))
+        (when record
+          (assert (= record.type "tool-result") (.. "llm-tool-result loader expected record.type == tool-result"))
+          (LlmToolResultNode {:llm-id id
+                              :store llm-store
+                              :key key}))))))
+
+(fn register-hackernews-loaders [graph hackernews-ensure-client]
+  (graph:register-key-loader "hackernews-root"
+    (exact-key-loader "hackernews-root"
+      (fn [] (HackerNewsRootNode {:ensure-client hackernews-ensure-client}))))
+  (graph:register-key-loader "hackernews-story-list"
+    (prefix-loader "hackernews-story-list:"
+      (fn [kind key]
+        (HackerNewsStoryListNode {:kind kind
+                                  :key key
+                                  :ensure-client hackernews-ensure-client}))))
+  (graph:register-key-loader "hackernews-story"
+    (prefix-loader "hackernews-story:"
+      (fn [id _key]
+        (HackerNewsStoryNode {:id id
+                              :ensure-client hackernews-ensure-client}))))
+  (graph:register-key-loader "hackernews-user"
+    (prefix-loader "hackernews-user:"
+      (fn [id _key]
+        (HackerNewsUserNode {:id id
+                             :ensure-client hackernews-ensure-client})))))
+
+(fn register-kernel-loaders [graph kernels]
+  (graph:register-key-loader "kernel"
+    (prefix-loader "kernel:"
+      (fn [id _key]
+        (local kernel (kernels:get-kernel id))
+        (when kernel
+          (KernelNode {:kernel-id kernel.id
+                       :kernels kernels})))))
+  (graph:register-key-loader "kernel-instance"
+    (prefix-loader "kernel-instance:"
+      (fn [id _key]
+        (local instance (kernels:get-instance id))
+        (when instance
+          (KernelInstanceNode {:instance-id instance.id
+                               :kernels kernels}))))))
+
+(fn register-world-loaders [graph world-manager asset-path-resolver]
+  (graph:register-key-loader "worlds"
+    (exact-key-loader "worlds"
+      (fn []
+        (when world-manager
+          (WorldsNode {:world-manager world-manager
+                       :asset-path-resolver asset-path-resolver})))))
+  (graph:register-key-loader "world"
+    (prefix-loader "world:"
+      (fn [world-id key]
+        (local world-entry (and world-manager
+                               (WorldData.resolve-world-entry world-manager world-id)))
+        (when world-entry
+          (WorldNode {:world-id world-id
+                      :world-manager world-manager
+                      :asset-path-resolver asset-path-resolver
+                       :world-entry world-entry
+                       :key key})))))
+  (register-activity-hierarchy-loaders graph world-manager asset-path-resolver)
+  (graph:register-key-loader "hud-panels"
+    (prefix-loader "hud-panels:"
+      (fn [world-id key]
+        (when world-manager
+          (HudPanelsNode {:world-id world-id
+                          :world-manager world-manager
+                          :key key})))))
+  (graph:register-key-loader "hud-panel"
+    (prefix-loader "hud-panel:"
+      (fn [rest key]
+        (local parts (split-key-parts rest))
+        (when (>= (length parts) 3)
+          (local world-id (. parts 1))
+          (local layer (. parts 2))
+          (local panel-index (tonumber (. parts 3)))
+          (local panel-entry (and world-manager panel-index
+                                  (WorldData.find-hud-panel world-manager world-id layer panel-index)))
+          (when panel-entry
+            (HudPanelNode {:world-id world-id
+                           :world-manager world-manager
+                           :layer layer
+                           :panel-index panel-index
+                           :panel-entry panel-entry
+                           :key key})))))))
+
 (fn M.register [graph opts]
   (assert graph "GraphKeyLoaders.register requires graph")
   (assert graph.register-key-loader "GraphKeyLoaders.register requires graph.register-key-loader")
@@ -320,246 +560,26 @@
   (local workflow-store options.workflow-store)
   (local workflow-runner options.workflow-runner)
 
-  (register-string-entity-loader graph {:store string-store})
-  (register-code-entity-loader graph {:store code-store})
-  (when workflow-store
-    (register-workflows-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
-    (when workflow-runner
-      (register-workflow-definition-loader graph {:store workflow-store :runner workflow-runner :code-store code-store})
-      (register-workflow-run-loader graph {:store workflow-store :runner workflow-runner}))
-    (register-workflow-step-loader graph {:store workflow-store}) ((. (require :graph/nodes/workflow-step-explorer) :register-loader) graph {:store workflow-store}) ((. (require :graph/nodes/workflow-run-explorer) :register-loader) graph {:store workflow-store})
-    (register-workflow-run-step-loader graph {:store workflow-store})
-    (register-workflow-run-event-loader graph {:store workflow-store})
-    (register-workflow-run-timeline-loader graph {:store workflow-store})
-    ((. (require :graph/nodes/agent-session) :register-loader) graph {:store workflow-store}))
-  (register-list-entity-loader graph {:store list-store
-                                      :identity-store identity-store})
-  (register-link-entity-loader graph {:store link-store})
-  (register-identity-loader graph {:store identity-store})
-  (register-notebook-loader graph {:store notebook-store
-                                   :identity-store identity-store
-                                   :string-store string-store})
+  (local stores {:string-store string-store
+                 :code-store code-store
+                 :list-store list-store
+                 :link-store link-store
+                 :identity-store identity-store
+                 :notebook-store notebook-store
+                 :kernels kernels})
 
-  (graph:register-key-loader "string-entity-list"
-    (exact-key-loader "string-entity-list"
-      (fn [] (StringEntityListNode {:store string-store}))))
-  (graph:register-key-loader "list-entity-list"
-    (exact-key-loader "list-entity-list"
-      (fn [] (ListEntityListNode {:store list-store}))))
-  (graph:register-key-loader "link-entity-list"
-    (exact-key-loader "link-entity-list"
-      (fn [] (LinkEntityListNode {:store link-store}))))
+  (register-store-backed-loaders graph stores)
+  (register-workflow-key-loaders graph workflow-store workflow-runner code-store)
+  (register-list-category-loaders graph stores)
 
-  (graph:register-key-loader "entities"
-    (exact-key-loader "entities"
-      (fn [] (EntitiesNode {}))))
-  (graph:register-key-loader "notebooks"
-    (exact-key-loader "notebooks"
-      (fn [] (NotebooksNode {:store notebook-store}))))
-  (graph:register-key-loader "kernels"
-    (exact-key-loader "kernels"
-      (fn [] (KernelsNode {:kernels kernels}))))
-  (graph:register-key-loader "start"
-    (exact-key-loader "start"
-      (fn []
-          (local node (StartNode))
-          (set node.auto-focus? true)
-          node)))
-  (graph:register-key-loader "quit"
-    (exact-key-loader "quit"
-      (fn [] (QuitNode {}))))
+  (register-filesystem-loaders graph)
+  (register-module-loaders graph)
 
-  (graph:register-key-loader "class"
-    (prefix-loader "class:"
-      (fn [id _key]
-        (ClassNode {:id id :name id}))))
+  (register-llm-loaders graph llm-store)
 
-  (graph:register-key-loader "fs" (existing-any-path-loader "fs:" (fn [path key] (FsNode {:path path :key key}))))
-  (graph:register-key-loader "fs-file-viewer"
-    (existing-path-loader "fs-file-viewer:" :file
-      (fn [path key] (FsFileViewerNode {:path path :key key}))))
-
-  (graph:register-key-loader "code-dir"
-    (existing-path-loader "code-dir:" :dir
-      (fn [path key]
-        (CodeDirNode {:path path :root path :key key}))))
-
-  (graph:register-key-loader "fnl-module"
-    (existing-path-loader "fnl-module:" :file
-      (fn [path key]
-        (when (string.match path "%.fnl$")
-          (FnlModuleNode {:path path :key key})))))
-
-  (graph:register-key-loader "cpp-module"
-    (existing-path-loader "cpp-module:" :file
-      (fn [path key]
-        (when (or (string.match path "%.cpp$")
-                  (string.match path "%.cc$")
-                  (string.match path "%.cxx$")
-                  (string.match path "%.h$")
-                  (string.match path "%.hpp$")
-                  (string.match path "%.hh$"))
-          (CppModuleNode {:path path :key key})))))
-
-  (graph:register-key-loader "text-module"
-    (existing-path-loader "text-module:" :file
-      (fn [path key]
-        (TextModuleNode {:path path :key key}))))
-
-  (graph:register-key-loader "table"
-    (prefix-loader "table:"
-      (fn [name key]
-        (local tbl (require-table-global name))
-        (when (= (type tbl) :table)
-          (TableNode {:table tbl
-                      :label name
-                      :key key})))))
-
-  (graph:register-key-loader "llm"
-    (exact-key-loader "llm"
-      (fn [] (LlmNode))))
-  (graph:register-key-loader "llm-provider"
-    (exact-key-loader "llm-provider"
-      (fn [] (LlmProviderNode {}))))
-  (graph:register-key-loader "llm-model"
-    (exact-key-loader "llm-model"
-      (fn [] (LlmModelNode {}))))
-  (graph:register-key-loader "llm-tools"
-    (exact-key-loader "llm-tools"
-      (fn [] (LlmToolsNode {}))))
-  (graph:register-key-loader "llm-conversations"
-    (exact-key-loader "llm-conversations"
-      (fn [] (LlmConversationsNode {:store llm-store}))))
-
-  (graph:register-key-loader "llm-tool"
-    (prefix-loader "llm-tool:"
-      (fn [name key]
-        (LlmToolNode {:name name :key key}))))
-
-  (graph:register-key-loader "llm-conversation"
-    (prefix-loader "llm-conversation:"
-      (fn [id key]
-        (local record (llm-store:get-conversation id))
-        (when record
-          (LlmConversationNode {:llm-id id
-                                :store llm-store
-                                :key key})))))
-
-  (graph:register-key-loader "llm-message"
-    (prefix-loader "llm-message:"
-      (fn [id key]
-        (local record (llm-store:get-item id))
-        (when record
-          (assert (= record.type "message") (.. "llm-message loader expected record.type == message"))
-          (LlmMessageNode {:llm-id id
-                           :store llm-store
-                           :key key})))))
-
-  (graph:register-key-loader "llm-tool-call"
-    (prefix-loader "llm-tool-call:"
-      (fn [id key]
-        (local record (llm-store:get-item id))
-        (when record
-          (assert (= record.type "tool-call") (.. "llm-tool-call loader expected record.type == tool-call"))
-          (LlmToolCallNode {:llm-id id
-                            :store llm-store
-                            :key key})))))
-
-  (graph:register-key-loader "llm-tool-result"
-    (prefix-loader "llm-tool-result:"
-      (fn [id key]
-        (local record (llm-store:get-item id))
-        (when record
-          (assert (= record.type "tool-result") (.. "llm-tool-result loader expected record.type == tool-result"))
-          (LlmToolResultNode {:llm-id id
-                              :store llm-store
-                              :key key})))))
-
-  (graph:register-key-loader "hackernews-root"
-    (exact-key-loader "hackernews-root"
-      (fn [] (HackerNewsRootNode {:ensure-client hackernews-ensure-client}))))
-
-  (graph:register-key-loader "hackernews-story-list"
-    (prefix-loader "hackernews-story-list:"
-      (fn [kind key]
-        (HackerNewsStoryListNode {:kind kind
-                                  :key key
-                                  :ensure-client hackernews-ensure-client}))))
-
-  (graph:register-key-loader "hackernews-story"
-    (prefix-loader "hackernews-story:"
-      (fn [id _key]
-        (HackerNewsStoryNode {:id id
-                              :ensure-client hackernews-ensure-client}))))
-
-  (graph:register-key-loader "hackernews-user"
-    (prefix-loader "hackernews-user:"
-      (fn [id _key]
-        (HackerNewsUserNode {:id id
-                             :ensure-client hackernews-ensure-client}))))
-
-  (graph:register-key-loader "kernel"
-    (prefix-loader "kernel:"
-      (fn [id _key]
-        (local kernel (kernels:get-kernel id))
-        (when kernel
-          (KernelNode {:kernel-id kernel.id
-                       :kernels kernels})))))
-
-  (graph:register-key-loader "kernel-instance"
-    (prefix-loader "kernel-instance:"
-      (fn [id _key]
-        (local instance (kernels:get-instance id))
-        (when instance
-          (KernelInstanceNode {:instance-id instance.id
-                               :kernels kernels})))))
-
-  (graph:register-key-loader "worlds"
-    (exact-key-loader "worlds"
-      (fn []
-        (when world-manager
-          (WorldsNode {:world-manager world-manager
-                       :asset-path-resolver asset-path-resolver})))))
-
-  (graph:register-key-loader "world"
-    (prefix-loader "world:"
-      (fn [world-id key]
-        (local world-entry (and world-manager
-                               (WorldData.resolve-world-entry world-manager world-id)))
-        (when world-entry
-          (WorldNode {:world-id world-id
-                      :world-manager world-manager
-                      :asset-path-resolver asset-path-resolver
-                       :world-entry world-entry
-                       :key key})))))
-
-  (register-activity-hierarchy-loaders graph world-manager asset-path-resolver)
-
-  (graph:register-key-loader "hud-panels"
-    (prefix-loader "hud-panels:"
-      (fn [world-id key]
-        (when world-manager
-          (HudPanelsNode {:world-id world-id
-                          :world-manager world-manager
-                          :key key})))))
-
-  (graph:register-key-loader "hud-panel"
-    (prefix-loader "hud-panel:"
-      (fn [rest key]
-        (local parts (split-key-parts rest))
-        (when (>= (length parts) 3)
-          (local world-id (. parts 1))
-          (local layer (. parts 2))
-          (local panel-index (tonumber (. parts 3)))
-          (local panel-entry (and world-manager panel-index
-                                  (WorldData.find-hud-panel world-manager world-id layer panel-index)))
-          (when panel-entry
-            (HudPanelNode {:world-id world-id
-                           :world-manager world-manager
-                           :layer layer
-                           :panel-index panel-index
-                           :panel-entry panel-entry
-                           :key key}))))))
+  (register-hackernews-loaders graph hackernews-ensure-client)
+  (register-kernel-loaders graph kernels)
+  (register-world-loaders graph world-manager asset-path-resolver)
 
 	  true)
 
