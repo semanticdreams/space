@@ -157,6 +157,7 @@
     :tests.test-status-badge
     :tests.test-cgltf
     :tests.test-graph-core
+    :tests.test-graph-file-types
     :tests.test-workflow-store
     :tests.test-workflow-code-executor
     :tests.test-workflow-runner
