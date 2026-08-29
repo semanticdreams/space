@@ -19,11 +19,13 @@ class GitRunner:
     def __init__(self, outputs: dict[tuple[str, ...], str | capabilities.CommandResult]) -> None:
         self.outputs = outputs
         self.calls: list[list[str]] = []
+        self.checks: list[bool] = []
 
     def __call__(self, args, cwd: Path, check: bool = True):
-        del cwd, check
+        del cwd
         args = list(args)
         self.calls.append(args)
+        self.checks.append(check)
         output = self.outputs.get(tuple(args), "")
         if isinstance(output, capabilities.CommandResult):
             return output
@@ -38,13 +40,18 @@ def trusted_repo(monkeypatch, tmp_path: Path) -> Path:
     return repo
 
 
-def test_status_reports_branch_head_dirty_and_origin_main_merge_base(monkeypatch, trusted_repo: Path) -> None:
+def test_status_reports_expanded_freshness_evidence_when_current_with_origin_main(monkeypatch, trusted_repo: Path) -> None:
     runner = GitRunner(
         {
             ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
             ("git", "rev-parse", "HEAD"): "abc123\n",
+            ("git", "rev-parse", "origin/main"): "base456\n",
             ("git", "status", "--porcelain"): " M file.py\n",
             ("git", "merge-base", "HEAD", "origin/main"): "base456\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=0,
+            ),
         }
     )
     monkeypatch.setattr(git_integrate, "run_command", runner)
@@ -57,7 +64,65 @@ def test_status_reports_branch_head_dirty_and_origin_main_merge_base(monkeypatch
         "head_sha": "abc123",
         "dirty": True,
         "origin_main_merge_base": "base456",
+        "origin_main_sha": "base456",
+        "origin_main_is_ancestor_of_head": True,
+        "branch_current_with_origin_main": True,
+        "safe_merge_needed": False,
     }
+    assert [call for call in runner.calls if call[:3] == ["git", "merge-base", "--is-ancestor"]] == [
+        ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]
+    ]
+    assert runner.checks[runner.calls.index(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"])] is False
+
+
+def test_status_reports_merge_needed_when_origin_main_is_not_ancestor_of_head(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "HEAD"): "abc123\n",
+            ("git", "rev-parse", "origin/main"): "def789\n",
+            ("git", "status", "--porcelain"): "",
+            ("git", "merge-base", "HEAD", "origin/main"): "base456\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=1,
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.git_status(trusted_repo)
+
+    assert result["status"] == "pass"
+    assert result["evidence"]["origin_main_sha"] == "def789"
+    assert result["evidence"]["origin_main_is_ancestor_of_head"] is False
+    assert result["evidence"]["branch_current_with_origin_main"] is False
+    assert result["evidence"]["safe_merge_needed"] is True
+
+
+def test_status_fails_closed_on_unexpected_origin_main_ancestor_return_code(monkeypatch, trusted_repo: Path) -> None:
+    runner = GitRunner(
+        {
+            ("git", "branch", "--show-current"): "feature/opencode-capabilities\n",
+            ("git", "rev-parse", "HEAD"): "abc123\n",
+            ("git", "rev-parse", "origin/main"): "def789\n",
+            ("git", "status", "--porcelain"): "",
+            ("git", "merge-base", "HEAD", "origin/main"): "base456\n",
+            ("git", "merge-base", "--is-ancestor", "origin/main", "HEAD"): command_result(
+                ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"],
+                returncode=128,
+                stderr="fatal: not a valid object name origin/main\n",
+            ),
+        }
+    )
+    monkeypatch.setattr(git_integrate, "run_command", runner)
+
+    result = git_integrate.git_status(trusted_repo)
+
+    assert result["status"] == "fail"
+    assert result["evidence"]["code"] == "command_failed"
+    assert result["evidence"]["details"]["args"] == ["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]
+    assert result["evidence"]["details"]["returncode"] == 128
 
 
 def test_merge_origin_main_refuses_dirty_worktree(monkeypatch, trusted_repo: Path) -> None:
