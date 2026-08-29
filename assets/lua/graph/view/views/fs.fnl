@@ -66,7 +66,7 @@
     (local items (if options.items options.items []))
 
     (fn build [ctx]
-        (local build-ctx (if ctx ctx options.ctx))
+        (local build-ctx ctx)
         (assert build-ctx "FsNodeView requires a build context")
         (local view {})
         (local panel-target (if options.target

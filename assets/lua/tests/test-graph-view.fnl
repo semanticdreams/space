@@ -4518,6 +4518,12 @@
       (assert (not ok) "FsNodeView should reject missing explicit build context")
       (assert (string.find (tostring err) "FsNodeView requires a build context" 1 true)
               (.. "Expected build context error, got: " (tostring err)))
+      (local options-builder (node.view node {:ctx fallback-ctx}))
+      (local (options-ok options-err) (pcall options-builder))
+      (assert (not options-ok)
+              "FsNodeView should reject options.ctx when builder ctx is missing")
+      (assert (string.find (tostring options-err) "FsNodeView requires a build context" 1 true)
+              (.. "Expected options.ctx build context error, got: " (tostring options-err)))
       (graph:drop))))
 
 (fn fs-node-unknown-file-shows-only-external-editor []
