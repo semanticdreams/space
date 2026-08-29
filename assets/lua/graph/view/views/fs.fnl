@@ -5,6 +5,61 @@
 (local FsRipgrepDialog (require :graph/view/views/fs-ripgrep-dialog))
 (local fs (require :fs))
 
+(fn constant-child [element]
+    (fn [_]
+        element))
+
+(fn resolve-target-path [target]
+    (local target-path (and target target.path))
+    (and target-path fs.absolute (fs.absolute target-path)))
+
+(fn file-mode? [resolved-path]
+    (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
+    (and stat stat.exists stat.is-file))
+
+(fn make-edit-button [build-ctx hidden? edit-enabled? resolved-path]
+    (fn open-edit [_button _event]
+        (when edit-enabled?
+            (ExternalEditor.open-file resolved-path (fn [] nil))))
+    (when (not hidden?)
+        ((Button {:icon "edit"
+                  :text "Edit"
+                  :variant :ghost
+                  :enabled? edit-enabled?
+                  :on-click open-edit})
+         build-ctx)))
+
+(fn make-ripgrep-button [build-ctx hidden? resolved-path open-ripgrep-panel]
+    (fn open-ripgrep [_button _event]
+        (open-ripgrep-panel))
+    (when (not hidden?)
+        ((Button {:text "Ripgrep"
+                  :variant :ghost
+                  :enabled? (not (= resolved-path nil))
+                  :on-click open-ripgrep})
+         build-ctx)))
+
+(fn make-action-row [build-ctx hidden? edit-button ripgrep-button]
+    (when (not hidden?)
+        ((Flex {:axis 1
+                :xspacing 0.3
+                :yalign :center
+                :children [(FlexChild (constant-child edit-button) 0)
+                           (FlexChild (constant-child ripgrep-button) 0)]})
+         build-ctx)))
+
+(fn make-layout [build-ctx file-mode search action-row]
+    (local children
+        (if file-mode
+            [(FlexChild (constant-child search) 1)]
+            [(FlexChild (constant-child action-row) 0)
+             (FlexChild (constant-child search) 1)]))
+    ((Flex {:axis 2
+            :xalign :stretch
+            :yspacing 0.4
+            :children children})
+     build-ctx))
+
 (fn FsNodeView [node opts]
     (local options (or opts {}))
     (local target (or node options.node))
@@ -16,20 +71,9 @@
         (local view {})
         (local panel-target (or options.target
                                 (and build-ctx build-ctx.panel-target)))
-        (local target-path (and target target.path))
-        (local resolved-path (and target-path fs.absolute (fs.absolute target-path)))
-        (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
-        (local edit-enabled? (and stat stat.exists stat.is-file))
-
-        (local edit-button
-            ((Button {:icon "edit"
-                      :text "Edit"
-                      :variant :ghost
-                      :enabled? edit-enabled?
-                      :on-click (fn [_button _event]
-                                    (when edit-enabled?
-                                        (ExternalEditor.open-file resolved-path (fn [] nil))))})
-             build-ctx))
+        (local resolved-path (resolve-target-path target))
+        (local file-mode (file-mode? resolved-path))
+        (local edit-enabled? file-mode)
 
         (fn open-ripgrep-panel []
           (assert (and panel-target panel-target.add-panel-child)
@@ -39,21 +83,9 @@
                                          :path resolved-path
                                          :label (or target.label resolved-path)})))
 
-        (local ripgrep-button
-          ((Button {:text "Ripgrep"
-                    :variant :ghost
-                    :enabled? (not (= resolved-path nil))
-                    :on-click (fn [_button _event]
-                                (open-ripgrep-panel))})
-           build-ctx))
-
-        (local action-row
-            ((Flex {:axis 1
-                    :xspacing 0.3
-                    :yalign :center
-                    :children [(FlexChild (fn [_] edit-button) 0)
-                               (FlexChild (fn [_] ripgrep-button) 0)]})
-             build-ctx))
+        (local edit-button (make-edit-button build-ctx file-mode edit-enabled? resolved-path))
+        (local ripgrep-button (make-ripgrep-button build-ctx file-mode resolved-path open-ripgrep-panel))
+        (local action-row (make-action-row build-ctx file-mode edit-button ripgrep-button))
 
         (local search
             ((SearchView {:items []
@@ -61,16 +93,11 @@
                           :num-per-page 10})
              build-ctx))
 
-        (local layout
-            ((Flex {:axis 2
-                    :xalign :stretch
-                    :yspacing 0.4
-                    :children [(FlexChild (fn [_] action-row) 0)
-                               (FlexChild (fn [_] search) 1)]})
-             build-ctx))
+        (local layout (make-layout build-ctx file-mode search action-row))
 
         (set view.search search)
         (set view.action-row action-row)
+        (set view.edit-button edit-button)
         (set view.ripgrep-button ripgrep-button)
         (set view.open-ripgrep-panel (fn [_self] (open-ripgrep-panel)))
         (set view.layout layout.layout)
