@@ -4,6 +4,8 @@
 
 Regular file paths render a SearchView of explicit interaction rows. Interaction rows are data objects with `kind` fields; labels are display text only.
 
+File type detection is conservative and extension-based for this iteration. Viewer and module rows are emitted only for regular files classified as known text/source extensions; unknown regular files expose only the safe `:external-editor` interaction.
+
 ## File interactions
 
 - `:external-editor` opens `ExternalEditor.open-file(path, callback)` and does not add graph topology.
