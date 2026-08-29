@@ -1,5 +1,6 @@
 #include <sol/sol.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -7,12 +8,16 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "paths.h"
 
 namespace fs = std::filesystem;
 
 namespace {
+
+constexpr std::uint64_t kMaxTextWindowBytes = 262144;
+constexpr char kUtf8Replacement[] = "\xEF\xBF\xBD";
 
 std::string normalize_path(const fs::path& path)
 {
@@ -174,6 +179,142 @@ void throw_with_message(const std::string& prefix, const std::error_code& ec)
     }
 }
 
+void append_replacement_character(std::string& text)
+{
+    text.append(kUtf8Replacement, 3);
+}
+
+bool is_utf8_continuation(unsigned char byte)
+{
+    return byte >= 0x80 && byte <= 0xBF;
+}
+
+bool has_remaining_bytes(const std::string& raw, std::size_t offset, std::size_t count)
+{
+    return raw.size() - offset >= count;
+}
+
+bool valid_utf8_sequence(const std::string& raw, std::size_t offset, std::size_t length)
+{
+    const auto byte = [&raw, offset](std::size_t index) {
+        return static_cast<unsigned char>(raw[offset + index]);
+    };
+
+    if (length == 2) {
+        return byte(0) >= 0xC2 && byte(0) <= 0xDF && is_utf8_continuation(byte(1));
+    }
+    if (length == 3) {
+        unsigned char first = byte(0);
+        unsigned char second = byte(1);
+        return ((first == 0xE0 && second >= 0xA0 && second <= 0xBF)
+                || (first >= 0xE1 && first <= 0xEC && is_utf8_continuation(second))
+                || (first == 0xED && second >= 0x80 && second <= 0x9F)
+                || (first >= 0xEE && first <= 0xEF && is_utf8_continuation(second)))
+            && is_utf8_continuation(byte(2));
+    }
+    if (length == 4) {
+        unsigned char first = byte(0);
+        unsigned char second = byte(1);
+        return ((first == 0xF0 && second >= 0x90 && second <= 0xBF)
+                || (first >= 0xF1 && first <= 0xF3 && is_utf8_continuation(second))
+                || (first == 0xF4 && second >= 0x80 && second <= 0x8F))
+            && is_utf8_continuation(byte(2))
+            && is_utf8_continuation(byte(3));
+    }
+    return false;
+}
+
+bool valid_utf8_prefix(const std::string& raw, std::size_t offset, std::size_t length)
+{
+    std::size_t remaining = raw.size() - offset;
+    if (remaining >= length || remaining == 0) {
+        return false;
+    }
+
+    unsigned char first = static_cast<unsigned char>(raw[offset]);
+    if (remaining == 1) {
+        return true;
+    }
+
+    unsigned char second = static_cast<unsigned char>(raw[offset + 1]);
+    if (length == 2) {
+        return is_utf8_continuation(second);
+    }
+    if (length == 3) {
+        return (first == 0xE0 && second >= 0xA0 && second <= 0xBF)
+            || (first >= 0xE1 && first <= 0xEC && is_utf8_continuation(second))
+            || (first == 0xED && second >= 0x80 && second <= 0x9F)
+            || (first >= 0xEE && first <= 0xEF && is_utf8_continuation(second));
+    }
+    if (length == 4) {
+        bool valid_second = (first == 0xF0 && second >= 0x90 && second <= 0xBF)
+            || (first >= 0xF1 && first <= 0xF3 && is_utf8_continuation(second))
+            || (first == 0xF4 && second >= 0x80 && second <= 0x8F);
+        if (!valid_second) {
+            return false;
+        }
+        if (remaining == 2) {
+            return true;
+        }
+        return is_utf8_continuation(static_cast<unsigned char>(raw[offset + 2]));
+    }
+    return false;
+}
+
+std::size_t utf8_sequence_length(unsigned char first)
+{
+    if (first >= 0xC2 && first <= 0xDF) {
+        return 2;
+    }
+    if (first >= 0xE0 && first <= 0xEF) {
+        return 3;
+    }
+    if (first >= 0xF0 && first <= 0xF4) {
+        return 4;
+    }
+    return 0;
+}
+
+std::pair<std::string, bool> sanitize_text_window(const std::string& raw)
+{
+    std::string text;
+    text.reserve(raw.size());
+    bool truncated_utf8 = false;
+
+    for (std::size_t i = 0; i < raw.size();) {
+        unsigned char first = static_cast<unsigned char>(raw[i]);
+        if (first == 0) {
+            append_replacement_character(text);
+            ++i;
+        } else if (first <= 0x7F) {
+            text.push_back(static_cast<char>(first));
+            ++i;
+        } else {
+            std::size_t sequence_length = utf8_sequence_length(first);
+            if (sequence_length == 0) {
+                append_replacement_character(text);
+                ++i;
+            } else if (!has_remaining_bytes(raw, i, sequence_length)) {
+                if (valid_utf8_prefix(raw, i, sequence_length)) {
+                    append_replacement_character(text);
+                    truncated_utf8 = true;
+                    break;
+                }
+                append_replacement_character(text);
+                ++i;
+            } else if (valid_utf8_sequence(raw, i, sequence_length)) {
+                text.append(raw, i, sequence_length);
+                i += sequence_length;
+            } else {
+                append_replacement_character(text);
+                ++i;
+            }
+        }
+    }
+
+    return {text, truncated_utf8};
+}
+
 } // namespace
 
 std::string fs_cwd()
@@ -277,6 +418,68 @@ std::string fs_read_file(const std::string& path)
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
+}
+
+sol::table fs_read_text_window(sol::this_state ts,
+                               const std::string& path,
+                               std::int64_t offset,
+                               std::int64_t max_bytes)
+{
+    if (path.empty()) {
+        throw sol::error("fs.read_text_window: path must be non-empty");
+    }
+    if (offset < 0) {
+        throw sol::error("fs.read_text_window: offset must be non-negative");
+    }
+    if (max_bytes <= 0) {
+        throw sol::error("fs.read_text_window: max-bytes must be positive");
+    }
+
+    std::error_code size_ec;
+    std::uint64_t size = static_cast<std::uint64_t>(fs::file_size(path, size_ec));
+    throw_with_message("fs.read_text_window", size_ec);
+
+    std::uint64_t requested = static_cast<std::uint64_t>(max_bytes);
+    std::uint64_t capped = std::min(requested, kMaxTextWindowBytes);
+    std::uint64_t start = static_cast<std::uint64_t>(offset);
+    std::uint64_t available = start < size ? size - start : 0;
+    std::uint64_t bytes_to_read = std::min(capped, available);
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw sol::error("fs.read_text_window: unable to open " + path);
+    }
+
+    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!file && bytes_to_read > 0) {
+        throw sol::error("fs.read_text_window: unable to seek " + path);
+    }
+
+    std::string raw;
+    raw.resize(static_cast<std::size_t>(bytes_to_read));
+    if (bytes_to_read > 0) {
+        file.read(raw.data(), static_cast<std::streamsize>(bytes_to_read));
+        raw.resize(static_cast<std::size_t>(file.gcount()));
+        if (!file.eof() && file.fail()) {
+            throw sol::error("fs.read_text_window: unable to read " + path);
+        }
+    }
+
+    auto [text, truncated_utf8] = sanitize_text_window(raw);
+    std::uint64_t bytes_read = static_cast<std::uint64_t>(raw.size());
+    std::uint64_t next_offset = start + bytes_read;
+
+    sol::state_view lua(ts);
+    sol::table result = lua.create_table();
+    result["path"] = path;
+    result["offset"] = start;
+    result["next-offset"] = next_offset;
+    result["size"] = size;
+    result["bytes-read"] = bytes_read;
+    result["eof"] = next_offset >= size;
+    result["text"] = text;
+    result["truncated-utf8"] = truncated_utf8;
+    return result;
 }
 
 void fs_write_file(const std::string& path, const std::string& contents)
@@ -437,6 +640,7 @@ sol::table create_fs_table(sol::state_view lua)
     fs_table.set_function("stat", &fs_stat);
     fs_table.set_function("list-dir", &fs_list_dir);
     fs_table.set_function("read-file", &fs_read_file);
+    fs_table.set_function("read-text-window", &fs_read_text_window);
     fs_table.set_function("write-file", &fs_write_file);
     fs_table.set_function("append-file", &fs_append_file);
     fs_table.set_function("create-dir", &fs_create_dir);

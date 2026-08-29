@@ -35,6 +35,19 @@ def _dirty_output(repo: Path) -> str:
     return run_command(["git", "status", "--porcelain"], repo).stdout
 
 
+def _origin_main_is_ancestor_of_head(repo: Path) -> bool:
+    result = run_command(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"], repo, check=False)
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise CapabilityError(
+        "command_failed",
+        "Command failed while evaluating capability guard",
+        {"args": result.args, "returncode": result.returncode, "stderr": result.stderr.strip()},
+    )
+
+
 def _guard_clean_non_main(action: str, repo: Path) -> tuple[str | None, dict[str, object] | None]:
     dirty = _dirty_output(repo).strip()
     branch = _current_branch(repo)
@@ -55,12 +68,23 @@ def git_status(repo_root: Path) -> dict[str, object]:
         repo = ensure_space_repo(repo_root)
         branch = _current_branch(repo)
         head_sha = run_command(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+        origin_main_sha = run_command(["git", "rev-parse", "origin/main"], repo).stdout.strip()
         dirty = bool(_dirty_output(repo).strip())
         merge_base = run_command(["git", "merge-base", "HEAD", "origin/main"], repo).stdout.strip()
+        origin_main_is_ancestor = _origin_main_is_ancestor_of_head(repo)
         return success(
             action,
             "Git status collected for bounded integration decision",
-            {"branch": branch, "head_sha": head_sha, "dirty": dirty, "origin_main_merge_base": merge_base},
+            {
+                "branch": branch,
+                "head_sha": head_sha,
+                "dirty": dirty,
+                "origin_main_merge_base": merge_base,
+                "origin_main_sha": origin_main_sha,
+                "origin_main_is_ancestor_of_head": origin_main_is_ancestor,
+                "branch_current_with_origin_main": origin_main_is_ancestor,
+                "safe_merge_needed": not origin_main_is_ancestor,
+            },
         )
     except CapabilityError as error:
         return failure(action, error.message, {"code": error.code, "details": error.details})

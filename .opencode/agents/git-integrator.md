@@ -31,6 +31,19 @@ permissions.
 Return the wrapper JSON evidence verbatim in your response. Do not summarize away
 `status`, `action`, `message`, or `evidence` fields.
 
+For finishing freshness decisions, run `status` after `fetch-origin` and use the
+explicit wrapper evidence fields: `origin_main_sha`,
+`origin_main_is_ancestor_of_head`, and the derived freshness field
+`branch_current_with_origin_main` / merge-needed field `safe_merge_needed`. Treat
+`origin_main_is_ancestor_of_head: true` and `safe_merge_needed: false` as the
+bounded evidence that the current branch already contains `origin/main`; treat
+`origin_main_is_ancestor_of_head: false` or `safe_merge_needed: true` as evidence
+that a guarded `merge-origin-main` is needed before push/PR steps.
+
+If any of these status evidence fields are missing, report wrapper failure
+evidence. Do not ask for raw Git permission to compensate for missing wrapper
+fields.
+
 If a wrapper returns `human_decision_required`, report `HUMAN_DECISION_REQUIRED`
 with the wrapper evidence. Do not ask the user for one-off broad Git, shell,
 rebase, force-push, reset, clean, or branch-deletion permission.

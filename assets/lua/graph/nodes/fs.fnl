@@ -7,6 +7,8 @@
 (local fs (require :fs))
 (local logging (require :logging))
 (local ExternalEditor (require :external-editor))
+(local FileTypes (require :graph/file-types))
+(local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
 
 (local M {})
 
@@ -20,17 +22,6 @@
         (string.lower text)
         ""))
 
-(fn fnl-path? [path]
-    (and path (string.match (safe-lower path) "%.fnl$")))
-
-(fn cpp-path? [path]
-    (and path
-         (or (string.match (safe-lower path) "%.cpp$")
-             (string.match (safe-lower path) "%.cc$")
-             (string.match (safe-lower path) "%.cxx$")
-             (string.match (safe-lower path) "%.h$")
-             (string.match (safe-lower path) "%.hpp$")
-             (string.match (safe-lower path) "%.hh$"))))
 
 (fn M.resolve-path [self path]
     (normalize-path (or path self)))
@@ -39,6 +30,55 @@
     (if (and fs fs.cwd)
         (fs.cwd)
         "."))
+(fn interaction-label [interaction classification]
+    (if (= interaction.kind :external-editor)
+        "Edit externally"
+        (= interaction.kind :file-viewer)
+        "View text"
+        classification.module-label))
+
+(fn build-file-interaction-items [current-path]
+    (local classification (FileTypes.classify current-path))
+    (local interactions [{:kind :external-editor
+                          :path current-path}])
+    (when classification.viewer?
+        (table.insert interactions
+                      {:kind :file-viewer
+                       :path current-path
+                       :target-key (.. "fs-file-viewer:" current-path)}))
+    (when classification.module-kind
+        (table.insert interactions
+                      {:kind :module
+                       :path current-path
+                       :module-kind classification.module-kind
+                       :target-key (.. classification.module-key-prefix current-path)}))
+    (icollect [_ interaction (ipairs interactions)]
+        [interaction (interaction-label interaction classification)]))
+
+(fn open-file-interaction [self interaction]
+    (assert interaction "FsNode requires a file interaction")
+    (local graph self.graph)
+    (if (= interaction.kind :external-editor)
+        (do
+            (ExternalEditor.open-file interaction.path (fn [] nil))
+            true)
+        (= interaction.kind :file-viewer)
+        (do
+            (assert graph "FsNode requires a mounted graph to add file viewer edges")
+            (local viewer-node (FsFileViewerNode {:path interaction.path
+                                                  :key interaction.target-key}))
+            (graph:add-edge (GraphEdge {:source self
+                                        :target viewer-node}))
+            viewer-node)
+        (= interaction.kind :module)
+        (do
+            (assert graph "FsNode requires a mounted graph to add module edges")
+            (local module-node (self:create-module-node interaction.module-kind interaction.path))
+            (when module-node
+                (graph:add-edge (GraphEdge {:source self
+                                            :target module-node}))
+                module-node))
+        (error (.. "FsNode unsupported file interaction kind: " (tostring interaction.kind)))))
 
 (fn M.FsNode [opts]
     (assert (and fs fs.list-dir) "FsNode requires the fs module")
@@ -123,20 +163,40 @@
                      (if (= a-dir b-dir)
                          (< (safe-lower a.name) (safe-lower b.name))
                          a-dir)))
-             entries))
+              entries))
 
-    (set node.build-items
+    (set node.path-stat
          (fn [self current-path]
-             (local entries [])
-             (local listed (self:list-directory current-path))
+              (local raw-path (self:resolve-path current-path))
+              (local resolved-path (and raw-path fs.absolute (fs.absolute raw-path)))
+              (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
+              (values raw-path stat resolved-path)))
+
+    (set node.build-directory-items
+         (fn [self current-path]
+              (local entries [])
+              (local listed (self:list-directory current-path))
              (each [_ entry (ipairs listed)]
                  (table.insert entries (self:normalize-entry entry)))
              (self:sort-entries entries)
              (local parent-entry (self:make-parent-entry current-path))
              (when parent-entry
                  (table.insert entries 1 parent-entry))
-             (icollect [_ entry (ipairs entries)]
-                 [entry (self:entry-label entry)])))
+              (icollect [_ entry (ipairs entries)]
+                  [entry (self:entry-label entry)])))
+
+    (set node.build-file-interactions
+         (fn [_self current-path]
+             (build-file-interaction-items current-path)))
+
+    (set node.build-items
+          (fn [self current-path]
+              (local (listing-path stat resolved-path) (self:path-stat current-path))
+              (if (and stat stat.exists stat.is-dir)
+                  (self:build-directory-items listing-path)
+                  (and stat stat.exists stat.is-file)
+                  (self:build-file-interactions resolved-path)
+                  (error "FsNode path is not a directory or regular file"))))
 
     (set node.emit-items
          (fn [self]
@@ -145,17 +205,22 @@
                  (self.items-changed:emit items))
              items))
 
+    (set node.open-file-interaction open-file-interaction)
+
     (set node.open-entry
          (fn [self entry]
-             (when entry
-                 (local graph self.graph)
-                 (assert graph "FsNode requires a mounted graph to add edges")
-                 (assert entry.path "FsNode entries require a path")
-                 (assert self.create-child-node "FsNode missing create-child-node")
-                 (local resolved (self:resolve-path entry.path))
-                 (local child (self:create-child-node resolved))
-                 (graph:add-edge (GraphEdge {:source self
-                                                 :target child})))))
+              (when entry
+                  (if entry.kind
+                      (self:open-file-interaction entry)
+                      (do
+                          (local graph self.graph)
+                          (assert graph "FsNode requires a mounted graph to add edges")
+                          (assert entry.path "FsNode entries require a path")
+                          (assert self.create-child-node "FsNode missing create-child-node")
+                          (local resolved (self:resolve-path entry.path))
+                          (local child (self:create-child-node resolved))
+                          (graph:add-edge (GraphEdge {:source self
+                                                      :target child})))))))
 
     (set node.open-code-dir
          (fn [self]
@@ -237,27 +302,15 @@
                                 :icon "edit"
                                 :fn (fn [_button _event]
                                         (ExternalEditor.open-file resolved-path (fn [] nil)))}))
-             (when (and stat stat.exists stat.is-file resolved-path (fnl-path? resolved-path))
-                 (table.insert actions 2
-                               {:name "Open as Fennel Module"
-                                :icon "code"
-                                :fn (fn [_button _event]
-                                        (self:open-module-node :fnl))}))
-             (when (and stat stat.exists stat.is-file resolved-path (cpp-path? resolved-path))
-                 (table.insert actions 2
-                               {:name "Open as C++ Module"
-                                :icon "code"
-                                :fn (fn [_button _event]
-                                        (self:open-module-node :cpp))}))
-             (when (and stat stat.exists stat.is-file resolved-path
-                        (not (fnl-path? resolved-path))
-                        (not (cpp-path? resolved-path)))
-                 (table.insert actions 2
-                               {:name "Open as Text Module"
-                                :icon "code"
-                                :fn (fn [_button _event]
-                                        (self:open-module-node :text))}))
-             actions))
+              (when (and stat stat.exists stat.is-file resolved-path)
+                  (local classification (FileTypes.classify resolved-path))
+                  (when classification.module-kind
+                      (table.insert actions 2
+                                    {:name classification.module-label
+                                     :icon "code"
+                                     :fn (fn [_button _event]
+                                             (self:open-module-node classification.module-kind))})))
+              actions))
 
     (set node.drop
          (fn [self]
