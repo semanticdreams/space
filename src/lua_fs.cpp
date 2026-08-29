@@ -224,6 +224,43 @@ bool valid_utf8_sequence(const std::string& raw, std::size_t offset, std::size_t
     return false;
 }
 
+bool valid_utf8_prefix(const std::string& raw, std::size_t offset, std::size_t length)
+{
+    std::size_t remaining = raw.size() - offset;
+    if (remaining >= length || remaining == 0) {
+        return false;
+    }
+
+    unsigned char first = static_cast<unsigned char>(raw[offset]);
+    if (remaining == 1) {
+        return true;
+    }
+
+    unsigned char second = static_cast<unsigned char>(raw[offset + 1]);
+    if (length == 2) {
+        return is_utf8_continuation(second);
+    }
+    if (length == 3) {
+        return (first == 0xE0 && second >= 0xA0 && second <= 0xBF)
+            || (first >= 0xE1 && first <= 0xEC && is_utf8_continuation(second))
+            || (first == 0xED && second >= 0x80 && second <= 0x9F)
+            || (first >= 0xEE && first <= 0xEF && is_utf8_continuation(second));
+    }
+    if (length == 4) {
+        bool valid_second = (first == 0xF0 && second >= 0x90 && second <= 0xBF)
+            || (first >= 0xF1 && first <= 0xF3 && is_utf8_continuation(second))
+            || (first == 0xF4 && second >= 0x80 && second <= 0x8F);
+        if (!valid_second) {
+            return false;
+        }
+        if (remaining == 2) {
+            return true;
+        }
+        return is_utf8_continuation(static_cast<unsigned char>(raw[offset + 2]));
+    }
+    return false;
+}
+
 std::size_t utf8_sequence_length(unsigned char first)
 {
     if (first >= 0xC2 && first <= 0xDF) {
@@ -258,9 +295,13 @@ std::pair<std::string, bool> sanitize_text_window(const std::string& raw)
                 append_replacement_character(text);
                 ++i;
             } else if (!has_remaining_bytes(raw, i, sequence_length)) {
+                if (valid_utf8_prefix(raw, i, sequence_length)) {
+                    append_replacement_character(text);
+                    truncated_utf8 = true;
+                    break;
+                }
                 append_replacement_character(text);
-                truncated_utf8 = true;
-                break;
+                ++i;
             } else if (valid_utf8_sequence(raw, i, sequence_length)) {
                 text.append(raw, i, sequence_length);
                 i += sequence_length;

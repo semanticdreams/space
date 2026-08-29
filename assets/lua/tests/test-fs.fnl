@@ -1,5 +1,6 @@
 (local tests [])
 (local fs (require :fs))
+(local process (require :process))
 
 (var temp-counter 0)
 (local fs-temp-root (fs.join-path "/tmp/space/tests" "fs-test-tmp"))
@@ -46,6 +47,11 @@
   (assert (not ok) description)
   (assert (string-contains? err "fs.read_text_window")
           (.. description ": expected fs.read_text_window in " (tostring err))))
+
+(fn space-bin []
+  (if (fs.exists "./build/space")
+      "./build/space"
+      "./space"))
 
 (fn fs-write-read-stat []
   (with-temp-dir (fn [root]
@@ -116,7 +122,26 @@
     (assert (not (string-contains? window.text (string.char 0))) "text should not contain NUL")
     (assert (string-contains? window.text "�") "text should contain replacement character"))))
 
+(fn fs-read-text-window-preserves-trailing-ascii-after-invalid-lead []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "malformed.txt"))
+    (fs.write-file file (.. (string.char 0xE2) "("))
+    (local window (fs.read-text-window file 0 2))
+    (assert (= window.text "�(") "invalid lead should be replaced and trailing ASCII preserved")
+    (assert (= window.truncated-utf8 false) "invalid lead plus ASCII should not be marked truncated"))))
+
 (fn fs-read-text-window-rejects-invalid-arguments []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:invalid-argument-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "invalid-argument child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn invalid-argument-main []
   (assert-read-text-window-error "empty path should fail"
                                  (fn [] (fs.read-text-window "" 0 1)))
   (assert-read-text-window-error "negative offset should fail"
@@ -130,6 +155,7 @@
 (table.insert tests {:name "fs read-text-window reads bounded range" :fn fs-read-text-window-bounded-range})
 (table.insert tests {:name "fs read-text-window caps max bytes" :fn fs-read-text-window-caps-max-bytes})
 (table.insert tests {:name "fs read-text-window sanitizes display text" :fn fs-read-text-window-sanitizes-display-text})
+(table.insert tests {:name "fs read-text-window preserves trailing ascii after invalid lead" :fn fs-read-text-window-preserves-trailing-ascii-after-invalid-lead})
 (table.insert tests {:name "fs read-text-window rejects invalid arguments" :fn fs-read-text-window-rejects-invalid-arguments})
 
 (local main
@@ -139,5 +165,6 @@
                        :tests tests})))
 
 {:name "fs"
- :tests tests
- :main main}
+  :tests tests
+  :main main
+  :invalid-argument-main invalid-argument-main}
