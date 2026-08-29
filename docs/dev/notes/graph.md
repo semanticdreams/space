@@ -42,6 +42,8 @@ Previews expose compact state, high-frequency local actions, and short search/li
 
 UX-purpose graph nodes expose one focused operation/detail surface and own no domain records. They are graph-addressable adapters over owning stores or systems, such as workflow step explorers or run timelines, and they materialize related topology only through explicit user actions.
 
+- Filesystem file content follows the same exposure-layer rule: `fs:<path>` remains the generic path adapter, regular files expose explicit interaction rows, and `fs-file-viewer:<absolute-path>` is a UX-purpose node that reads only bounded windows. See [Graph Filesystem File Interactions](/dev/features/graph-filesystem-file-interactions).
+
 Full node views and panels handle dense content, long payloads, and editor-style interactions. Source code, logs, JSON, Fennel forms, multiline errors, inputs, and outputs belong in these views rather than in single-line preview labels.
 
 Graph-selection actions must read active `GraphMap` selection, validate accepted node types, and fail loudly or display explicit graph-native status on invalid selection. Destructive actions must be explicit graph actions rather than confirmation-dialog flows.
