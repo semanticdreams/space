@@ -4291,5 +4291,210 @@
 (fn graph-titlebar-color= [a b] (and a b (< (math.abs (- a.x b.x)) 1e-4) (< (math.abs (- a.y b.y)) 1e-4) (< (math.abs (- a.z b.z)) 1e-4) (< (math.abs (- a.w b.w)) 1e-4))) (fn graph-expanded-card-titlebar-uses-tertiary-surface [] (local ctx (make-ctx)) (set ctx.theme ((require :light-theme))) (local expected-titlebar-color ctx.theme.button.variants.tertiary.background) (local body-color ctx.theme.card.background) (local node (Graph.GraphNode {:key "preview-titlebar-node" :preview (tracked-preview {})})) (local GraphNodePresentation (require :graph/view/presentation)) (local card-builder (GraphNodePresentation.card-builder {:node node :position (glm.vec3 0 0 0) :default-size (glm.vec3 32 18 0) :on-collapse (fn [] nil) :on-open (fn [_] nil) :on-menu (fn [_] nil)})) (local card (card-builder ctx)) (assert card.header-titlebar-background "Expanded card should expose a separate titlebar background surface") (assert (graph-titlebar-color= card.header-titlebar-background.color expected-titlebar-color) "Expanded card titlebar should use the light theme tertiary background") (assert (not (graph-titlebar-color= card.header-titlebar-background.color body-color)) "Expanded card titlebar background should be distinct from the card body") (card:drop))
 (table.insert tests {:name "Graph expanded card titlebar uses tertiary surface" :fn graph-expanded-card-titlebar-uses-tertiary-surface})
 (fn graph-expanded-card-header-actions-stay-inside-long-title-card [] (local ctx (make-ctx)) (local state {:measure (glm.vec3 8 6 0) :constrained-measure (glm.vec3 8 6 0)}) (local node (Graph.GraphNode {:key "long-title-narrow-preview" :label "This graph node label is long enough to overflow the compact preview header actions" :preview (tracked-preview state)})) (local GraphNodePresentation (require :graph/view/presentation)) (local card-builder (GraphNodePresentation.card-builder {:node node :position (glm.vec3 0 0 0) :default-size (glm.vec3 32 18 0) :min-size (glm.vec3 24 12 0) :max-size (glm.vec3 52 34 0) :on-collapse (fn [] nil) :on-open (fn [_] nil) :on-menu (fn [_] nil)})) (local card (card-builder ctx)) (ctx.layout-root:update) (assert (> card.header-bar.layout.measure.x 32) "Test fixture should require more than the compact default width") (local menu-button (. card.header-bar.children 5 :element)) (local menu-right-edge (+ menu-button.layout.position.x menu-button.layout.size.x)) (local card-right-edge (+ card.layout.position.x card._card-size.x)) (assert (<= menu-right-edge (+ card-right-edge 1e-3)) (.. "Rightmost header action should stay inside card; button edge " menu-right-edge " card edge " card-right-edge)) (card:drop)) (table.insert tests {:name "Graph expanded card header actions stay inside long-title card" :fn graph-expanded-card-header-actions-stay-inside-long-title-card})
-(fn find-search-row [items label] (var found nil) (each [_ item (ipairs items)] (when (= (. item 2) label) (set found (. item 1)))) found) (fn search-labels [items] (icollect [_ item (ipairs items)] (. item 2))) (fn with-fs-interaction-test-dir [f] (with-temp-data-dir (fn [_root] (with-temp-dir f)))) (fn fs-node-file-view-renders-only-search-interactions [] (with-fs-interaction-test-dir (fn [root] (local path (fs.join-path root "main.fnl")) (fs.write-file path "(local x 1)\n") (local ctx (make-ctx)) (local graph (Graph {:with-start false})) (local node (FsNode {:path path})) (set node.list-directory (fn [_self _path] (error "file mode must not list directory entries"))) (graph:add-node node {:position (glm.vec3 0 0 0)}) (local view ((node.view node) ctx)) (view:refresh-items) (assert (= view.action-row nil) "FsNode file view should not render the directory action row") (local external-row (find-search-row view.search.items "Edit externally")) (local viewer-row (find-search-row view.search.items "View text")) (local module-row (find-search-row view.search.items "Open as Fennel Module")) (assert external-row "FsNode file view should include external editor interaction") (assert viewer-row "FsNode file view should include text viewer interaction") (assert module-row "FsNode file view should include module interaction") (assert (= external-row.kind :external-editor)) (assert (= viewer-row.kind :file-viewer)) (assert (= module-row.kind :module)) (view:drop) (graph:drop)))) (fn fs-node-external-editor-interaction-does-not-add-edge [] (with-fs-interaction-test-dir (fn [root] (local ExternalEditor (require :external-editor)) (local path (fs.join-path root "main.fnl")) (fs.write-file path "(local x 1)\n") (local graph (Graph {:with-start false})) (local node (FsNode {:path path})) (graph:add-node node {:position (glm.vec3 0 0 0)}) (local interaction (find-search-row (node:emit-items) "Edit externally")) (local original-open-file ExternalEditor.open-file) (var opened-path nil) (set ExternalEditor.open-file (fn [external-path callback] (set opened-path external-path) (when callback (callback)) true)) (local (ok err) (pcall (fn [] (local result (node:open-entry interaction)) (assert (= result true) "External editor interaction should return true")))) (set ExternalEditor.open-file original-open-file) (when (not ok) (error err)) (assert (paths-eq opened-path (fs.absolute path)) "External editor interaction should open absolute file path") (assert (= (graph:edge-count) 0) "External editor interaction should not add graph edges") (graph:drop)))) (fn fs-node-text-viewer-interaction-adds-viewer-node [] (with-fs-interaction-test-dir (fn [root] (local path (fs.join-path root "note.md")) (fs.write-file path "# hello\n") (local graph (Graph {:with-start false})) (local node (FsNode {:path path})) (graph:add-node node {:position (glm.vec3 0 0 0)}) (local interaction (find-search-row (node:emit-items) "View text")) (assert interaction "Text file should expose View text interaction") (node:open-entry interaction) (local viewer-key (.. "fs-file-viewer:" (fs.absolute path))) (assert (graph:lookup viewer-key) "View text interaction should add fs-file-viewer node") (assert (= (graph:edge-count) 1)) (graph:drop)))) (fn fs-node-module-interactions-preserve-key-formats [] (with-fs-interaction-test-dir (fn [root] (local graph (Graph {:with-start false})) (local file-cases [{:name "main.fnl" :label "Open as Fennel Module" :prefix "fnl-module:" :content "(local x 1)\n"} {:name "main.cpp" :label "Open as C++ Module" :prefix "cpp-module:" :content "int main() { return 0; }\n"} {:name "note.md" :label "Open as Text Module" :prefix "text-module:" :content "# note\n"}]) (each [_ file-case (ipairs file-cases)] (local path (fs.join-path root file-case.name)) (fs.write-file path file-case.content) (local node (FsNode {:path path})) (graph:add-node node {:position (glm.vec3 0 0 0)}) (local interaction (find-search-row (node:emit-items) file-case.label)) (assert interaction (.. file-case.name " should expose module interaction")) (node:open-entry interaction) (local expected-key (.. file-case.prefix (fs.absolute path))) (assert (graph:lookup expected-key) (.. file-case.name " should add module node key " expected-key))) (assert (= (graph:edge-count) 3)) (graph:drop)))) (fn fs-node-unknown-file-shows-only-external-editor [] (with-fs-interaction-test-dir (fn [root] (local path (fs.join-path root "blob.bin")) (fs.write-file path "\001\002\003") (local node (FsNode {:path path})) (local labels (search-labels (node:emit-items))) (assert (= (length labels) 1) "Unknown file should expose exactly one interaction") (assert (= (. labels 1) "Edit externally")) (local interaction (find-search-row (node:emit-items) "Edit externally")) (assert (= interaction.kind :external-editor))))) (fn fs-node-directory-listing-behavior-remains-unchanged [] (with-fs-interaction-test-dir (fn [root] (local child-dir (fs.join-path root "child")) (local file (fs.join-path root "note.txt")) (fs.create-dirs child-dir) (fs.write-file file "hello") (local node (FsNode {:path root})) (local items (node:emit-items)) (local dir-entry (find-search-row items "child/")) (local file-entry (find-search-row items "note.txt")) (assert dir-entry "Directory FsNode should still list child directories with slash") (assert file-entry "Directory FsNode should still list child files by name") (assert (= dir-entry.kind nil) "Directory entries should not be file interaction rows") (assert (= file-entry.kind nil) "Directory file entries should not be file interaction rows")))) (table.insert tests {:name "FsNode file view renders only search interactions" :fn fs-node-file-view-renders-only-search-interactions}) (table.insert tests {:name "FsNode external editor interaction does not add edge" :fn fs-node-external-editor-interaction-does-not-add-edge}) (table.insert tests {:name "FsNode text viewer interaction adds viewer node" :fn fs-node-text-viewer-interaction-adds-viewer-node}) (table.insert tests {:name "FsNode module interactions preserve key formats" :fn fs-node-module-interactions-preserve-key-formats}) (table.insert tests {:name "FsNode unknown file shows only external editor" :fn fs-node-unknown-file-shows-only-external-editor}) (table.insert tests {:name "FsNode directory listing behavior remains unchanged" :fn fs-node-directory-listing-behavior-remains-unchanged}) (local main (fn [] (local runner (require :tests/runner)) (table.insert tests 1 {:name "GraphView direct test suppresses expected selection info logs" :fn (fn [] (assert ((. (require :logging) :set-level) "warn") "graph-view focused test requires logging level control"))}) (runner.run-tests {:name "graph-view" :tests tests})))
+(fn find-search-row [items label]
+  (var found nil)
+  (each [_ item (ipairs items)]
+    (when (= (. item 2) label)
+      (set found (. item 1))))
+  found)
+
+(fn search-labels [items]
+  (icollect [_ item (ipairs items)]
+    (. item 2)))
+
+(fn with-fs-interaction-test-dir [f]
+  (with-temp-data-dir
+    (fn [_root]
+      (with-temp-dir f))))
+
+(fn fs-node-file-view-renders-only-search-interactions []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local path (fs.join-path root "main.fnl"))
+      (fs.write-file path "(local x 1)\n")
+      (local ctx (make-ctx))
+      (local graph (Graph {:with-start false}))
+      (local node (FsNode {:path path}))
+      (set node.list-directory
+           (fn [_self _path]
+             (error "file mode must not list directory entries")))
+      (graph:add-node node {:position (glm.vec3 0 0 0)})
+      (local view ((node.view node) ctx))
+      (view:refresh-items)
+      (assert (= view.action-row nil)
+              "FsNode file view should not render the directory action row")
+      (local external-row (find-search-row view.search.items "Edit externally"))
+      (local viewer-row (find-search-row view.search.items "View text"))
+      (local module-row (find-search-row view.search.items "Open as Fennel Module"))
+      (assert external-row "FsNode file view should include external editor interaction")
+      (assert viewer-row "FsNode file view should include text viewer interaction")
+      (assert module-row "FsNode file view should include module interaction")
+      (assert (= external-row.kind :external-editor))
+      (assert (= viewer-row.kind :file-viewer))
+      (assert (= module-row.kind :module))
+      (view:drop)
+      (graph:drop))))
+
+(fn fs-node-external-editor-interaction-does-not-add-edge []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local ExternalEditor (require :external-editor))
+      (local path (fs.join-path root "main.fnl"))
+      (fs.write-file path "(local x 1)\n")
+      (local graph (Graph {:with-start false}))
+      (local node (FsNode {:path path}))
+      (graph:add-node node {:position (glm.vec3 0 0 0)})
+      (local interaction (find-search-row (node:emit-items) "Edit externally"))
+      (local original-open-file ExternalEditor.open-file)
+      (var opened-path nil)
+      (set ExternalEditor.open-file
+           (fn [external-path callback]
+             (set opened-path external-path)
+             (when callback (callback))
+             true))
+      (local (ok err)
+        (pcall
+          (fn []
+            (local result (node:open-entry interaction))
+            (assert (= result true)
+                    "External editor interaction should return true"))))
+      (set ExternalEditor.open-file original-open-file)
+      (when (not ok)
+        (error err))
+      (assert (paths-eq opened-path (fs.absolute path))
+              "External editor interaction should open absolute file path")
+      (assert (= (graph:edge-count) 0)
+              "External editor interaction should not add graph edges")
+      (graph:drop))))
+
+(fn fs-node-text-viewer-interaction-adds-viewer-node []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local path (fs.join-path root "note.md"))
+      (fs.write-file path "# hello\n")
+      (local graph (Graph {:with-start false}))
+      (local node (FsNode {:path path}))
+      (graph:add-node node {:position (glm.vec3 0 0 0)})
+      (local interaction (find-search-row (node:emit-items) "View text"))
+      (assert interaction "Text file should expose View text interaction")
+      (local result (node:open-entry interaction))
+      (local viewer-key (.. "fs-file-viewer:" (fs.absolute path)))
+      (local viewer-node (graph:lookup viewer-key))
+      (assert viewer-node "View text interaction should add fs-file-viewer node")
+      (assert (= result viewer-node)
+              "View text interaction should return the viewer node")
+      (assert (= (graph:edge-count) 1))
+      (graph:drop))))
+
+(fn fs-node-relative-text-viewer-uses-absolute-key []
+  (local cwd (fs.cwd))
+  (local relative-path "assets/lua/tests/data/fs-node-relative-viewer.md")
+  (local absolute-path (fs.absolute relative-path))
+  (fs.write-file absolute-path "# relative viewer\n")
+  (local graph (Graph {:with-start false}))
+  (local node (FsNode {:path relative-path}))
+  (graph:add-node node {:position (glm.vec3 0 0 0)})
+  (local interaction (find-search-row (node:emit-items) "View text"))
+  (assert interaction "Relative text file should expose View text interaction")
+  (assert (= interaction.path absolute-path)
+          "File interaction path should be absolute")
+  (assert (= interaction.target-key (.. "fs-file-viewer:" absolute-path))
+          "File viewer target key should use absolute path")
+  (local result (node:open-entry interaction))
+  (local viewer-key (.. "fs-file-viewer:" absolute-path))
+  (assert (= result (graph:lookup viewer-key))
+          "Relative View text interaction should return absolute-key viewer node")
+  (assert (= result.key viewer-key))
+  (assert (= (graph:edge-count) 1))
+  (graph:drop)
+  (fs.remove absolute-path)
+  cwd)
+
+(fn fs-node-module-interactions-preserve-key-formats []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local graph (Graph {:with-start false}))
+      (local file-cases
+        [{:name "main.fnl"
+          :label "Open as Fennel Module"
+          :prefix "fnl-module:"
+          :content "(local x 1)\n"}
+         {:name "main.cpp"
+          :label "Open as C++ Module"
+          :prefix "cpp-module:"
+          :content "int main() { return 0; }\n"}
+         {:name "note.md"
+          :label "Open as Text Module"
+          :prefix "text-module:"
+          :content "# note\n"}])
+      (each [_ file-case (ipairs file-cases)]
+        (local path (fs.join-path root file-case.name))
+        (fs.write-file path file-case.content)
+        (local node (FsNode {:path path}))
+        (graph:add-node node {:position (glm.vec3 0 0 0)})
+        (local interaction (find-search-row (node:emit-items) file-case.label))
+        (assert interaction (.. file-case.name " should expose module interaction"))
+        (node:open-entry interaction)
+        (local expected-key (.. file-case.prefix (fs.absolute path)))
+        (assert (graph:lookup expected-key)
+                (.. file-case.name " should add module node key " expected-key)))
+      (assert (= (graph:edge-count) 3))
+      (graph:drop))))
+
+(fn fs-node-unknown-file-shows-only-external-editor []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local path (fs.join-path root "blob.bin"))
+      (fs.write-file path "\001\002\003")
+      (local node (FsNode {:path path}))
+      (local labels (search-labels (node:emit-items)))
+      (assert (= (length labels) 1)
+              "Unknown file should expose exactly one interaction")
+      (assert (= (. labels 1) "Edit externally"))
+      (local interaction (find-search-row (node:emit-items) "Edit externally"))
+      (assert (= interaction.kind :external-editor)))))
+
+(fn fs-node-directory-listing-behavior-remains-unchanged []
+  (with-fs-interaction-test-dir
+    (fn [root]
+      (local child-dir (fs.join-path root "child"))
+      (local file (fs.join-path root "note.txt"))
+      (fs.create-dirs child-dir)
+      (fs.write-file file "hello")
+      (local node (FsNode {:path root}))
+      (local items (node:emit-items))
+      (local dir-entry (find-search-row items "child/"))
+      (local file-entry (find-search-row items "note.txt"))
+      (assert dir-entry "Directory FsNode should still list child directories with slash")
+      (assert file-entry "Directory FsNode should still list child files by name")
+      (assert (= dir-entry.kind nil)
+              "Directory entries should not be file interaction rows")
+      (assert (= file-entry.kind nil)
+              "Directory file entries should not be file interaction rows"))))
+
+(table.insert tests {:name "FsNode file view renders only search interactions"
+                     :fn fs-node-file-view-renders-only-search-interactions})
+(table.insert tests {:name "FsNode external editor interaction does not add edge"
+                     :fn fs-node-external-editor-interaction-does-not-add-edge})
+(table.insert tests {:name "FsNode text viewer interaction adds viewer node"
+                     :fn fs-node-text-viewer-interaction-adds-viewer-node})
+(table.insert tests {:name "FsNode relative text viewer interaction uses absolute key"
+                     :fn fs-node-relative-text-viewer-uses-absolute-key})
+(table.insert tests {:name "FsNode module interactions preserve key formats"
+                     :fn fs-node-module-interactions-preserve-key-formats})
+(table.insert tests {:name "FsNode unknown file shows only external editor"
+                     :fn fs-node-unknown-file-shows-only-external-editor})
+(table.insert tests {:name "FsNode directory listing behavior remains unchanged"
+                     :fn fs-node-directory-listing-behavior-remains-unchanged})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (table.insert tests 1
+                  {:name "GraphView direct test suppresses expected selection info logs"
+                   :fn (fn []
+                         (assert ((. (require :logging) :set-level) "warn")
+                                 "graph-view focused test requires logging level control"))})
+    (runner.run-tests {:name "graph-view" :tests tests})))
+
 {:name "graph-view" :tests tests :main main}

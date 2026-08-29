@@ -6,7 +6,9 @@
 (local Signal (require :signal))
 (local fs (require :fs))
 (local logging (require :logging))
-(local ExternalEditor (require :external-editor)) (local FileTypes (require :graph/file-types)) (local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
+(local ExternalEditor (require :external-editor))
+(local FileTypes (require :graph/file-types))
+(local {:FsFileViewerNode FsFileViewerNode} (require :graph/nodes/fs-file-viewer))
 
 (local M {})
 
@@ -28,17 +30,55 @@
     (if (and fs fs.cwd)
         (fs.cwd)
         "."))
-(fn build-file-interaction-items [current-path] (local classification (FileTypes.classify current-path)) (local interactions [{:kind :external-editor :path current-path}]) (when classification.viewer? (table.insert interactions {:kind :file-viewer :path current-path :target-key (.. "fs-file-viewer:" current-path)})) (when classification.module-kind (table.insert interactions {:kind :module :path current-path :module-kind classification.module-kind :target-key (.. classification.module-key-prefix current-path)})) (icollect [_ interaction (ipairs interactions)] [interaction (if (= interaction.kind :external-editor) "Edit externally" (= interaction.kind :file-viewer) "View text" classification.module-label)]))
-(fn open-file-interaction [self interaction] (assert interaction "FsNode requires a file interaction") (local graph self.graph) (if (= interaction.kind :external-editor) (do (ExternalEditor.open-file interaction.path (fn [] nil)) true) (= interaction.kind :file-viewer) (do (assert graph "FsNode requires a mounted graph to add file viewer edges") (local viewer-node (FsFileViewerNode {:path interaction.path :key interaction.target-key})) (graph:add-edge (GraphEdge {:source self :target viewer-node}))) (= interaction.kind :module) (do (assert graph "FsNode requires a mounted graph to add module edges") (local module-node (self:create-module-node interaction.module-kind interaction.path)) (when module-node (graph:add-edge (GraphEdge {:source self :target module-node})) module-node)) (error (.. "FsNode unsupported file interaction kind: " (tostring interaction.kind)))))
+(fn interaction-label [interaction classification]
+    (if (= interaction.kind :external-editor)
+        "Edit externally"
+        (= interaction.kind :file-viewer)
+        "View text"
+        classification.module-label))
 
+(fn build-file-interaction-items [current-path]
+    (local classification (FileTypes.classify current-path))
+    (local interactions [{:kind :external-editor
+                          :path current-path}])
+    (when classification.viewer?
+        (table.insert interactions
+                      {:kind :file-viewer
+                       :path current-path
+                       :target-key (.. "fs-file-viewer:" current-path)}))
+    (when classification.module-kind
+        (table.insert interactions
+                      {:kind :module
+                       :path current-path
+                       :module-kind classification.module-kind
+                       :target-key (.. classification.module-key-prefix current-path)}))
+    (icollect [_ interaction (ipairs interactions)]
+        [interaction (interaction-label interaction classification)]))
 
-
-
-
-
-
-
-
+(fn open-file-interaction [self interaction]
+    (assert interaction "FsNode requires a file interaction")
+    (local graph self.graph)
+    (if (= interaction.kind :external-editor)
+        (do
+            (ExternalEditor.open-file interaction.path (fn [] nil))
+            true)
+        (= interaction.kind :file-viewer)
+        (do
+            (assert graph "FsNode requires a mounted graph to add file viewer edges")
+            (local viewer-node (FsFileViewerNode {:path interaction.path
+                                                  :key interaction.target-key}))
+            (graph:add-edge (GraphEdge {:source self
+                                        :target viewer-node}))
+            viewer-node)
+        (= interaction.kind :module)
+        (do
+            (assert graph "FsNode requires a mounted graph to add module edges")
+            (local module-node (self:create-module-node interaction.module-kind interaction.path))
+            (when module-node
+                (graph:add-edge (GraphEdge {:source self
+                                            :target module-node}))
+                module-node))
+        (error (.. "FsNode unsupported file interaction kind: " (tostring interaction.kind)))))
 
 (fn M.FsNode [opts]
     (assert (and fs fs.list-dir) "FsNode requires the fs module")
@@ -127,7 +167,8 @@
 
     (set node.path-stat
          (fn [self current-path]
-             (local resolved-path (self:resolve-path current-path))
+             (local raw-path (self:resolve-path current-path))
+             (local resolved-path (and raw-path fs.absolute (fs.absolute raw-path)))
              (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
              (values resolved-path stat)))
 
