@@ -36,6 +36,25 @@
             (set valid false)))
         (if valid seq-len nil))))
 
+(fn semantic-utf8-codepoint [text index seq-len]
+  (local sequence (string.sub text index (+ index seq-len -1)))
+  (local (ok cp) (pcall utf8.codepoint sequence))
+  (if ok cp nil))
+
+(fn utf8-source-advance [text index]
+  (local expected-len (utf8-sequence-length (string.byte text index)))
+  (local total (# text))
+  (local complete-len (complete-utf8-sequence-length-at text index))
+  (if (not expected-len)
+      1
+      (> (+ index expected-len -1) total)
+      (- total index -1)
+      (and complete-len (semantic-utf8-codepoint text index complete-len))
+      complete-len
+      complete-len
+      complete-len
+      1))
+
 (fn complete-utf8-prefix-length [text]
   (var index 1)
   (var prefix-end 0)
@@ -176,31 +195,34 @@
         (while (and (< current-line line) (< pos buffer.size) (< scanned-bytes scan-budget))
           (local read-bytes (math.min buffer.chunk-bytes (- scan-budget scanned-bytes)))
           (local chunk (read-composed-range buffer pos read-bytes))
+          (local chunk-start pos)
           (var i 1)
-          (var found false)
-          (while (and (<= i (# chunk)) (< current-line line) (not found))
+          (var target-byte nil)
+          (while (and (<= i (# chunk)) (< current-line line))
             (local b (string.byte chunk i))
             (if (= b 10)
                 (do
                   (set current-line (+ current-line 1))
-                  (set pos (+ pos i))
-                  (table.insert buffer.line-anchors {:line current-line :byte pos})
-                  (set found true))
+                  (local line-byte (+ chunk-start i))
+                  (table.insert buffer.line-anchors {:line current-line :byte line-byte})
+                  (when (= current-line line)
+                    (set target-byte line-byte)))
                 (= b 13)
                 (do
                   (local next-b (if (< i (# chunk))
                                     (string.byte chunk (+ i 1))
                                     (byte-at buffer (+ pos i))))
                   (set current-line (+ current-line 1))
-                  (if (= next-b 10)
-                      (set pos (+ pos i 1))
-                      (set pos (+ pos i)))
-                  (table.insert buffer.line-anchors {:line current-line :byte pos})
-                  (set found true)))
+                  (local newline-bytes (if (= next-b 10) 2 1))
+                  (local line-byte (+ chunk-start i newline-bytes -1))
+                  (table.insert buffer.line-anchors {:line current-line :byte line-byte})
+                  (when (= current-line line)
+                    (set target-byte line-byte))
+                  (when (= newline-bytes 2)
+                    (set i (+ i 1)))))
             (set i (+ i 1)))
-          (when (not found)
-            (set pos (+ pos (# chunk)))
-            (set scanned-bytes (+ scanned-bytes (# chunk))))
+          (set scanned-bytes (+ scanned-bytes (# chunk)))
+          (set pos (if target-byte target-byte (+ chunk-start (# chunk))))
           (when (= (# chunk) 0)
             (set scanned-bytes scan-budget)))
         (values pos (= current-line line)))))
@@ -218,10 +240,10 @@
   (while (and (<= index total) (< count columns))
     (local expected-len (utf8-sequence-length (string.byte text index)))
     (local complete-len (complete-utf8-sequence-length-at text index))
-    (if complete-len
+    (local cp (if complete-len (semantic-utf8-codepoint text index complete-len) nil))
+    (if cp
         (do
           (local sequence (string.sub text index (+ index complete-len -1)))
-          (local cp (utf8.codepoint sequence))
           (table.insert parts sequence)
           (table.insert cps cp)
           (set source-end (+ index complete-len -1))
@@ -231,7 +253,27 @@
           (set index (+ index complete-len))
           (set count (+ count 1)))
         (and expected-len (> (+ index expected-len -1) total))
-        (set index (+ total 1))
+        (do
+          (local replacement "�")
+          (table.insert parts replacement)
+          (table.insert cps 0xFFFD)
+          (set source-end total)
+          (set display-end (+ display-end (# replacement)))
+          (table.insert source-offsets source-end)
+          (table.insert display-offsets display-end)
+          (set index (+ total 1))
+          (set count (+ count 1)))
+        complete-len
+        (do
+          (local replacement "�")
+          (table.insert parts replacement)
+          (table.insert cps 0xFFFD)
+          (set source-end (+ index complete-len -1))
+          (set display-end (+ display-end (# replacement)))
+          (table.insert source-offsets source-end)
+          (table.insert display-offsets display-end)
+          (set index (+ index complete-len))
+          (set count (+ count 1)))
         (do
           (local replacement "�")
           (table.insert parts replacement)
@@ -339,8 +381,7 @@
       buffer.size
       (do
         (local chunk (read-composed-range buffer byte (math.min 4 (- buffer.size byte))))
-        (local seq-len (complete-utf8-sequence-length-at chunk 1))
-        (math.min buffer.size (+ byte (if (= seq-len nil) 1 seq-len))))))
+        (math.min buffer.size (+ byte (utf8-source-advance chunk 1))))))
 
 (fn clip-row-column [row start-column requested-columns]
   (local full-text row.text)

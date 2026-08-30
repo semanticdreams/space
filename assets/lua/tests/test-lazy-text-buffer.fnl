@@ -194,6 +194,30 @@
   (assert (<= source.read-count 6) (.. "missing line discovery should not scan to EOF; reads=" source.read-count))
   (assert (<= source.bytes-requested 128) (.. "missing line discovery should keep requested bytes bounded; bytes=" source.bytes-requested)))
 
+(fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "many-newlines.txt"))
+  (local parts [])
+  (for [_ 1 10000]
+    (table.insert parts "x\n"))
+  (fs.write-file file (table.concat parts ""))
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.read-count 0)
+  (set source.bytes-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.read-count (+ self.read-count 1))
+         (set self.bytes-requested (+ self.bytes-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16 :line-index-scan-budget 64}))
+  (local snapshot (buffer:get-viewport {:line 1000 :column 0 :lines 1 :columns 5}))
+  (local row (. snapshot.rows 1))
+  (assert row.partial? "far line discovery should become partial when line-index budget is exhausted")
+  (assert (not row.line-end-known?) "far line discovery should not pretend target line is known after budget exhaustion")
+  (assert (<= source.read-count 6) (.. "far newline discovery should keep reads bounded; reads=" source.read-count))
+  (assert (<= source.bytes-requested 128) (.. "far newline discovery should keep requested bytes bounded; bytes=" source.bytes-requested)))
+
 (fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "edit.txt"))
@@ -264,6 +288,35 @@
   (assert result.saved)
   (local raw (fs.read-byte-range file 0 16))
   (assert (= raw.bytes (.. "Zab" (string.char 255) "cd")) "save must preserve untouched invalid original byte"))
+
+(fn lazy-text-buffer-renders-malformed-semantic-utf8-as-replacement []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "invalid-semantic.bin"))
+  (fs.write-file file (.. "a" (string.char 0xE0 0x80 0x80) "b" (string.char 0xED 0xA0 0x80) "c"))
+  (local buffer (buffer-for-file file {:chunk-bytes 8}))
+  (local row (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}) :rows 1))
+  (assert (= row.text "a�b�c") "overlong and surrogate-shaped bytes should render as replacements and continue")
+  (assert (= (. row.column-byte-offsets 1) 0))
+  (assert (= (. row.column-byte-offsets 2) 1))
+  (assert (= (. row.column-byte-offsets 3) 4) "replacement should advance over malformed source sequence")
+  (assert (= (. row.column-byte-offsets 4) 5))
+  (assert (= (. row.column-byte-offsets 5) 8) "surrogate replacement should advance over malformed source sequence")
+  (assert (= (. row.column-byte-offsets 6) 9))
+  (buffer:move-caret-to-line-column 0 2)
+  (assert (= buffer.cursor-byte 4) "caret after malformed sequence should land after all offending source bytes"))
+
+(fn lazy-text-buffer-renders-truncated-eof-utf8-as-replacement []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "invalid-truncated.bin"))
+  (fs.write-file file (.. "a" (string.char 0xE2 0x82)))
+  (local buffer (buffer-for-file file {:chunk-bytes 8}))
+  (local row (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}) :rows 1))
+  (assert (= row.text "a�") "truncated EOF sequence should render as replacement")
+  (assert (= (. row.column-byte-offsets 1) 0))
+  (assert (= (. row.column-byte-offsets 2) 1))
+  (assert (= (. row.column-byte-offsets 3) 3) "truncated replacement should advance over remaining source bytes")
+  (buffer:move-caret-to-line-column 0 2)
+  (assert (= buffer.cursor-byte 3) "caret after truncated sequence should land at EOF"))
 
 (fn lazy-text-buffer-save-streams-pieces-through-atomic-replace []
   (local root (make-clean-temp-dir))
@@ -367,11 +420,14 @@
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
+(table.insert tests {:name "lazy text buffer bounds far line discovery with many newlines" :fn lazy-text-buffer-bounds-far-line-discovery-with-many-newlines})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})
 (table.insert tests {:name "lazy text buffer selection copies across original and added pieces" :fn lazy-text-buffer-selection-copies-across-original-and-added-pieces})
 (table.insert tests {:name "lazy text buffer selection copies large original span completely" :fn lazy-text-buffer-selection-copies-large-original-span-completely})
 (table.insert tests {:name "lazy text buffer preserves invalid original bytes when untouched" :fn lazy-text-buffer-preserves-invalid-original-bytes-when-untouched})
 (table.insert tests {:name "lazy text buffer renders invalid original bytes as replacement" :fn lazy-text-buffer-renders-invalid-original-bytes-as-replacement})
+(table.insert tests {:name "lazy text buffer renders malformed semantic UTF-8 as replacement" :fn lazy-text-buffer-renders-malformed-semantic-utf8-as-replacement})
+(table.insert tests {:name "lazy text buffer renders truncated EOF UTF-8 as replacement" :fn lazy-text-buffer-renders-truncated-eof-utf8-as-replacement})
 (table.insert tests {:name "lazy text buffer save streams pieces through atomic replace" :fn lazy-text-buffer-save-streams-pieces-through-atomic-replace})
 (table.insert tests {:name "lazy text buffer save reports external modification conflict" :fn lazy-text-buffer-save-reports-external-modification-conflict})
 (table.insert tests {:name "lazy text buffer save detects same-size external modification" :fn lazy-text-buffer-save-detects-same-size-external-modification})

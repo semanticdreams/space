@@ -254,6 +254,30 @@
   (assert (= (. last-move :line) 3) "Down after PageDown should move from visible page to following row")
   (input:drop))
 
+(fn virtual-input-shift-page-down-extends-selection []
+  (local rows [(row 0 "zero" 0) (row 1 "one" 10) (row 2 "two" 20) (row 3 "three" 30)])
+  (local buffer (make-buffer {:rows rows :cursor-byte 0}))
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+  (input:refresh-viewport)
+  (assert (input:on-key-down {:key 1073741902 :mod 1}) "Shift+PageDown should be handled")
+  (local selection (. buffer.state.selections (length buffer.state.selections)))
+  (assert selection "Shift+PageDown should record an extended selection")
+  (assert (= selection.anchor 0) "Shift+PageDown should preserve original anchor")
+  (assert (= selection.active 20) "Shift+PageDown should extend to the relocated page caret")
+  (input:drop))
+
+(fn virtual-input-shift-page-up-extends-selection []
+  (local rows [(row 0 "zero" 0) (row 1 "one" 10) (row 2 "two" 20) (row 3 "three" 30)])
+  (local buffer (make-buffer {:rows rows :cursor-byte 20 :scroll-line 2}))
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+  (input:refresh-viewport)
+  (assert (input:on-key-down {:key 1073741899 :mod 1}) "Shift+PageUp should be handled")
+  (local selection (. buffer.state.selections (length buffer.state.selections)))
+  (assert selection "Shift+PageUp should record an extended selection")
+  (assert (= selection.anchor 20) "Shift+PageUp should preserve original anchor")
+  (assert (= selection.active 0) "Shift+PageUp should extend to the relocated page caret")
+  (input:drop))
+
 (fn virtual-input-inserts-and-deletes-through-lazy-buffer []
   (local buffer (make-buffer {:cursor-byte 2 :selection {:anchor-byte 1 :active-byte 3 :start-byte 1 :end-byte 3}}))
   (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
@@ -415,6 +439,8 @@
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
 (table.insert tests {:name "VirtualInput PageDown keeps subsequent vertical navigation valid" :fn virtual-input-page-down-keeps-subsequent-vertical-navigation-valid})
+(table.insert tests {:name "VirtualInput Shift+PageDown extends selection" :fn virtual-input-shift-page-down-extends-selection})
+(table.insert tests {:name "VirtualInput Shift+PageUp extends selection" :fn virtual-input-shift-page-up-extends-selection})
 (table.insert tests {:name "VirtualInput inserts and deletes through lazy buffer" :fn virtual-input-inserts-and-deletes-through-lazy-buffer})
 (table.insert tests {:name "VirtualInput copies selected text" :fn virtual-input-copies-selected-text})
 (table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict})

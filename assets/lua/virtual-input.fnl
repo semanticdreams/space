@@ -279,13 +279,14 @@
       (apply-caret-line-column self line (row-visible-column-count self _row) extend?)
       (error (.. "VirtualInput unsupported caret move: " (tostring delta)))))
 
-(fn scroll-lines [self delta]
+(fn scroll-lines [self delta opts]
   (local changed (self.buffer:scroll-lines delta))
   (when changed
+    (local extend? (and opts opts.extend-selection?))
     (sync-scroll self)
     (self:refresh-viewport)
     (when (not (caret-row self))
-      (apply-caret-line-column self self.scroll-line 0 false)))
+      (apply-caret-line-column self self.scroll-line 0 extend?)))
   changed)
 
 (fn copy-selection [self]
@@ -335,9 +336,9 @@
             (= key KEY_END)
             (self:move-caret :end {:extend-selection? shift?})
             (= key KEY_PAGEUP)
-            (self:scroll-lines (- self.line-count))
+            (self:scroll-lines (- self.line-count) {:extend-selection? shift?})
             (= key KEY_PAGEDOWN)
-            (self:scroll-lines self.line-count)
+            (self:scroll-lines self.line-count {:extend-selection? shift?})
             (= key KEY_BACKSPACE)
             (self:delete-before-cursor)
             (= key KEY_DELETE)
