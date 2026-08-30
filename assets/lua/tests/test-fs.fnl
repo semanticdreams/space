@@ -326,7 +326,7 @@
     (assert (string-contains? err "fs.atomic_replace_if_current: file changed since token")
             (.. "expected final token conflict error, got " (tostring err)))
     (assert (= (fs.read-file file) "raced")
-            "target modification must not be overwritten by final replace"))))
+            "detected stale save must preserve external content and not publish replacement"))))
 
 (fn fs-atomic-replace-if-current-rejects-malformed-segments []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-invalid-segment-main"]

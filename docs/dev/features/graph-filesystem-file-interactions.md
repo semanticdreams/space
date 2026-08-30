@@ -20,7 +20,7 @@ The viewer UI uses `VirtualInput` for internal editing. `Input` and `InputModel`
 
 The viewer provides explicit `Save` and `Edit externally` controls. The external-editor button remains available because double-click behavior is not the primary file-opening affordance for this lazy editable viewer.
 
-Saving never blindly overwrites externally changed files. Before saving, the viewer checks whether the file token still matches the buffer baseline; the buffer then saves through `fs.atomic-replace-if-current`, which revalidates the token after writing the temporary replacement and reports a conflict instead of replacing a modified file.
+Saving follows a pragmatic Neovim/Vim-style contract: the viewer does not blindly overwrite known stale external changes, and detected conflicts leave the user's in-memory edits dirty. Before saving, the viewer checks whether the file token still matches the buffer baseline; the buffer then saves through `fs.atomic-replace-if-current`, which revalidates the token after writing the temporary replacement and immediately before `rename`. POSIX/Linux cannot prevent a non-cooperating writer from changing the path in the tiny gap between final validation and `rename`, so this is normal stale-change detection rather than strict race-free CAS.
 
 ## Persistence invariant
 

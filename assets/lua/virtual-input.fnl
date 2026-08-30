@@ -267,7 +267,9 @@
   (local changed (self.buffer:scroll-lines delta))
   (when changed
     (sync-scroll self)
-    (self:refresh-viewport))
+    (self:refresh-viewport)
+    (when (not (caret-row self))
+      (apply-caret-line-column self self.scroll-line 0 false)))
   changed)
 
 (fn copy-selection [self]

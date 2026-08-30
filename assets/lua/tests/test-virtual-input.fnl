@@ -232,11 +232,23 @@
   (input:on-key-down {:key 1073741905})
   (input:on-key-down {:key 1073741903})
   (input:on-key-down {:key 1073741902})
-  (assert (= (length buffer.state.moved) 2) "arrow keys should move through the lazy buffer")
+  (assert (>= (length buffer.state.moved) 2) "arrow keys should move through the lazy buffer")
   (assert (= (. buffer.state.scrolled 1) 2) "page down should scroll by visible lines")
   (assert (>= (length buffer.state.viewport-calls) 3) "navigation should refresh visible viewport")
   (local handled (input:on-key-down {:key 999999}))
   (assert (= handled false) "unsupported key payloads return false")
+  (input:drop))
+
+(fn virtual-input-page-down-keeps-subsequent-vertical-navigation-valid []
+  (local rows [(row 0 "zero" 0) (row 1 "one" 10) (row 2 "two" 20) (row 3 "three" 30)])
+  (local buffer (make-buffer {:rows rows :cursor-byte 0}))
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+  (input:refresh-viewport)
+  (assert (input:on-key-down {:key 1073741902}) "PageDown should be handled")
+  (local (ok err) (pcall (fn [] (input:on-key-down {:key 1073741905}))))
+  (assert ok (.. "Down after PageDown should not use nil caret line/column: " (tostring err)))
+  (local last-move (. buffer.state.moved (length buffer.state.moved)))
+  (assert (= (. last-move :line) 3) "Down after PageDown should move from visible page to following row")
   (input:drop))
 
 (fn virtual-input-inserts-and-deletes-through-lazy-buffer []
@@ -367,6 +379,7 @@
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
+(table.insert tests {:name "VirtualInput PageDown keeps subsequent vertical navigation valid" :fn virtual-input-page-down-keeps-subsequent-vertical-navigation-valid})
 (table.insert tests {:name "VirtualInput inserts and deletes through lazy buffer" :fn virtual-input-inserts-and-deletes-through-lazy-buffer})
 (table.insert tests {:name "VirtualInput copies selected text" :fn virtual-input-copies-selected-text})
 (table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict})

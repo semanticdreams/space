@@ -10,7 +10,7 @@ This stack is intentionally plain text only in this iteration. It does not provi
 
 `LazyTextSource.file(path, opts)` normalizes the path, captures a filesystem token with `fs.file-token`, and exposes bounded reads through `fs.read-byte-range`. The source keeps the baseline token that represents the file version the buffer was opened from and can refresh that baseline after a successful save.
 
-Native filesystem saves use `fs.atomic-replace-if-current(path, segments, expected-token)`. Segment tables may reference unchanged byte ranges from the original source file or provide inserted text. The native primitive validates that the current file still matches `expected-token`, writes the composed content to a temporary replacement, revalidates the token after the temporary file is complete, and atomically installs it only if the token is still current.
+Native filesystem saves use `fs.atomic-replace-if-current(path, segments, expected-token)`. Segment tables may reference unchanged byte ranges from the original source file or provide inserted text. The native primitive validates that the current file still matches `expected-token`, writes the composed content to a temporary replacement, applies temp-file setup such as permissions, revalidates the token immediately before `rename`, and reports a conflict instead of replacing a known changed file.
 
 ## Piece table buffer
 
@@ -38,7 +38,9 @@ Viewport construction reads composed ranges in bounded chunks and marks long row
 
 ## Save and conflict behavior
 
-Saves never blindly overwrite externally changed files. Before the graph file viewer saves, it compares the current file token with the buffer source baseline token and reports a conflict if the file changed externally. The buffer save itself delegates to `atomic-replace-if-current`, which repeats the token check at the native filesystem boundary after composing the replacement and immediately before replacing the file.
+Saves follow a pragmatic Neovim/Vim-style save-safety contract: they do not blindly overwrite known stale external changes, and detected conflicts preserve the user's in-memory edits. Before the graph file viewer saves, it compares the current file token with the buffer source baseline token and reports a conflict if the file changed externally. The buffer save itself delegates to `atomic-replace-if-current`, which repeats the token check at the native filesystem boundary after composing the replacement and immediately before replacing the file.
+
+This is not a strict race-free compare-and-replace guarantee for arbitrary non-cooperating writers. POSIX/Linux path replacement cannot prevent another process from changing the target in the tiny gap between final validation and `rename`; callers should describe this as normal stale-change detection, not mathematical CAS semantics.
 
 On successful save, the buffer refreshes its baseline token, collapses pieces back to a single original-file piece, clears the add buffer, and marks itself clean. On conflict or error, the buffer remains dirty so the caller can report the problem and preserve the user's in-memory edits.
 

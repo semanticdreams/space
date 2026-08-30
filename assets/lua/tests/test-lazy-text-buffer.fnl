@@ -170,6 +170,30 @@
   (assert (not row.line-end-known?) "line ending should be unknown after bounded scan")
   (assert (<= source.read-count 2) (.. "viewport should not scan to EOF; reads=" source.read-count)))
 
+(fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "missing-line.txt"))
+  (local parts [])
+  (for [_ 1 4096]
+    (table.insert parts "abcdefghij"))
+  (fs.write-file file (table.concat parts ""))
+  (local source (source-for-file file {:chunk-bytes 16}))
+  (local original-read-range source.read-range)
+  (set source.read-count 0)
+  (set source.bytes-requested 0)
+  (set source.read-range
+       (fn [self offset max-bytes]
+         (set self.read-count (+ self.read-count 1))
+         (set self.bytes-requested (+ self.bytes-requested max-bytes))
+         (original-read-range self offset max-bytes)))
+  (local buffer (LazyTextBuffer {:source source :chunk-bytes 16 :line-index-scan-budget 64}))
+  (local snapshot (buffer:get-viewport {:line 24 :column 0 :lines 1 :columns 5}))
+  (local row (. snapshot.rows 1))
+  (assert row.partial? "unknown later line in newline-free file should be marked partial")
+  (assert (not row.line-end-known?) "unknown later line must not be represented as fully discovered")
+  (assert (<= source.read-count 6) (.. "missing line discovery should not scan to EOF; reads=" source.read-count))
+  (assert (<= source.bytes-requested 128) (.. "missing line discovery should keep requested bytes bounded; bytes=" source.bytes-requested)))
+
 (fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "edit.txt"))
@@ -305,6 +329,7 @@
 (table.insert tests {:name "lazy text buffer clips nonzero UTF-8 columns with relative offsets" :fn lazy-text-buffer-clips-nonzero-utf8-columns-with-relative-offsets})
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
 (table.insert tests {:name "lazy text buffer bounds newline-free viewport source reads" :fn lazy-text-buffer-bounds-newline-free-viewport-source-reads})
+(table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})
 (table.insert tests {:name "lazy text buffer selection copies across original and added pieces" :fn lazy-text-buffer-selection-copies-across-original-and-added-pieces})
 (table.insert tests {:name "lazy text buffer preserves invalid original bytes when untouched" :fn lazy-text-buffer-preserves-invalid-original-bytes-when-untouched})

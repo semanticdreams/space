@@ -131,15 +131,32 @@
       (set best anchor)))
   best)
 
+(fn unknown-row [line start-byte]
+  {:line line
+   :start-byte start-byte
+   :end-byte start-byte
+   :line-end-byte start-byte
+   :line-end-known? false
+   :partial? true
+   :newline-bytes 0
+   :text ""
+   :codepoints []
+   :column-byte-offsets [0]})
+
 (fn find-line-start [buffer line]
   (if (<= line 0)
-      0
+      (values 0 true)
       (do
         (local anchor (nearest-anchor buffer.line-anchors line))
         (var current-line anchor.line)
         (var pos anchor.byte)
-        (while (and (< current-line line) (< pos buffer.size))
-          (local chunk (read-composed-range buffer pos buffer.chunk-bytes))
+        (var scanned-bytes 0)
+        (local scan-budget (if (= buffer.line-index-scan-budget nil)
+                             (* buffer.chunk-bytes 16)
+                             buffer.line-index-scan-budget))
+        (while (and (< current-line line) (< pos buffer.size) (< scanned-bytes scan-budget))
+          (local read-bytes (math.min buffer.chunk-bytes (- scan-budget scanned-bytes)))
+          (local chunk (read-composed-range buffer pos read-bytes))
           (var i 1)
           (var found false)
           (while (and (<= i (# chunk)) (< current-line line) (not found))
@@ -163,10 +180,11 @@
                   (set found true)))
             (set i (+ i 1)))
           (when (not found)
-            (set pos (+ pos (# chunk))))
+            (set pos (+ pos (# chunk)))
+            (set scanned-bytes (+ scanned-bytes (# chunk))))
           (when (= (# chunk) 0)
-            (set current-line line)))
-        pos)))
+            (set scanned-bytes scan-budget)))
+        (values pos (= current-line line)))))
 
 (fn clipped-row-values [text columns]
   (local prefix (string.sub text 1 (complete-utf8-prefix-length text)))
@@ -308,16 +326,21 @@
   (local requested-columns (if (= view.columns nil) 80 view.columns))
   (local rows [])
   (var line start-line)
-  (var start-byte (find-line-start buffer start-line))
+  (local (initial-start-byte initial-known?) (find-line-start buffer start-line))
+  (var start-byte initial-start-byte)
+  (var line-start-known? initial-known?)
   (for [_ 1 requested-lines]
-    (local row (build-row buffer line start-byte (+ start-column requested-columns)))
-    (local next-start-byte (if row.line-end-known?
+    (local row (if line-start-known?
+                 (build-row buffer line start-byte (+ start-column requested-columns))
+                 (unknown-row line start-byte)))
+    (local next-start-byte (if (and line-start-known? row.line-end-known?)
                               (+ row.line-end-byte row.newline-bytes)
-                              buffer.size))
+                              start-byte))
     (when (> start-column 0)
       (clip-row-column row start-column requested-columns))
     (table.insert rows row)
     (set start-byte next-start-byte)
+    (set line-start-known? (and line-start-known? row.line-end-known?))
     (set line (+ line 1)))
   {:start-line start-line
    :start-column start-column
@@ -380,13 +403,16 @@
   true)
 
 (fn move-caret-to-line-column [buffer line column]
-  (local start (find-line-start buffer line))
-  (local row (build-row buffer line start column))
-  (local offsets row.column-byte-offsets)
-  (local byte-offset (if (= (. offsets (+ column 1)) nil)
-                         (# row.text)
-                         (. offsets (+ column 1))))
-  (set buffer.cursor-byte (+ start byte-offset))
+  (local (start known?) (find-line-start buffer line))
+  (if known?
+      (do
+        (local row (build-row buffer line start column))
+        (local offsets row.column-byte-offsets)
+        (local byte-offset (if (= (. offsets (+ column 1)) nil)
+                             (# row.text)
+                             (. offsets (+ column 1))))
+        (set buffer.cursor-byte (+ start byte-offset)))
+      (set buffer.cursor-byte (clamp start 0 buffer.size)))
   true)
 
 (fn scroll-lines [buffer delta]
@@ -454,7 +480,8 @@
                              source.chunk-bytes
                              65536)))
   {:source source
-   :chunk-bytes chunk-bytes
+    :chunk-bytes chunk-bytes
+    :line-index-scan-budget (or opts.line-index-scan-budget (* chunk-bytes 16))
    :pieces [(make-piece :original 0 source.size)]
    :add-buffer ""
    :size source.size
