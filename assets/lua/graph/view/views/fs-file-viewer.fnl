@@ -1,45 +1,89 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
 (local Text (require :text))
+(local VirtualInput (require :virtual-input))
+(local Modifiers (require :input-modifiers))
 
-(fn zero-if-nil [value]
-  (if (= value nil) 0 value))
+(fn token-matches? [current expected]
+  (assert current "token-matches? requires current token")
+  (assert expected "token-matches? requires expected token")
+  (and (= current.path expected.path)
+       (= current.exists expected.exists)
+       (= current.is-file expected.is-file)
+       (= current.size expected.size)
+       (= current.modified expected.modified)
+       (= current.change-id expected.change-id)))
 
-(fn text-if-present [window]
-  (if (and window window.text) window.text ""))
+(fn changed-since-baseline? [buffer]
+  (assert buffer "changed-since-baseline? requires buffer")
+  (assert buffer.source "changed-since-baseline? requires buffer.source")
+  (local current (buffer.source:current-token))
+  (not (token-matches? current buffer.source.baseline-token)))
 
-(fn metadata-label [window]
-  (if window
-      (string.format "Offset %s  Bytes %s  Size %s"
-                     (tostring (zero-if-nil window.offset))
-                     (tostring (zero-if-nil window.bytes-read))
-                     (tostring (zero-if-nil window.size)))
-      "Offset 0  Bytes 0  Size 0"))
+(fn status-label [kind detail]
+  (if (= kind :dirty)
+      "Unsaved changes"
+      (= kind :saved)
+      "Saved"
+      (= kind :conflict)
+      (.. "Conflict: " (if (= detail nil) "file changed externally" detail))
+      (= kind :error)
+      (.. "Error: " (if (= detail nil) "save failed" detail))
+      (= kind :clean)
+      "Clean"
+      (error (.. "unsupported fs-file-viewer status: " (tostring kind)))))
 
-(fn update-window-text [view window]
-  (view.content-text:set-text (text-if-present window))
-  (view.metadata-text:set-text (metadata-label window)))
+(fn set-status [view kind detail]
+  (set view.status-kind kind)
+  (view.status-text:set-text (status-label kind detail)))
 
-(fn previous-button-click [button _event]
-  (button.viewer-node:previous-window))
+(fn update-dirty-status [input _buffer]
+  (set-status input.viewer-view :dirty))
 
-(fn next-button-click [button _event]
-  (button.viewer-node:next-window))
+(fn save-view [view]
+  (assert view "save-view requires view")
+  (assert view.virtual-input "save-view requires view.virtual-input")
+  (if (changed-since-baseline? view.virtual-input.buffer)
+      (do
+        (set-status view :conflict "file changed since token")
+        false)
+      (do
+        (local buffer view.virtual-input.buffer)
+        (local (ok result) (pcall buffer.save buffer))
+        (if ok
+            (do
+              (view.virtual-input:refresh-viewport)
+              (set-status view :saved)
+              result)
+            (do
+              (local message (tostring result))
+              (if (string.find message "file changed since token" 1 true)
+                  (set-status view :conflict message)
+                  (set-status view :error message))
+              false)))))
 
-(fn refresh-button-click [button _event]
-  (button.viewer-node:refresh-window))
+(fn save-button-click [button _event]
+  (save-view button.viewer-view))
+
+(fn save-key? [payload]
+  (and payload
+       (Modifiers.ctrl-held? payload.mod)
+       (if (= payload.key (string.byte "s"))
+           true
+           (= payload.key (string.byte "S"))
+           true
+           false)))
+
+(fn route-key-down [view original-on-key-down input payload]
+  (if (save-key? payload)
+      (if (save-view view) true false)
+      (original-on-key-down input payload)))
 
 (fn open-external-click [button _event]
   (button.viewer-node:open-external))
 
-(fn build-previous-button [ctx]
-  ctx.fs_file_viewer_previous_button)
-
-(fn build-next-button [ctx]
-  ctx.fs_file_viewer_next_button)
-
-(fn build-refresh-button [ctx]
-  ctx.fs_file_viewer_refresh_button)
+(fn build-save-button [ctx]
+  ctx.fs_file_viewer_save_button)
 
 (fn build-edit-button [ctx]
   ctx.fs_file_viewer_edit_button)
@@ -47,17 +91,18 @@
 (fn build-controls [ctx]
   ctx.fs_file_viewer_controls)
 
-(fn build-metadata-text [ctx]
-  ctx.fs_file_viewer_metadata_text)
+(fn build-status-text [ctx]
+  ctx.fs_file_viewer_status_text)
 
-(fn build-content-button [ctx]
-  ctx.fs_file_viewer_content_button)
-
-(fn build-content-text [ctx]
-  ctx.fs_file_viewer_content_text)
+(fn build-virtual-input [ctx]
+  ctx.fs_file_viewer_virtual_input)
 
 (fn set-viewer-node [button node]
   (set button.viewer-node node)
+  button)
+
+(fn set-viewer-view [button view]
+  (set button.viewer-view view)
   button)
 
 (fn make-button [ctx node text handler]
@@ -68,22 +113,19 @@
      ctx)
     node))
 
-(fn make-content-button [ctx node]
-  (set-viewer-node
-    ((Button {:child build-content-text
-              :xalign :start
-              :yalign :start
-              :on-double-click open-external-click})
+(fn make-save-button [ctx view]
+  (set-viewer-view
+    ((Button {:text "Save"
+              :variant :ghost
+              :on-click save-button-click})
      ctx)
-    node))
+    view))
 
 (fn make-controls [ctx]
   ((Flex {:axis 1
           :xspacing 0.3
           :yalign :center
-          :children [(FlexChild build-previous-button 0)
-                     (FlexChild build-next-button 0)
-                     (FlexChild build-refresh-button 0)
+          :children [(FlexChild build-save-button 0)
                      (FlexChild build-edit-button 0)]})
    ctx))
 
@@ -92,57 +134,56 @@
           :xalign :stretch
           :yspacing 0.35
           :children [(FlexChild build-controls 0)
-                     (FlexChild build-metadata-text 0)
-                     (FlexChild build-content-button 1)]})
+                     (FlexChild build-status-text 0)
+                     (FlexChild build-virtual-input 1)]})
    ctx))
 
 (fn clear-context-fields [ctx]
-  (set ctx.fs_file_viewer_previous_button nil)
-  (set ctx.fs_file_viewer_next_button nil)
-  (set ctx.fs_file_viewer_refresh_button nil)
+  (set ctx.fs_file_viewer_save_button nil)
   (set ctx.fs_file_viewer_edit_button nil)
   (set ctx.fs_file_viewer_controls nil)
-  (set ctx.fs_file_viewer_metadata_text nil)
-  (set ctx.fs_file_viewer_content_button nil)
-  (set ctx.fs_file_viewer_content_text nil))
+  (set ctx.fs_file_viewer_status_text nil)
+  (set ctx.fs_file_viewer_virtual_input nil))
 
 (fn FsFileViewerNodeView [node _opts]
   (fn build [ctx]
     (local build-ctx ctx)
     (assert build-ctx "FsFileViewerNodeView requires a build context")
-    (local content-text ((Text {:text ""}) build-ctx))
-    (local metadata-text ((Text {:text (metadata-label nil)}) build-ctx))
-    (set build-ctx.fs_file_viewer_content_text content-text)
-    (local previous-button (make-button build-ctx node "Previous" previous-button-click))
-    (local next-button (make-button build-ctx node "Next" next-button-click))
-    (local refresh-button (make-button build-ctx node "Refresh" refresh-button-click))
+    (assert node.buffer "FsFileViewerNodeView requires node.buffer")
+    (local status-text ((Text {:text (status-label :clean)}) build-ctx))
+    (local view {:virtual-input nil
+                 :save-button nil
+                 :edit-button nil
+                 :status-text status-text
+                 :layout nil
+                 :status-kind :clean})
+    (local virtual-input ((VirtualInput {:buffer node.buffer
+                                         :line-count 24
+                                         :column-count 100
+                                         :on-change update-dirty-status})
+                          build-ctx))
+    (set virtual-input.viewer-view view)
+    (set view.virtual-input virtual-input)
+    (local original-on-key-down virtual-input.on-key-down)
+    (set virtual-input.save (fn [_input] (save-view view)))
+    (set virtual-input.on-key-down
+         (fn [input payload]
+           (route-key-down view original-on-key-down input payload)))
+    (local save-button (make-save-button build-ctx view))
     (local edit-button (make-button build-ctx node "Edit externally" open-external-click))
-    (set build-ctx.fs_file_viewer_previous_button previous-button)
-    (set build-ctx.fs_file_viewer_next_button next-button)
-    (set build-ctx.fs_file_viewer_refresh_button refresh-button)
+    (set build-ctx.fs_file_viewer_virtual_input virtual-input)
+    (set build-ctx.fs_file_viewer_save_button save-button)
     (set build-ctx.fs_file_viewer_edit_button edit-button)
-    (local content-button (make-content-button build-ctx node))
-    (set build-ctx.fs_file_viewer_content_button content-button)
-    (set build-ctx.fs_file_viewer_metadata_text metadata-text)
+    (set build-ctx.fs_file_viewer_status_text status-text)
     (local controls (make-controls build-ctx))
     (set build-ctx.fs_file_viewer_controls controls)
     (local root (make-root build-ctx))
     (clear-context-fields build-ctx)
-    (local view {:previous-button previous-button
-                 :next-button next-button
-                 :refresh-button refresh-button
-                 :edit-button edit-button
-                 :content-button content-button
-                 :content-text content-text
-                 :metadata-text metadata-text
-                 :layout root.layout})
-    (local handler (fn [window]
-                    (update-window-text view window)))
-    (node.window-changed:connect handler)
-    (node:refresh-window)
+    (set view.save-button save-button)
+    (set view.edit-button edit-button)
+    (set view.layout root.layout)
     (set view.drop
          (fn [_self]
-           (node.window-changed:disconnect handler true)
            (root:drop)))
     view))
 

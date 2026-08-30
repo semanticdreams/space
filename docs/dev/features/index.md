@@ -17,6 +17,7 @@ Detailed design and implementation notes for major feature systems.
 - [Graph Notebooks](./graph-notebooks)
 - [Hot Reload Units](./hot-reload-units)
 - [Kernel System](./kernel-system)
+- [Lazy Text Buffer and Virtual Input](./lazy-text-buffer-virtual-input)
 - [OpenCode Agent Workflow](./opencode-agent-workflow)
 - [Layout Widget Engine](./layout-widget-engine)
 - [Panel Transfer System](./panel-transfer-system)

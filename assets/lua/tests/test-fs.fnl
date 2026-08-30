@@ -48,6 +48,41 @@
   (assert (string-contains? err "fs.read_text_window")
           (.. description ": expected fs.read_text_window in " (tostring err))))
 
+(fn assert-read-byte-range-error [description f]
+  (local (ok err) (pcall f))
+  (assert (not ok) description)
+  (assert (string-contains? err "fs.read_byte_range")
+          (.. description ": expected fs.read_byte_range in " (tostring err))))
+
+(fn assert-atomic-replace-segment-error [description f file token]
+  (local (ok err) (pcall f file token))
+  (assert (not ok) description)
+  (assert (string-contains? err "fs.atomic_replace_if_current")
+          (.. description ": expected fs.atomic_replace_if_current in " (tostring err))))
+
+(fn replace-with-stale-token [file token]
+  (fs.atomic-replace-if-current file [{:text "new"}] token))
+
+(fn replace-with-negative-offset [file token]
+  (fs.atomic-replace-if-current file [{:source-path file :offset -1 :bytes 1}] token))
+
+(fn replace-with-negative-byte-count [file token]
+  (fs.atomic-replace-if-current file [{:source-path file :offset 0 :bytes -1}] token))
+
+(fn replace-with-missing-source-path [file token]
+  (fs.atomic-replace-if-current file [{:offset 0 :bytes 1}] token))
+
+(fn replace-with-empty-segment [file token]
+  (fs.atomic-replace-if-current file [{}] token))
+
+(fn replace-with-single-segment-table [file token]
+  (fs.atomic-replace-if-current file {:text "new"} token))
+
+(fn replace-with-sparse-segment-table [file token]
+  (local segments [])
+  (tset segments 2 {:text "later"})
+  (fs.atomic-replace-if-current file segments token))
+
 (fn space-bin []
   (if (fs.exists "./build/space")
       "./build/space"
@@ -147,7 +182,176 @@
   (assert-read-text-window-error "negative offset should fail"
                                  (fn [] (fs.read-text-window "/tmp/space-fs-window.txt" -1 1)))
   (assert-read-text-window-error "zero max-bytes should fail"
-                                 (fn [] (fs.read-text-window "/tmp/space-fs-window.txt" 0 0))))
+                                  (fn [] (fs.read-text-window "/tmp/space-fs-window.txt" 0 0))))
+
+(fn fs-file-token-reports-regular-file-identity []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "token.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (assert (= token.path (fs.absolute file)))
+    (assert token.exists)
+    (assert token.is-file)
+    (assert (= token.size 6))
+    (assert token.modified)
+    (assert token.permissions))))
+
+(fn fs-file-token-repeated-calls-are-stable-for-unchanged-file []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "stable-token.txt"))
+    (fs.write-file file "abcdef")
+    (local baseline (fs.file-token file))
+    (assert (= (type baseline.modified) :string) "file-token modified should be stable string primitive")
+    (assert (= (type baseline.change-id) :string) "file-token change-id should be stable string primitive")
+    (for [_ 1 100]
+      (local current (fs.file-token file))
+      (assert (= current.path baseline.path))
+      (assert (= current.exists baseline.exists))
+      (assert (= current.is-file baseline.is-file))
+      (assert (= current.size baseline.size))
+      (assert (= current.permissions baseline.permissions))
+      (assert (= current.modified baseline.modified))
+      (assert (= current.change-id baseline.change-id))))))
+
+(fn fs-file-token-detects-immediate-same-size-replacement []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "same-size-token.txt"))
+    (fs.write-file file "abcdef")
+    (local baseline (fs.file-token file))
+    (fs.write-file file "uvwxyz")
+    (local current (fs.file-token file))
+    (assert (not= current.change-id baseline.change-id)
+            "same-size replacement should change bounded file token identity"))))
+
+(fn fs-read-byte-range-returns-bounded-raw-bytes []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "range.txt"))
+    (fs.write-file file "abcdef")
+    (local range (fs.read-byte-range file 2 3))
+    (assert (= range.offset 2))
+    (assert (= range.next-offset 5))
+    (assert (= range.size 6))
+    (assert (= range.bytes-read 3))
+    (assert (= range.bytes "cde"))
+    (assert (not range.eof))
+    (fs.write-file file (repeated-text "a" 262145))
+    (local capped (fs.read-byte-range file 0 999999))
+    (assert (= capped.bytes-read 262144))
+    (assert (= (# capped.bytes) 262144))
+    (assert (= capped.next-offset 262144)))))
+
+(fn fs-read-byte-range-rejects-invalid-arguments []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:read-byte-range-invalid-argument-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "read-byte-range invalid-argument child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn read-byte-range-invalid-argument-main []
+  (assert-read-byte-range-error "empty path should fail"
+                                (fn [] (fs.read-byte-range "" 0 1)))
+  (assert-read-byte-range-error "negative offset should fail"
+                                (fn [] (fs.read-byte-range "/tmp/space-fs-range.txt" -1 1)))
+  (assert-read-byte-range-error "zero max-bytes should fail"
+                                (fn [] (fs.read-byte-range "/tmp/space-fs-range.txt" 0 0))))
+
+(fn fs-atomic-replace-if-current-writes-text-and-source-segments []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "atomic.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (local result
+      (fs.atomic-replace-if-current
+        file
+        [{:source-path file :offset 0 :bytes 2}
+         {:text "XY"}
+         {:source-path file :offset 4 :bytes 2}]
+        token))
+    (assert result.saved)
+    (assert (= result.path (fs.absolute file)))
+    (assert (= (fs.read-file file) "abXYef"))
+    (assert result.token)
+    (assert (= result.token.size 6)))))
+
+(fn fs-atomic-replace-if-current-rejects-stale-token []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-stale-token-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "atomic-replace stale-token child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn atomic-replace-stale-token-main []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "stale.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (fs.write-file file "changed")
+    (assert-atomic-replace-segment-error "stale token should fail" replace-with-stale-token file token))))
+
+(fn write-raced-file [file]
+  (fn []
+    (fs.write-file file "raced")))
+
+(fn fs-atomic-replace-if-current-rejects-modification-before-final-replace []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-raced-final-replace-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "atomic-replace raced final replace child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn atomic-replace-raced-final-replace-main []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "raced.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (local (ok err)
+      (pcall fs.atomic-replace-if-current
+             file
+             [{:text "replacement"}]
+             token
+             {:test-before-final-validate (write-raced-file file)}))
+    (assert (not ok) "save should reject modification after temp write and before final replace")
+    (assert (string-contains? err "fs.atomic_replace_if_current: file changed since token")
+            (.. "expected final token conflict error, got " (tostring err)))
+    (assert (= (fs.read-file file) "raced")
+            "detected stale save must preserve external content and not publish replacement"))))
+
+(fn fs-atomic-replace-if-current-rejects-malformed-segments []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-invalid-segment-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "atomic-replace invalid-segment child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn atomic-replace-invalid-segment-main []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "invalid-segment.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (assert-atomic-replace-segment-error "negative offset should fail" replace-with-negative-offset file token)
+    (assert-atomic-replace-segment-error "negative byte count should fail" replace-with-negative-byte-count file token)
+    (assert-atomic-replace-segment-error "missing source path should fail" replace-with-missing-source-path file token)
+    (assert-atomic-replace-segment-error "segment without text or source path should fail" replace-with-empty-segment file token)
+    (assert-atomic-replace-segment-error "single segment table should fail" replace-with-single-segment-table file token)
+    (assert (= (fs.read-file file) "abcdef"))
+    (assert-atomic-replace-segment-error "sparse segment table should fail" replace-with-sparse-segment-table file token)
+    (assert (= (fs.read-file file) "abcdef")))))
 
 (table.insert tests {:name "fs write/read/stat" :fn fs-write-read-stat})
 (table.insert tests {:name "fs list_dir filters hidden files" :fn fs-list-dir-hidden-filter})
@@ -157,6 +361,15 @@
 (table.insert tests {:name "fs read-text-window sanitizes display text" :fn fs-read-text-window-sanitizes-display-text})
 (table.insert tests {:name "fs read-text-window preserves trailing ascii after invalid lead" :fn fs-read-text-window-preserves-trailing-ascii-after-invalid-lead})
 (table.insert tests {:name "fs read-text-window rejects invalid arguments" :fn fs-read-text-window-rejects-invalid-arguments})
+(table.insert tests {:name "fs file-token reports regular file identity" :fn fs-file-token-reports-regular-file-identity})
+(table.insert tests {:name "fs file-token repeated calls are stable for unchanged file" :fn fs-file-token-repeated-calls-are-stable-for-unchanged-file})
+(table.insert tests {:name "fs file-token detects immediate same-size replacement" :fn fs-file-token-detects-immediate-same-size-replacement})
+(table.insert tests {:name "fs read-byte-range returns bounded raw bytes" :fn fs-read-byte-range-returns-bounded-raw-bytes})
+(table.insert tests {:name "fs read-byte-range rejects invalid arguments" :fn fs-read-byte-range-rejects-invalid-arguments})
+(table.insert tests {:name "fs atomic-replace-if-current writes text and source segments" :fn fs-atomic-replace-if-current-writes-text-and-source-segments})
+(table.insert tests {:name "fs atomic-replace-if-current rejects stale token" :fn fs-atomic-replace-if-current-rejects-stale-token})
+(table.insert tests {:name "fs atomic-replace-if-current rejects modification before final replace" :fn fs-atomic-replace-if-current-rejects-modification-before-final-replace})
+(table.insert tests {:name "fs atomic-replace-if-current rejects malformed segments" :fn fs-atomic-replace-if-current-rejects-malformed-segments})
 
 (local main
   (fn []
@@ -167,4 +380,8 @@
 {:name "fs"
   :tests tests
   :main main
-  :invalid-argument-main invalid-argument-main}
+  :invalid-argument-main invalid-argument-main
+  :read-byte-range-invalid-argument-main read-byte-range-invalid-argument-main
+  :atomic-replace-stale-token-main atomic-replace-stale-token-main
+  :atomic-replace-raced-final-replace-main atomic-replace-raced-final-replace-main
+  :atomic-replace-invalid-segment-main atomic-replace-invalid-segment-main}

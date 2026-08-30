@@ -12,13 +12,15 @@ File type detection is conservative and extension-based for this iteration. View
 - `:file-viewer` materializes `fs-file-viewer:<absolute-path>` and adds an explicit edge from the file `FsNode`.
 - `:module` materializes `fnl-module:<absolute-path>`, `cpp-module:<absolute-path>`, or `text-module:<absolute-path>` and adds an explicit edge.
 
-## Bounded internal viewer
+## Editable lazy internal viewer
 
-`fs-file-viewer:<absolute-path>` is a UX-purpose graph node. It owns viewer state such as current byte offset, previous offsets, and current bounded window metadata. It does not own or persist file content.
+`fs-file-viewer:<absolute-path>` is a UX-purpose graph node backed by `LazyTextSource.file`, `LazyTextBuffer`, and the `VirtualInput` widget. It opens regular text/source files as editable lazy text without loading the whole file into memory and without serializing file contents into graph state.
 
-The viewer reads through `fs.read-text-window(path, offset, max-bytes)`, which caps reads at 262144 bytes, seeks to the requested zero-based byte offset, sanitizes display text, and returns bounded window metadata. Viewer UI must not use `Input` or `fs.read-file`.
+The viewer UI uses `VirtualInput` for internal editing. `Input` and `InputModel` remain for small in-memory controls and must not be used for file-scale text. `VirtualInput` renders only visible rows from bounded viewport snapshots and routes edits to the lazy piece-table buffer.
 
-Double-clicking the viewer content opens the external editor. Internal editing and saving are not part of this feature.
+The viewer provides explicit `Save` and `Edit externally` controls. The external-editor button remains available because double-click behavior is not the primary file-opening affordance for this lazy editable viewer.
+
+Saving follows a pragmatic Neovim/Vim-style contract: the viewer does not blindly overwrite known stale external changes, and detected conflicts leave the user's in-memory edits dirty. Before saving, the viewer checks whether the file token still matches the buffer baseline; the buffer then saves through `fs.atomic-replace-if-current`, which revalidates the token after writing the temporary replacement and immediately before `rename`. POSIX/Linux cannot prevent a non-cooperating writer from changing the path in the tiny gap between final validation and `rename`, so this is normal stale-change detection rather than strict race-free CAS.
 
 ## Persistence invariant
 
