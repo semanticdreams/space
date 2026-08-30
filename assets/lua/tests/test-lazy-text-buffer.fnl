@@ -289,6 +289,31 @@
   (local raw (fs.read-byte-range file 0 16))
   (assert (= raw.bytes (.. "Zab" (string.char 255) "cd")) "save must preserve untouched invalid original byte"))
 
+(fn lazy-text-buffer-vertical-move-clamps-invalid-row-column-to-source-end []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "invalid-vertical.bin"))
+  (fs.write-file file (.. "abcdef\n" "a" (string.char 255) "b"))
+  (local buffer (buffer-for-file file {:chunk-bytes 8}))
+  (buffer:move-caret-to-line-column 1 10)
+  (assert (= buffer.cursor-byte buffer.size)
+          (.. "wide target column should clamp to source/document end, cursor=" buffer.cursor-byte " size=" buffer.size)))
+
+(fn lazy-text-buffer-renders-invalid-lead-before-ascii-as-replacement []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "invalid-lead-ascii.bin"))
+  (fs.write-file file (.. "a" (string.char 0xE2) "("))
+  (local buffer (buffer-for-file file {:chunk-bytes 8}))
+  (local row (. (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}) :rows 1))
+  (assert (= row.text "a�(") "invalid lead byte should not swallow trailing ASCII")
+  (assert (= (. row.column-byte-offsets 1) 0))
+  (assert (= (. row.column-byte-offsets 2) 1))
+  (assert (= (. row.column-byte-offsets 3) 2) "replacement should advance only over invalid lead byte")
+  (assert (= (. row.column-byte-offsets 4) 3))
+  (buffer:move-caret-to-line-column 0 2)
+  (assert (= buffer.cursor-byte 2) "caret after replacement should be before trailing ASCII")
+  (buffer:move-caret-to-line-column 0 3)
+  (assert (= buffer.cursor-byte 3) "caret after trailing ASCII should reach source EOF"))
+
 (fn lazy-text-buffer-renders-malformed-semantic-utf8-as-replacement []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "invalid-semantic.bin"))
@@ -426,6 +451,8 @@
 (table.insert tests {:name "lazy text buffer selection copies large original span completely" :fn lazy-text-buffer-selection-copies-large-original-span-completely})
 (table.insert tests {:name "lazy text buffer preserves invalid original bytes when untouched" :fn lazy-text-buffer-preserves-invalid-original-bytes-when-untouched})
 (table.insert tests {:name "lazy text buffer renders invalid original bytes as replacement" :fn lazy-text-buffer-renders-invalid-original-bytes-as-replacement})
+(table.insert tests {:name "lazy text buffer vertical move clamps invalid row column to source end" :fn lazy-text-buffer-vertical-move-clamps-invalid-row-column-to-source-end})
+(table.insert tests {:name "lazy text buffer renders invalid lead before ASCII as replacement" :fn lazy-text-buffer-renders-invalid-lead-before-ascii-as-replacement})
 (table.insert tests {:name "lazy text buffer renders malformed semantic UTF-8 as replacement" :fn lazy-text-buffer-renders-malformed-semantic-utf8-as-replacement})
 (table.insert tests {:name "lazy text buffer renders truncated EOF UTF-8 as replacement" :fn lazy-text-buffer-renders-truncated-eof-utf8-as-replacement})
 (table.insert tests {:name "lazy text buffer save streams pieces through atomic replace" :fn lazy-text-buffer-save-streams-pieces-through-atomic-replace})

@@ -41,13 +41,25 @@
   (local (ok cp) (pcall utf8.codepoint sequence))
   (if ok cp nil))
 
+(fn valid-truncated-utf8-prefix? [text index expected-len]
+  (local total (# text))
+  (var valid true)
+  (when (not (and expected-len (> (+ index expected-len -1) total)))
+    (set valid false))
+  (var offset 1)
+  (while (and valid (<= (+ index offset) total))
+    (when (not (utf8-continuation? (string.byte text (+ index offset))))
+      (set valid false))
+    (set offset (+ offset 1)))
+  valid)
+
 (fn utf8-source-advance [text index]
   (local expected-len (utf8-sequence-length (string.byte text index)))
   (local total (# text))
   (local complete-len (complete-utf8-sequence-length-at text index))
   (if (not expected-len)
       1
-      (> (+ index expected-len -1) total)
+      (valid-truncated-utf8-prefix? text index expected-len)
       (- total index -1)
       (and complete-len (semantic-utf8-codepoint text index complete-len))
       complete-len
@@ -252,7 +264,7 @@
           (table.insert display-offsets display-end)
           (set index (+ index complete-len))
           (set count (+ count 1)))
-        (and expected-len (> (+ index expected-len -1) total))
+        (valid-truncated-utf8-prefix? text index expected-len)
         (do
           (local replacement "�")
           (table.insert parts replacement)
@@ -505,9 +517,9 @@
         (local row (build-row buffer line start column))
         (local offsets row.column-byte-offsets)
         (local byte-offset (if (= (. offsets (+ column 1)) nil)
-                             (# row.text)
+                             (. offsets (# offsets))
                              (. offsets (+ column 1))))
-        (set buffer.cursor-byte (+ start byte-offset)))
+        (set buffer.cursor-byte (clamp (+ start byte-offset) 0 buffer.size)))
       (set buffer.cursor-byte (clamp start 0 buffer.size)))
   true)
 
