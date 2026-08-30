@@ -56,12 +56,31 @@
 (fn make-piece [source offset bytes]
   {:source source :offset offset :bytes bytes})
 
+(fn read-original-piece-text [piece buffer]
+  (local parts [])
+  (var offset piece.offset)
+  (var remaining piece.bytes)
+  (while (> remaining 0)
+    (local request-bytes (math.min buffer.chunk-bytes remaining))
+    (local range (buffer.source:read-range offset request-bytes))
+    (when (not (= (type range.bytes) :string))
+      (error "LazyTextBuffer read-composed-range: source returned non-string bytes"))
+    (when (not (= (type range.bytes-read) :number))
+      (error "LazyTextBuffer read-composed-range: source returned invalid bytes-read"))
+    (local bytes-read range.bytes-read)
+    (when (<= bytes-read 0)
+      (error "LazyTextBuffer read-composed-range: source returned no bytes before requested range was satisfied"))
+    (when (not (= bytes-read (# range.bytes)))
+      (error "LazyTextBuffer read-composed-range: source bytes-read does not match returned bytes"))
+    (table.insert parts range.bytes)
+    (set offset (+ offset bytes-read))
+    (set remaining (- remaining bytes-read)))
+  (table.concat parts ""))
+
 (fn piece-text [piece buffer]
   (if (= piece.source :add)
       (string.sub buffer.add-buffer (+ piece.offset 1) (+ piece.offset piece.bytes))
-      (do
-        (local range (buffer.source:read-range piece.offset piece.bytes))
-        range.bytes)))
+      (read-original-piece-text piece buffer)))
 
 (fn total-bytes [pieces]
   (var total 0)

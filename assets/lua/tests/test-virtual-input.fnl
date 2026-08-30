@@ -208,6 +208,9 @@
   (assert input.save-results "record-save requires input.save-results")
   (table.insert input.save-results result))
 
+(fn count-change [input _buffer]
+  (set input.change-count (+ input.change-count 1)))
+
 (fn virtual-input-requires-explicit-build-context []
   (local (ok err) (pcall expect-build-without-context))
   (assert (not ok) "VirtualInput should reject missing build context")
@@ -324,6 +327,38 @@
   (assert (= (snapshot-text buffer) "aZde") "selection bytes should be replaced by inserted text")
   (input:drop))
 
+(fn virtual-input-backspace-deletes-active-selection []
+  (local buffer (lazy-buffer "backspace-selection" "abcdef"))
+  (buffer:move-caret-to-byte 4)
+  (buffer:set-selection 1 4)
+  (local input (build-input {:buffer buffer
+                             :line-count 1
+                             :column-count 10
+                             :on-change count-change}))
+  (set input.change-count 0)
+  (assert (input:on-key-down {:key 8}) "Backspace should delete active selection")
+  (assert (= (snapshot-text buffer) "aef") "Backspace should remove selected bytes")
+  (assert (= buffer.cursor-byte 1) "caret should move to selection start")
+  (assert (not buffer.selection) "selection should clear after delete")
+  (assert (= input.change-count 1) "selection delete should notify once")
+  (input:drop))
+
+(fn virtual-input-delete-deletes-active-selection []
+  (local buffer (lazy-buffer "delete-selection" "abcdef"))
+  (buffer:move-caret-to-byte 4)
+  (buffer:set-selection 1 4)
+  (local input (build-input {:buffer buffer
+                             :line-count 1
+                             :column-count 10
+                             :on-change count-change}))
+  (set input.change-count 0)
+  (assert (input:on-key-down {:key 127}) "Delete should delete active selection")
+  (assert (= (snapshot-text buffer) "aef") "Delete should remove selected bytes")
+  (assert (= buffer.cursor-byte 1) "caret should move to selection start")
+  (assert (not buffer.selection) "selection should clear after delete")
+  (assert (= input.change-count 1) "selection delete should notify once")
+  (input:drop))
+
 (fn virtual-input-caret-navigation-scrolls-to-target-row []
   (local rows [(row 0 "zero" 0) (row 1 "one" 10) (row 2 "two" 20) (row 3 "three" 30)])
   (local buffer (make-buffer {:rows rows :cursor-byte 10}))
@@ -386,6 +421,8 @@
 (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
 (table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events})
 (table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection})
+(table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
+(table.insert tests {:name "VirtualInput Delete deletes active selection" :fn virtual-input-delete-deletes-active-selection})
 (table.insert tests {:name "VirtualInput caret navigation scrolls to target row" :fn virtual-input-caret-navigation-scrolls-to-target-row})
 (table.insert tests {:name "VirtualInput horizontal navigation preserves UTF-8 boundaries" :fn virtual-input-horizontal-navigation-preserves-utf8-boundaries})
 (table.insert tests {:name "VirtualInput horizontal crossing newline scrolls viewport" :fn virtual-input-horizontal-crossing-newline-scrolls-viewport})

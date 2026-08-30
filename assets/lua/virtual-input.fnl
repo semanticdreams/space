@@ -208,21 +208,37 @@
     (self:refresh-viewport))
   changed)
 
-(fn delete-before-cursor [self]
-  (local changed (self.buffer:delete-before-cursor))
+(fn delete-active-selection [self]
+  (when (not self.buffer.delete-selection)
+    (error "VirtualInput requires buffer:delete-selection for selected delete"))
+  (local changed (self.buffer:delete-selection))
   (when changed
     (set self.selection-anchor-byte self.buffer.cursor-byte)
     (notify-change self)
     (self:refresh-viewport))
   changed)
 
+(fn delete-before-cursor [self]
+  (if self.buffer.selection
+      (delete-active-selection self)
+      (do
+        (local changed (self.buffer:delete-before-cursor))
+        (when changed
+          (set self.selection-anchor-byte self.buffer.cursor-byte)
+          (notify-change self)
+          (self:refresh-viewport))
+        changed)))
+
 (fn delete-at-cursor [self]
-  (local changed (self.buffer:delete-at-cursor))
-  (when changed
-    (set self.selection-anchor-byte self.buffer.cursor-byte)
-    (notify-change self)
-    (self:refresh-viewport))
-  changed)
+  (if self.buffer.selection
+      (delete-active-selection self)
+      (do
+        (local changed (self.buffer:delete-at-cursor))
+        (when changed
+          (set self.selection-anchor-byte self.buffer.cursor-byte)
+          (notify-change self)
+          (self:refresh-viewport))
+        changed)))
 
 (fn update-horizontal-selection [self anchor extend-selection?]
   (if extend-selection?

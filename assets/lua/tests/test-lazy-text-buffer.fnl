@@ -216,6 +216,20 @@
   (buffer:set-selection 2 7)
   (assert (= (buffer:get-selected-text) "cXYde")))
 
+(fn lazy-text-buffer-selection-copies-large-original-span-completely []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "large-selection.txt"))
+  (local parts [])
+  (for [_ 1 300000]
+    (table.insert parts "a"))
+  (fs.write-file file (table.concat parts ""))
+  (local buffer (buffer-for-file file {:chunk-bytes 65536}))
+  (buffer:set-selection 0 300000)
+  (local selected (buffer:get-selected-text))
+  (assert (= (# selected) 300000) (.. "large original selection should not be truncated; bytes=" (# selected)))
+  (assert (= (string.sub selected 1 1) "a"))
+  (assert (= (string.sub selected 300000 300000) "a")))
+
 (fn lazy-text-buffer-preserves-invalid-original-bytes-when-untouched []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "invalid.bin"))
@@ -332,6 +346,7 @@
 (table.insert tests {:name "lazy text buffer bounds missing line discovery in newline-free file" :fn lazy-text-buffer-bounds-missing-line-discovery-in-newline-free-file})
 (table.insert tests {:name "lazy text buffer inserts and deletes across piece boundaries" :fn lazy-text-buffer-inserts-and-deletes-across-piece-boundaries})
 (table.insert tests {:name "lazy text buffer selection copies across original and added pieces" :fn lazy-text-buffer-selection-copies-across-original-and-added-pieces})
+(table.insert tests {:name "lazy text buffer selection copies large original span completely" :fn lazy-text-buffer-selection-copies-large-original-span-completely})
 (table.insert tests {:name "lazy text buffer preserves invalid original bytes when untouched" :fn lazy-text-buffer-preserves-invalid-original-bytes-when-untouched})
 (table.insert tests {:name "lazy text buffer save streams pieces through atomic replace" :fn lazy-text-buffer-save-streams-pieces-through-atomic-replace})
 (table.insert tests {:name "lazy text buffer save reports external modification conflict" :fn lazy-text-buffer-save-reports-external-modification-conflict})
