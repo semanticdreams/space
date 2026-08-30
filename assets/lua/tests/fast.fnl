@@ -134,6 +134,7 @@
     :tests.test-focus
     :tests.test-input-model
     :tests.test-lazy-text-buffer
+    :tests.test-virtual-input
     :tests.test-dial-type
     :tests.test-input-dial-type
     :tests.test-input

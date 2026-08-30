@@ -262,6 +262,25 @@
     (set buffer.line-anchors [{:line 0 :byte 0}])
     true))
 
+(fn previous-codepoint-boundary [buffer byte]
+  (if (<= byte 0)
+      0
+      (do
+        (var pos (- byte 1))
+        (while (and (> pos 0) (utf8-continuation? (byte-at buffer pos)))
+          (set pos (- pos 1)))
+        pos)))
+
+(fn next-codepoint-boundary [buffer byte]
+  (if (>= byte buffer.size)
+      buffer.size
+      (do
+        (local b (byte-at buffer byte))
+        (local seq-len (utf8-sequence-length b))
+        (when (not seq-len)
+          (error "LazyTextBuffer cursor is not on a UTF-8 boundary"))
+        (math.min buffer.size (+ byte seq-len)))))
+
 (fn clip-row-column [row start-column requested-columns]
   (local full-text row.text)
   (local full-cps row.codepoints)
@@ -323,15 +342,38 @@
   (set buffer.line-anchors [{:line 0 :byte 0}])
   true)
 
+(fn delete-selection [buffer]
+  (if buffer.selection
+      (do
+        (local start buffer.selection.start-byte)
+        (local finish buffer.selection.end-byte)
+        (set buffer.selection nil)
+        (if (delete-range buffer start finish) true false))
+      false))
+
 (fn delete-before-cursor [buffer]
   (if (<= buffer.cursor-byte 0)
       false
-      (if (delete-range buffer (- buffer.cursor-byte 1) buffer.cursor-byte) true false)))
+      (if (delete-range buffer (previous-codepoint-boundary buffer buffer.cursor-byte) buffer.cursor-byte) true false)))
 
 (fn delete-at-cursor [buffer]
   (if (>= buffer.cursor-byte buffer.size)
       false
-      (if (delete-range buffer buffer.cursor-byte (+ buffer.cursor-byte 1)) true false)))
+      (if (delete-range buffer buffer.cursor-byte (next-codepoint-boundary buffer buffer.cursor-byte)) true false)))
+
+(fn move-caret-horizontal [buffer delta]
+  (assert (= (type delta) :number) "LazyTextBuffer move-caret-horizontal requires numeric delta")
+  (local steps (math.abs (math.floor delta)))
+  (var moved false)
+  (for [_ 1 steps]
+    (local current buffer.cursor-byte)
+    (local next (if (< delta 0)
+                  (previous-codepoint-boundary buffer current)
+                  (next-codepoint-boundary buffer current)))
+    (when (not (= next current))
+      (set buffer.cursor-byte next)
+      (set moved true)))
+  moved)
 
 (fn move-caret-to-byte [buffer byte]
   (set buffer.cursor-byte (clamp byte 0 buffer.size))
@@ -421,10 +463,12 @@
    :selection nil
    :dirty? false
    :line-anchors [{:line 0 :byte 0}]
-   :get-viewport get-viewport
-   :insert-text insert-text
-   :delete-before-cursor delete-before-cursor
-   :delete-at-cursor delete-at-cursor
+    :get-viewport get-viewport
+    :insert-text insert-text
+    :delete-selection delete-selection
+    :delete-before-cursor delete-before-cursor
+    :delete-at-cursor delete-at-cursor
+    :move-caret-horizontal move-caret-horizontal
    :move-caret-to-byte move-caret-to-byte
    :move-caret-to-line-column move-caret-to-line-column
    :scroll-lines scroll-lines

@@ -277,6 +277,26 @@
     insert-invalid-byte
     buffer))
 
+(fn lazy-text-buffer-moves_caret_by_utf8_boundaries []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "utf8-move.txt"))
+  (fs.write-file file "éx")
+  (local buffer (buffer-for-file file {:chunk-bytes 4}))
+  (buffer:move-caret-horizontal 1)
+  (assert (= buffer.cursor-byte 2) "right movement should skip the full multibyte character")
+  (buffer:move-caret-horizontal -1)
+  (assert (= buffer.cursor-byte 0) "left movement should return to previous boundary"))
+
+(fn lazy-text-buffer-deletes_utf8_codepoints []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "utf8-delete.txt"))
+  (fs.write-file file "éx")
+  (local buffer (buffer-for-file file {:chunk-bytes 4}))
+  (buffer:move-caret-to-byte 2)
+  (buffer:delete-before-cursor)
+  (local snapshot (buffer:get-viewport {:line 0 :column 0 :lines 1 :columns 10}))
+  (assert (= (. snapshot.rows 1 :text) "x") "backspace should delete the full multibyte character"))
+
 (table.insert tests {:name "lazy text source reads bounded byte ranges" :fn lazy-text-source-reads-bounded-byte-ranges})
 (table.insert tests {:name "lazy text source records baseline token" :fn lazy-text-source-records-baseline-token})
 (table.insert tests {:name "lazy text buffer viewport reads only requested rows" :fn lazy-text-buffer-viewport-reads-only-requested-rows})
@@ -292,6 +312,8 @@
 (table.insert tests {:name "lazy text buffer save reports external modification conflict" :fn lazy-text-buffer-save-reports-external-modification-conflict})
 (table.insert tests {:name "lazy text buffer save detects same-size external modification" :fn lazy-text-buffer-save-detects-same-size-external-modification})
 (table.insert tests {:name "lazy text buffer rejects invalid UTF-8 inserted text" :fn lazy-text-buffer-rejects-invalid-utf8-inserted-text})
+(table.insert tests {:name "lazy text buffer moves caret by UTF-8 boundaries" :fn lazy-text-buffer-moves_caret_by_utf8_boundaries})
+(table.insert tests {:name "lazy text buffer deletes UTF-8 codepoints" :fn lazy-text-buffer-deletes_utf8_codepoints})
 
 (local main
   (fn []
