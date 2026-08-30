@@ -105,6 +105,18 @@
   (assert (= (. snapshot.rows 3 :newline-bytes) 2))
   (assert (= (. snapshot.rows 4 :text) "dd")))
 
+(fn lazy-text-buffer-direct-line-request-handles-crlf-split-across-chunks []
+  (local root (make-clean-temp-dir))
+  (local file (fs.join-path root "direct-crlf.txt"))
+  (fs.write-file file "aa\r\nbb\ncc")
+  (local buffer (buffer-for-file file {:chunk-bytes 3}))
+  (local snapshot (buffer:get-viewport {:line 2 :column 0 :lines 1 :columns 10}))
+  (local row (. snapshot.rows 1))
+  (assert (= row.text "cc") "direct request after split CRLF should start at later requested line")
+  (assert (= row.start-byte 7) "line 2 should start after aa CRLF and bb LF")
+  (buffer:move-caret-to-line-column 2 0)
+  (assert (= buffer.cursor-byte 7) "caret line 2 column 0 should land at cc start"))
+
 (fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets []
   (local root (make-clean-temp-dir))
   (local file (fs.join-path root "utf8.txt"))
@@ -440,6 +452,7 @@
 (table.insert tests {:name "lazy text source records baseline token" :fn lazy-text-source-records-baseline-token})
 (table.insert tests {:name "lazy text buffer viewport reads only requested rows" :fn lazy-text-buffer-viewport-reads-only-requested-rows})
 (table.insert tests {:name "lazy text buffer indexes LF and CRLF across chunks" :fn lazy-text-buffer-indexes-lf-and-crlf-across-chunks})
+(table.insert tests {:name "lazy text buffer direct line request handles CRLF split across chunks" :fn lazy-text-buffer-direct-line-request-handles-crlf-split-across-chunks})
 (table.insert tests {:name "lazy text buffer maps UTF-8 columns to byte offsets" :fn lazy-text-buffer-maps-utf8-columns-to-byte-offsets})
 (table.insert tests {:name "lazy text buffer clips nonzero UTF-8 columns with relative offsets" :fn lazy-text-buffer-clips-nonzero-utf8-columns-with-relative-offsets})
 (table.insert tests {:name "lazy text buffer clips before multibyte boundary" :fn lazy-text-buffer-clips-before-multibyte-boundary})
