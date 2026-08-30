@@ -296,6 +296,38 @@
     (fs.write-file file "changed")
     (assert-atomic-replace-segment-error "stale token should fail" replace-with-stale-token file token))))
 
+(fn write-raced-file [file]
+  (fn []
+    (fs.write-file file "raced")))
+
+(fn fs-atomic-replace-if-current-rejects-modification-before-final-replace []
+  (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-raced-final-replace-main"]
+                              :env {:SPACE_DISABLE_AUDIO "1"
+                                    :SPACE_ASSETS_PATH (os.getenv "SPACE_ASSETS_PATH")
+                                    :FENNEL_PATH (os.getenv "FENNEL_PATH")
+                                    :FENNEL_MACRO_PATH (os.getenv "FENNEL_MACRO_PATH")}
+                              :timeout 30}))
+  (assert (= result.exit-code 0)
+          (.. "atomic-replace raced final replace child should pass; stdout=" (or result.stdout "")
+              " stderr=" (or result.stderr ""))))
+
+(fn atomic-replace-raced-final-replace-main []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "raced.txt"))
+    (fs.write-file file "abcdef")
+    (local token (fs.file-token file))
+    (local (ok err)
+      (pcall fs.atomic-replace-if-current
+             file
+             [{:text "replacement"}]
+             token
+             {:test-before-final-validate (write-raced-file file)}))
+    (assert (not ok) "save should reject modification after temp write and before final replace")
+    (assert (string-contains? err "fs.atomic_replace_if_current: file changed since token")
+            (.. "expected final token conflict error, got " (tostring err)))
+    (assert (= (fs.read-file file) "raced")
+            "target modification must not be overwritten by final replace"))))
+
 (fn fs-atomic-replace-if-current-rejects-malformed-segments []
   (local result (process.run {:args [(space-bin) "-m" "tests.test-fs:atomic-replace-invalid-segment-main"]
                               :env {:SPACE_DISABLE_AUDIO "1"
@@ -336,6 +368,7 @@
 (table.insert tests {:name "fs read-byte-range rejects invalid arguments" :fn fs-read-byte-range-rejects-invalid-arguments})
 (table.insert tests {:name "fs atomic-replace-if-current writes text and source segments" :fn fs-atomic-replace-if-current-writes-text-and-source-segments})
 (table.insert tests {:name "fs atomic-replace-if-current rejects stale token" :fn fs-atomic-replace-if-current-rejects-stale-token})
+(table.insert tests {:name "fs atomic-replace-if-current rejects modification before final replace" :fn fs-atomic-replace-if-current-rejects-modification-before-final-replace})
 (table.insert tests {:name "fs atomic-replace-if-current rejects malformed segments" :fn fs-atomic-replace-if-current-rejects-malformed-segments})
 
 (local main
@@ -350,4 +383,5 @@
   :invalid-argument-main invalid-argument-main
   :read-byte-range-invalid-argument-main read-byte-range-invalid-argument-main
   :atomic-replace-stale-token-main atomic-replace-stale-token-main
+  :atomic-replace-raced-final-replace-main atomic-replace-raced-final-replace-main
   :atomic-replace-invalid-segment-main atomic-replace-invalid-segment-main}

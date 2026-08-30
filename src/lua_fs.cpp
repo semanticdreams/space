@@ -874,7 +874,7 @@ sol::table fs_atomic_replace_if_current(sol::this_state ts,
                                         const std::string& path,
                                         sol::table segments,
                                         sol::table expected_token,
-                                        sol::optional<sol::table>)
+                                        sol::optional<sol::table> opts)
 {
     if (path.empty()) {
         throw sol::error("fs.atomic_replace_if_current: path must be non-empty");
@@ -892,6 +892,16 @@ sol::table fs_atomic_replace_if_current(sol::this_state ts,
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     fs::path temp_path = parent / (absolute_path.filename().string() + ".space-tmp-" + std::to_string(now));
     fs::perms original_permissions = permissions_from_string(current_token.get<std::string>("permissions"));
+    sol::optional<sol::function> test_before_final_validate;
+    if (opts) {
+        sol::object hook_object = (*opts)["test-before-final-validate"];
+        if (hook_object.valid() && hook_object != sol::lua_nil) {
+            if (!hook_object.is<sol::function>()) {
+                throw sol::error("fs.atomic_replace_if_current: test-before-final-validate must be a function");
+            }
+            test_before_final_validate = hook_object.as<sol::function>();
+        }
+    }
 
     try {
         std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
@@ -955,6 +965,21 @@ sol::table fs_atomic_replace_if_current(sol::this_state ts,
         std::error_code ec;
         fs::permissions(temp_path, original_permissions, fs::perm_options::replace, ec);
         throw_with_message("fs.atomic_replace_if_current", ec);
+
+        if (test_before_final_validate) {
+            sol::protected_function hook = test_before_final_validate.value();
+            sol::protected_function_result hook_result = hook();
+            if (!hook_result.valid()) {
+                sol::error err = hook_result;
+                throw err;
+            }
+        }
+
+        current_token = build_file_token_table(lua, absolute_path);
+        if (!token_matches(current_token, expected_token)) {
+            throw sol::error("fs.atomic_replace_if_current: file changed since token");
+        }
+
         fs::rename(temp_path, absolute_path, ec);
         throw_with_message("fs.atomic_replace_if_current", ec);
     } catch (...) {
