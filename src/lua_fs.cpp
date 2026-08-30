@@ -11,6 +11,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/stat.h>
+#endif
+
 #include "paths.h"
 
 namespace fs = std::filesystem;
@@ -20,6 +24,7 @@ namespace {
 constexpr std::uint64_t kMaxTextWindowBytes = 262144;
 constexpr std::uint64_t kMaxByteRangeBytes = 262144;
 constexpr std::uint64_t kAtomicCopyBufferBytes = 262144;
+constexpr std::uint64_t kTokenFingerprintEdgeBytes = 65536;
 constexpr char kUtf8Replacement[] = "\xEF\xBF\xBD";
 
 std::string normalize_path(const fs::path& path)
@@ -60,6 +65,88 @@ double file_time_to_seconds(const fs::file_time_type& tp)
     auto adjusted = tp - file_now + system_now;
     auto time_point = time_point_cast<system_clock::duration>(adjusted);
     return duration<double>(time_point.time_since_epoch()).count();
+}
+
+std::string file_time_to_token_value(const fs::file_time_type& tp)
+{
+    return std::to_string(tp.time_since_epoch().count());
+}
+
+std::string stat_change_id(const fs::path& path)
+{
+#if defined(__APPLE__)
+    struct stat metadata;
+    if (::stat(path.c_str(), &metadata) != 0) {
+        return std::string();
+    }
+    std::ostringstream out;
+    out << metadata.st_dev << ':'
+        << metadata.st_ino << ':'
+        << metadata.st_size << ':'
+        << metadata.st_mtimespec.tv_sec << ':'
+        << metadata.st_mtimespec.tv_nsec << ':'
+        << metadata.st_ctimespec.tv_sec << ':'
+        << metadata.st_ctimespec.tv_nsec << ':'
+        << metadata.st_mode << ':'
+        << metadata.st_nlink;
+    return out.str();
+#elif defined(__unix__)
+    struct stat metadata;
+    if (::stat(path.c_str(), &metadata) != 0) {
+        return std::string();
+    }
+    std::ostringstream out;
+    out << metadata.st_dev << ':'
+        << metadata.st_ino << ':'
+        << metadata.st_size << ':'
+        << metadata.st_mtim.tv_sec << ':'
+        << metadata.st_mtim.tv_nsec << ':'
+        << metadata.st_ctim.tv_sec << ':'
+        << metadata.st_ctim.tv_nsec << ':'
+        << metadata.st_mode << ':'
+        << metadata.st_nlink;
+    return out.str();
+#else
+    return std::string();
+#endif
+}
+
+void hash_stream_bytes(std::uint64_t& hash, const char* data, std::streamsize size)
+{
+    for (std::streamsize index = 0; index < size; ++index) {
+        hash ^= static_cast<unsigned char>(data[index]);
+        hash *= 1099511628211ULL;
+    }
+}
+
+std::string bounded_file_fingerprint(const fs::path& path, std::uint64_t size)
+{
+    if (size == 0) {
+        return "empty";
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return "unreadable";
+    }
+
+    std::vector<char> buffer(static_cast<std::size_t>(kTokenFingerprintEdgeBytes));
+    std::uint64_t hash = 1469598103934665603ULL;
+    std::uint64_t first_bytes = std::min<std::uint64_t>(size, kTokenFingerprintEdgeBytes);
+    input.read(buffer.data(), static_cast<std::streamsize>(first_bytes));
+    hash_stream_bytes(hash, buffer.data(), input.gcount());
+
+    if (size > kTokenFingerprintEdgeBytes) {
+        std::uint64_t last_bytes = std::min<std::uint64_t>(size, kTokenFingerprintEdgeBytes);
+        input.clear();
+        input.seekg(static_cast<std::streamoff>(size - last_bytes), std::ios::beg);
+        input.read(buffer.data(), static_cast<std::streamsize>(last_bytes));
+        hash_stream_bytes(hash, buffer.data(), input.gcount());
+    }
+
+    std::ostringstream out;
+    out << size << ':' << hash;
+    return out.str();
 }
 
 std::string permissions_to_string(fs::perms permissions)
@@ -194,7 +281,7 @@ sol::table build_file_token_table(sol::state_view lua, const fs::path& input_pat
     bool exists = fs::exists(status);
     bool is_file = fs::is_regular_file(status);
     std::uint64_t size = 0;
-    double modified = 0.0;
+    std::string modified;
 
     if (exists && is_file) {
         auto file_size = fs::file_size(absolute, ec);
@@ -205,15 +292,20 @@ sol::table build_file_token_table(sol::state_view lua, const fs::path& input_pat
     if (exists) {
         auto write_time = fs::last_write_time(absolute, ec);
         throw_with_message("fs.file_token", ec);
-        modified = file_time_to_seconds(write_time);
+        modified = file_time_to_token_value(write_time);
     }
 
     sol::table token = lua.create_table();
+    std::string change_id = stat_change_id(absolute);
+    if (exists && is_file) {
+        change_id += ":sample:" + bounded_file_fingerprint(absolute, size);
+    }
     token["path"] = absolute.string();
     token["exists"] = exists;
     token["is-file"] = is_file;
     token["size"] = size;
     token["modified"] = modified;
+    token["change-id"] = change_id;
     token["permissions"] = permissions_to_string(status.permissions());
     return token;
 }
@@ -267,19 +359,22 @@ bool token_matches(sol::table current, sol::table expected)
     sol::object expected_is_file = expected["is-file"];
     sol::object expected_size = expected["size"];
     sol::object expected_modified = expected["modified"];
+    sol::object expected_change_id = expected["change-id"];
     sol::object expected_permissions = expected["permissions"];
 
     return expected_path.is<std::string>()
         && expected_exists.is<bool>()
         && expected_is_file.is<bool>()
         && expected_size.is<std::uint64_t>()
-        && expected_modified.is<double>()
+        && expected_modified.is<std::string>()
+        && expected_change_id.is<std::string>()
         && expected_permissions.is<std::string>()
         && current.get<std::string>("path") == expected_path.as<std::string>()
         && current.get<bool>("exists") == expected_exists.as<bool>()
         && current.get<bool>("is-file") == expected_is_file.as<bool>()
         && current.get<std::uint64_t>("size") == expected_size.as<std::uint64_t>()
-        && current.get<double>("modified") == expected_modified.as<double>()
+        && current.get<std::string>("modified") == expected_modified.as<std::string>()
+        && current.get<std::string>("change-id") == expected_change_id.as<std::string>()
         && current.get<std::string>("permissions") == expected_permissions.as<std::string>();
 }
 

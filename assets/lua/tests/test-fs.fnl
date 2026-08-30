@@ -196,6 +196,33 @@
     (assert token.modified)
     (assert token.permissions))))
 
+(fn fs-file-token-repeated-calls-are-stable-for-unchanged-file []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "stable-token.txt"))
+    (fs.write-file file "abcdef")
+    (local baseline (fs.file-token file))
+    (assert (= (type baseline.modified) :string) "file-token modified should be stable string primitive")
+    (assert (= (type baseline.change-id) :string) "file-token change-id should be stable string primitive")
+    (for [_ 1 100]
+      (local current (fs.file-token file))
+      (assert (= current.path baseline.path))
+      (assert (= current.exists baseline.exists))
+      (assert (= current.is-file baseline.is-file))
+      (assert (= current.size baseline.size))
+      (assert (= current.permissions baseline.permissions))
+      (assert (= current.modified baseline.modified))
+      (assert (= current.change-id baseline.change-id))))))
+
+(fn fs-file-token-detects-immediate-same-size-replacement []
+  (with-temp-dir (fn [root]
+    (local file (fs.join-path root "same-size-token.txt"))
+    (fs.write-file file "abcdef")
+    (local baseline (fs.file-token file))
+    (fs.write-file file "uvwxyz")
+    (local current (fs.file-token file))
+    (assert (not= current.change-id baseline.change-id)
+            "same-size replacement should change bounded file token identity"))))
+
 (fn fs-read-byte-range-returns-bounded-raw-bytes []
   (with-temp-dir (fn [root]
     (local file (fs.join-path root "range.txt"))
@@ -303,6 +330,8 @@
 (table.insert tests {:name "fs read-text-window preserves trailing ascii after invalid lead" :fn fs-read-text-window-preserves-trailing-ascii-after-invalid-lead})
 (table.insert tests {:name "fs read-text-window rejects invalid arguments" :fn fs-read-text-window-rejects-invalid-arguments})
 (table.insert tests {:name "fs file-token reports regular file identity" :fn fs-file-token-reports-regular-file-identity})
+(table.insert tests {:name "fs file-token repeated calls are stable for unchanged file" :fn fs-file-token-repeated-calls-are-stable-for-unchanged-file})
+(table.insert tests {:name "fs file-token detects immediate same-size replacement" :fn fs-file-token-detects-immediate-same-size-replacement})
 (table.insert tests {:name "fs read-byte-range returns bounded raw bytes" :fn fs-read-byte-range-returns-bounded-raw-bytes})
 (table.insert tests {:name "fs read-byte-range rejects invalid arguments" :fn fs-read-byte-range-rejects-invalid-arguments})
 (table.insert tests {:name "fs atomic-replace-if-current writes text and source segments" :fn fs-atomic-replace-if-current-writes-text-and-source-segments})
