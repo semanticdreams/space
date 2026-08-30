@@ -206,18 +206,43 @@
         (values pos (= current-line line)))))
 
 (fn clipped-row-values [text columns]
-  (local prefix (string.sub text 1 (complete-utf8-prefix-length text)))
-  (local offsets [0])
+  (local source-offsets [0])
+  (local display-offsets [0])
   (local cps [])
-  (var out-end 0)
+  (local parts [])
   (var count 0)
-  (each [byte-index cp (utf8.codes prefix)]
-    (when (< count columns)
-      (table.insert cps cp)
-      (set out-end (- (+ byte-index (byte-len (utf8.char cp))) 1))
-      (table.insert offsets out-end)
-      (set count (+ count 1))))
-  (values (string.sub prefix 1 out-end) cps offsets))
+  (var index 1)
+  (var source-end 0)
+  (var display-end 0)
+  (local total (# text))
+  (while (and (<= index total) (< count columns))
+    (local expected-len (utf8-sequence-length (string.byte text index)))
+    (local complete-len (complete-utf8-sequence-length-at text index))
+    (if complete-len
+        (do
+          (local sequence (string.sub text index (+ index complete-len -1)))
+          (local cp (utf8.codepoint sequence))
+          (table.insert parts sequence)
+          (table.insert cps cp)
+          (set source-end (+ index complete-len -1))
+          (set display-end (+ display-end complete-len))
+          (table.insert source-offsets source-end)
+          (table.insert display-offsets display-end)
+          (set index (+ index complete-len))
+          (set count (+ count 1)))
+        (and expected-len (> (+ index expected-len -1) total))
+        (set index (+ total 1))
+        (do
+          (local replacement "�")
+          (table.insert parts replacement)
+          (table.insert cps 0xFFFD)
+          (set source-end index)
+          (set display-end (+ display-end (# replacement)))
+          (table.insert source-offsets source-end)
+          (table.insert display-offsets display-end)
+          (set index (+ index 1))
+          (set count (+ count 1)))))
+  (values (table.concat parts "") cps source-offsets display-offsets source-end))
 
 (fn build-row [buffer line start-byte columns]
   (var pos start-byte)
@@ -270,8 +295,8 @@
     (set line-end-known? true)
     (set line-end-byte buffer.size))
   (local visible-text (table.concat visible-parts ""))
-  (local (text cps offsets) (clipped-row-values visible-text columns))
-  (set end-byte (+ start-byte (# text)))
+  (local (text cps offsets display-offsets source-end) (clipped-row-values visible-text columns))
+  (set end-byte (+ start-byte source-end))
   {:line line
    :start-byte start-byte
    :end-byte end-byte
@@ -279,9 +304,10 @@
    :line-end-known? line-end-known?
    :partial? partial?
    :newline-bytes newline-bytes
-   :text text
-   :codepoints cps
-   :column-byte-offsets offsets})
+    :text text
+    :codepoints cps
+    :column-byte-offsets offsets
+    :display-byte-offsets display-offsets})
 
 (fn delete-range [buffer start-byte end-byte]
   (local start (clamp start-byte 0 buffer.size))
@@ -312,31 +338,41 @@
   (if (>= byte buffer.size)
       buffer.size
       (do
-        (local b (byte-at buffer byte))
-        (local seq-len (utf8-sequence-length b))
-        (when (not seq-len)
-          (error "LazyTextBuffer cursor is not on a UTF-8 boundary"))
-        (math.min buffer.size (+ byte seq-len)))))
+        (local chunk (read-composed-range buffer byte (math.min 4 (- buffer.size byte))))
+        (local seq-len (complete-utf8-sequence-length-at chunk 1))
+        (math.min buffer.size (+ byte (if (= seq-len nil) 1 seq-len))))))
 
 (fn clip-row-column [row start-column requested-columns]
   (local full-text row.text)
   (local full-cps row.codepoints)
   (local full-offsets row.column-byte-offsets)
+  (local full-display-offsets (if (= row.display-byte-offsets nil)
+                                full-offsets
+                                row.display-byte-offsets))
   (local byte-start (if (= (. full-offsets (+ start-column 1)) nil)
-                        (# full-text)
+                        (. full-offsets (# full-offsets))
                         (. full-offsets (+ start-column 1))))
   (local byte-end (if (= (. full-offsets (+ start-column requested-columns 1)) nil)
-                      (# full-text)
+                      (. full-offsets (# full-offsets))
                       (. full-offsets (+ start-column requested-columns 1))))
-  (set row.text (string.sub full-text (+ byte-start 1) byte-end))
+  (local display-start (if (= (. full-display-offsets (+ start-column 1)) nil)
+                         (. full-display-offsets (# full-display-offsets))
+                         (. full-display-offsets (+ start-column 1))))
+  (local display-end (if (= (. full-display-offsets (+ start-column requested-columns 1)) nil)
+                       (. full-display-offsets (# full-display-offsets))
+                       (. full-display-offsets (+ start-column requested-columns 1))))
+  (set row.text (string.sub full-text (+ display-start 1) display-end))
   (set row.codepoints [])
   (local clipped-offsets [0])
+  (local clipped-display-offsets [0])
   (for [i (+ start-column 1) (math.min (# full-cps) (+ start-column requested-columns))]
     (table.insert row.codepoints (. full-cps i))
-    (table.insert clipped-offsets (- (. full-offsets (+ i 1)) byte-start)))
+    (table.insert clipped-offsets (- (. full-offsets (+ i 1)) byte-start))
+    (table.insert clipped-display-offsets (- (. full-display-offsets (+ i 1)) display-start)))
   (set row.start-byte (+ row.start-byte byte-start))
   (set row.end-byte (+ row.start-byte (- byte-end byte-start)))
-  (set row.column-byte-offsets clipped-offsets))
+  (set row.column-byte-offsets clipped-offsets)
+  (set row.display-byte-offsets clipped-display-offsets))
 
 (fn get-viewport [buffer view]
   (local start-line (if (= view.line nil) buffer.scroll-line view.line))
