@@ -221,6 +221,15 @@
 (fn build-input [opts]
   ((VirtualInput opts) (make-ctx)))
 
+(fn record-viewport-calls [buffer]
+  (local original-get-viewport buffer.get-viewport)
+  (set buffer.state {:viewport-calls []})
+  (set buffer.get-viewport
+       (fn [self view]
+         (table.insert self.state.viewport-calls view)
+         (original-get-viewport self view)))
+  buffer)
+
 (fn expect-build-without-context []
   ((VirtualInput {:buffer (make-buffer)}) nil))
 
@@ -612,6 +621,59 @@
       (assert (= buffer.cursor-byte 3) "l should route through the UTF-8-safe buffer movement API")
       (input:drop))))
 
+(fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (record-viewport-calls (lazy-buffer "horizontal-visible" "abcdefghijklmnopqrstuvwxyz")))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (input.layout:measurer)
+      (set input.layout.size (+ (glm.vec3 (* 2 input.padding.x)
+                                          (* 2 input.padding.y)
+                                          0)
+                                 (glm.vec3 (* 4 input.column-width)
+                                           input.line-height
+                                           0)))
+      (input.layout:layouter)
+      (input:on-click {:row-index 1 :column 0})
+      (for [_ 1 8]
+        (text-state:on-key-down {:key (string.byte "l")})
+        (input.layout:layouter))
+      (assert (> input.scroll-column 0) "moving right past visible columns should scroll horizontally")
+      (assert input.caret.visible? "caret should remain visible after horizontal scroll")
+      (local local-x (- input.caret.layout.position.x input.layout.position.x))
+      (assert (>= local-x input.padding.x) "caret x should stay inside left input padding")
+      (assert (<= local-x (- input.layout.size.x input.padding.x))
+              "caret x should stay inside right input padding")
+      (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+      (assert (= last-view.column input.scroll-column)
+              "viewport request should use updated horizontal scroll column")
+      (input:drop))))
+
+(fn virtual-input-numeric-horizontal-jump-keeps-caret-visible []
+  (local buffer (record-viewport-calls (lazy-buffer "numeric-horizontal-visible" "abcdefghijklmnopqrstuvwxyz")))
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+  (input.layout:measurer)
+  (set input.layout.size (+ (glm.vec3 (* 2 input.padding.x)
+                                    (* 2 input.padding.y)
+                                    0)
+                           (glm.vec3 (* 4 input.column-width)
+                                     input.line-height
+                                     0)))
+  (input.layout:layouter)
+  (assert (input:move-caret 8) "numeric movement should move through the safe horizontal API")
+  (input.layout:layouter)
+  (assert (= input.scroll-column 5) "jumping to column 8 should scroll far enough to show the caret")
+  (assert input.caret.visible? "caret should remain visible after numeric horizontal jump")
+  (local local-x (- input.caret.layout.position.x input.layout.position.x))
+  (assert (>= local-x input.padding.x) "caret x should stay inside left input padding after jump")
+  (assert (<= local-x (- input.layout.size.x input.padding.x))
+          "caret x should stay inside right input padding after jump")
+  (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+  (assert (= last-view.column input.scroll-column)
+          "viewport request should use updated horizontal scroll column after jump")
+  (input:drop))
+
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
@@ -639,6 +701,8 @@
 (table.insert tests {:name "VirtualInput layout hides off-viewport caret" :fn virtual-input-layout-hides-off-viewport-caret})
 (table.insert tests {:name "VirtualInput narrow layout requests visible columns and local clip" :fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip})
 (table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
+(table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
 
 (local main
   (fn []
