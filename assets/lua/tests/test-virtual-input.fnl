@@ -7,6 +7,7 @@
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
 (local InputState (require :input-state-router))
+(local Runtime (require :state-runtime))
 (local States (require :states))
 (local StateSystemBindings (require :state-system-bindings))
 (local TextState (require :text-state))
@@ -203,7 +204,7 @@
     (pcall body {:states states
                  :text-state text-state
                  :insert-state insert-state}))
-  (InputState.reset)
+  (Runtime.reset)
   (StateSystemBindings.bind-states-host original-states)
   (when states.drop
     (states:drop))
@@ -403,6 +404,26 @@
       (assert (= input.mode :insert) "VirtualInput should enter insert mode")
       (assert (= (states:active-name) :insert) "states host should enter insert")
       (input:drop))))
+
+(fn virtual-input-state-helper-clears-ignored-text-input []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "ignored-text-source" "abc"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 0})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should arm one ignored text-input event")
+      (input:drop)))
+  (local buffer (make-buffer))
+  (set-test-states)
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+  (input:on-click {:row-index 1 :column 0})
+  (assert (Runtime.dispatch-text-input {:text "Z"})
+          "fresh active input should receive routed text input")
+  (assert (= (. buffer.state.inserted 1) "Z")
+          "with-virtual-input-states cleanup should not leak ignored text-input events")
+  (input:drop))
 
 (fn virtual-input-text-state-h-l-move-without-numeric-delta-error []
   (with-virtual-input-states
@@ -703,6 +724,7 @@
 (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
 (table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events})
 (table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
+(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input})
 (table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
 (table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows})
 (table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
