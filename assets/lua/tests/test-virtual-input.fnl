@@ -565,6 +565,53 @@
   (assert (= input.caret.visible? false) "off-viewport cursor should not render caret on first visible row")
   (input:drop))
 
+(fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip []
+  (local buffer (make-buffer {:rows [(row 0 "abcdefghij" 0)
+                                     (row 1 "klmnopqrst" 11)]}))
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 10}))
+  (input.layout:measurer)
+  (local narrow-width (+ (* 2 input.padding.x) (* 3 input.column-width)))
+  (local one-line-height (+ (* 2 input.padding.y) input.line-height))
+  (set input.layout.position (glm.vec3 1 2 0))
+  (set input.layout.size (glm.vec3 narrow-width one-line-height 0))
+  (set input.layout.clip-region {:id 9001
+                                 :bounds {:position (glm.vec3 0 0 0)
+                                          :rotation (glm.quat 1 0 0 0)
+                                          :size (glm.vec3 100 100 0)}})
+  (input.layout:layouter)
+  (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+  (assert (= input.visible-column-count 3) "allocated width should reduce visible columns")
+  (assert (= input.visible-line-count 1) "allocated height should reduce visible rows")
+  (assert (= last-view.columns 3) "refresh should request allocated visible columns")
+  (assert (= last-view.lines 1) "refresh should request allocated visible rows")
+  (assert input.local-clip-region "VirtualInput should create a local clip region")
+  (assert (= (. input.rows 1 :layout :clip-region) input.local-clip-region)
+          "visible row should receive local clip")
+  (assert (= input.caret.layout.clip-region input.local-clip-region)
+          "caret should receive local clip")
+  (assert (<= input.local-clip-region.bounds.size.x input.layout.size.x)
+          "local clip width should not exceed allocated input width")
+  (input:drop))
+
+(fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "narrow-text-state-right" "abcdefghij"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 10}))
+      (input.layout:measurer)
+      (local narrow-width (+ (* 2 input.padding.x) (* 3 input.column-width)))
+      (local one-line-height (+ (* 2 input.padding.y) input.line-height))
+      (set input.layout.position (glm.vec3 0 0 0))
+      (set input.layout.size (glm.vec3 narrow-width one-line-height 0))
+      (input.layout:layouter)
+      (input:on-click {:row-index 1 :column 2})
+      (assert (= input.visible-column-count 3) "precondition: narrow layout should expose three visual columns")
+      (assert (text-state:on-key-down {:key (string.byte "l")})
+              "TextState l should move beyond the last visible codepoint")
+      (assert (= buffer.cursor-byte 3) "l should route through the UTF-8-safe buffer movement API")
+      (input:drop))))
+
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
@@ -590,6 +637,8 @@
 (table.insert tests {:name "VirtualInput horizontal crossing newline scrolls viewport" :fn virtual-input-horizontal-crossing-newline-scrolls-viewport})
 (table.insert tests {:name "VirtualInput horizontal navigation requires safe buffer API" :fn virtual-input-horizontal-navigation-requires-safe-buffer-api})
 (table.insert tests {:name "VirtualInput layout hides off-viewport caret" :fn virtual-input-layout-hides-off-viewport-caret})
+(table.insert tests {:name "VirtualInput narrow layout requests visible columns and local clip" :fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip})
+(table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
 
 (local main
   (fn []

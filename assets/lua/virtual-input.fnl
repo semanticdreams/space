@@ -3,6 +3,8 @@
 (local TextStyle (require :text-style))
 (local Rectangle (require :rectangle))
 (local {: Layout : resolve-mark-flag} (require :layout))
+(local ClipUtils (require :clip-utils))
+(local BoundsUtils (require :bounds-utils))
 (local gl (require :gl))
 (local Modifiers (require :input-modifiers))
 (local InputState (require :input-state-router))
@@ -20,6 +22,12 @@
 (local KEY_END 1073741901)
 (local KEY_PAGEUP 1073741899)
 (local KEY_PAGEDOWN 1073741902)
+
+(var virtual-input-clip-region-seq 0)
+
+(fn next-virtual-input-clip-region-id []
+  (set virtual-input-clip-region-seq (+ virtual-input-clip-region-seq 1))
+  virtual-input-clip-region-seq)
 
 (fn clip-codepoints [items max-count]
   (assert (= (type max-count) :number) "clip-codepoints requires max-count")
@@ -49,7 +57,7 @@
 
 (fn row-visible-column-count [input row]
   (assert row "row-visible-column-count requires row")
-  (math.min input.column-count (length (or row.codepoints []))))
+  (math.min input.visible-column-count (length (or row.codepoints []))))
 
 (fn mark-row-layouts-dirty [input]
   (each [_ row-widget (ipairs input.rows)]
@@ -130,21 +138,28 @@
 (fn refresh-viewport [self opts]
   (assert self.buffer "refresh-viewport requires buffer")
   (local options (or opts {}))
+  (local model-snapshot
+    (and (or (not (= self.visible-line-count self.configured-line-count))
+             (not (= self.visible-column-count self.configured-column-count)))
+         (self.buffer:get-viewport {:line self.scroll-line
+                                    :column self.scroll-column
+                                    :lines self.configured-line-count
+                                    :columns self.configured-column-count})))
   (local snapshot (self.buffer:get-viewport {:line self.scroll-line
-                                             :column self.scroll-column
-                                             :lines self.line-count
-                                             :columns self.column-count}))
+                                              :column self.scroll-column
+                                              :lines self.visible-line-count
+                                              :columns self.visible-column-count}))
   (set self.viewport snapshot)
   (set self.scroll-line snapshot.start-line)
   (set self.scroll-column snapshot.start-column)
   (each [i row-widget (ipairs self.rows)]
     (local viewport-row (. snapshot.rows i))
     (local codepoints (clip-codepoints (and viewport-row viewport-row.codepoints)
-                                       self.column-count))
+                                       self.visible-column-count))
     (row-widget:set-codepoints codepoints {:mark-measure-dirty? false}))
   (when (resolve-mark-flag options :mark-layout-dirty? true)
     (mark-viewport-dirty self))
-  (sync-model-state self snapshot)
+  (sync-model-state self (or model-snapshot snapshot))
   snapshot)
 
 (fn sync-scroll [self]
@@ -186,8 +201,8 @@
     (local next-scroll
       (if (< line self.scroll-line)
           line
-          (>= line (+ self.scroll-line self.line-count))
-          (math.max 0 (- line (- self.line-count 1)))
+          (>= line (+ self.scroll-line self.visible-line-count))
+          (math.max 0 (- line (- self.visible-line-count 1)))
           self.scroll-line))
     (when (not (= next-scroll self.scroll-line))
       (set self.scroll-line next-scroll)
@@ -430,9 +445,9 @@
             (= key KEY_END)
             (self:move-caret :end {:extend-selection? shift?})
             (= key KEY_PAGEUP)
-            (self:scroll-lines (- self.line-count) {:extend-selection? shift?})
+            (self:scroll-lines (- self.visible-line-count) {:extend-selection? shift?})
             (= key KEY_PAGEDOWN)
-            (self:scroll-lines self.line-count {:extend-selection? shift?})
+            (self:scroll-lines self.visible-line-count {:extend-selection? shift?})
             (= key KEY_BACKSPACE)
             (self:delete-before-cursor)
             (= key KEY_DELETE)
@@ -481,9 +496,69 @@
 (fn measure-virtual-input [input layout]
   (each [_ row-widget (ipairs input.rows)]
     (row-widget.layout:measurer))
-  (local width (+ (* 2 input.padding.x) (* input.column-width input.column-count)))
-  (local height (+ (* 2 input.padding.y) (* input.line-height input.line-count)))
+  (local width (+ (* 2 input.padding.x) (* input.column-width input.configured-column-count)))
+  (local height (+ (* 2 input.padding.y) (* input.line-height input.configured-line-count)))
   (set layout.measure (glm.vec3 width height 0)))
+
+(fn visible-count-for-size [available unit configured]
+  (assert (= (type available) :number) "visible-count-for-size requires available size")
+  (assert (= (type unit) :number) "visible-count-for-size requires unit size")
+  (assert (= (type configured) :number) "visible-count-for-size requires configured count")
+  (local raw-count (if (> unit 0)
+                     (math.floor (+ (/ (math.max 0 available) unit) 1e-6))
+                     configured))
+  (math.max 1 (math.min configured raw-count)))
+
+(fn update-visible-viewport-size [input size]
+  (assert input "update-visible-viewport-size requires input")
+  (local allocated (or size input.layout.size input.layout.measure))
+  (local inner-width (math.max 0 (- allocated.x (* 2 input.padding.x))))
+  (local inner-height (math.max 0 (- allocated.y (* 2 input.padding.y))))
+  (local next-columns (visible-count-for-size inner-width input.column-width input.configured-column-count))
+  (local next-lines (visible-count-for-size inner-height input.line-height input.configured-line-count))
+  (local changed? (or (not (= next-columns input.visible-column-count))
+                      (not (= next-lines input.visible-line-count))))
+  (when changed?
+    (set input.visible-column-count next-columns)
+    (set input.visible-line-count next-lines)
+    (input:refresh-viewport {:mark-layout-dirty? false}))
+  changed?)
+
+(fn intersect-bounds [parent child]
+  (if parent
+      (BoundsUtils.bounds-aabb-in-parent parent child)
+      child))
+
+(fn update-local-clip-region [input layout]
+  (assert input "update-local-clip-region requires input")
+  (assert layout "update-local-clip-region requires layout")
+  (local clip (or input.local-clip-region
+                  {:id input.local-clip-region-id
+                   :layout layout
+                   :bounds {:position layout.position
+                            :rotation layout.rotation
+                            :size layout.size}}))
+  (set clip.id input.local-clip-region-id)
+  (set clip.layout layout)
+  (local bounds (or clip.bounds
+                    {:position layout.position
+                     :rotation layout.rotation
+                     :size layout.size}))
+  (local input-bounds {:position layout.position
+                       :rotation layout.rotation
+                       :size layout.size})
+  (local parent-bounds (and layout.clip-region layout.clip-region.bounds))
+  (local resolved (intersect-bounds parent-bounds input-bounds))
+  (local resolved-size (or (and resolved resolved.size) layout.size))
+  (set clip.bounds bounds)
+  (set bounds.position (or (and resolved resolved.position) layout.position))
+  (set bounds.rotation (or (and resolved resolved.rotation) layout.rotation))
+  (set bounds.size (glm.vec3 (math.max 0 (math.min resolved-size.x layout.size.x))
+                             (math.max 0 (math.min resolved-size.y layout.size.y))
+                             (math.max 0 (math.min resolved-size.z layout.size.z))))
+  (ClipUtils.update-region clip)
+  (set input.local-clip-region clip)
+  clip)
 
 (fn layout-child [child position rotation size depth clip]
   (set child.layout.position position)
@@ -524,9 +599,10 @@
   (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
   (local position (or layout.position (glm.vec3 0 0 0)))
   (local size (or layout.size layout.measure))
-  (local clip layout.clip-region)
   (local depth (or layout.depth-offset-index 0))
+  (update-visible-viewport-size input size)
   (input:refresh-viewport {:mark-layout-dirty? false})
+  (local clip (update-local-clip-region input layout))
   (layout-child input.background position rotation size (+ depth 1) clip)
   (each [i row-widget (ipairs input.rows)]
     (local row-pos (+ position (rotation:rotate (glm.vec3 input.padding.x
@@ -665,11 +741,17 @@
        :caret caret
        :clickables clickables
        :focus-node focus-node
-       :focus-manager focus-manager
-       :connected? false
-       :line-count line-count
-       :column-count column-count
-       :padding padding
+        :focus-manager focus-manager
+        :connected? false
+        :line-count line-count
+        :column-count column-count
+        :configured-line-count line-count
+        :configured-column-count column-count
+        :visible-line-count line-count
+        :visible-column-count column-count
+        :local-clip-region nil
+        :local-clip-region-id (next-virtual-input-clip-region-id)
+        :padding padding
        :line-height computed-line-height
        :column-width computed-column-width
        :caret-width caret-width
