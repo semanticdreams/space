@@ -64,6 +64,69 @@
   (mark-row-layouts-dirty input)
   (mark-caret-dirty input))
 
+(fn adapter-row [row]
+  (assert row "adapter-row requires row")
+  {:line row.line
+   :start-byte row.start-byte
+   :end-byte row.end-byte
+   :line-end-byte row.line-end-byte
+   :line-end-known? row.line-end-known?
+   :newline-bytes row.newline-bytes
+   :newline-length (or row.newline-bytes 0)
+   :text row.text
+   :codepoints (or row.codepoints [])
+   :column-byte-offsets (or row.column-byte-offsets [0])})
+
+(fn adapter-line-start-index [lines idx]
+  (assert lines "adapter-line-start-index requires lines")
+  (var total 0)
+  (var i 0)
+  (while (< i idx)
+    (local line (. lines (+ i 1)))
+    (when line
+      (set total (+ total
+                   (length (or line.codepoints []))
+                   (or line.newline-length 0))))
+    (set i (+ i 1)))
+  total)
+
+(fn cursor-column-for-row [row cursor]
+  (assert row "cursor-column-for-row requires row")
+  (var column 0)
+  (each [i offset (ipairs (or row.column-byte-offsets []))]
+    (when (<= (+ (or row.start-byte 0) offset) cursor)
+      (set column (- i 1))))
+  column)
+
+(fn sync-model-state [self snapshot]
+  (assert self "sync-model-state requires input")
+  (local model (or self.model {}))
+  (local lines [])
+  (each [_ row (ipairs (or (and snapshot snapshot.rows) []))]
+    (table.insert lines (adapter-row row)))
+  (local cursor (or self.buffer.cursor-byte 0))
+  (var cursor-line 0)
+  (var cursor-column 0)
+  (var found? false)
+  (each [i row (ipairs lines)]
+    (when (and (not found?)
+               (>= cursor (or row.start-byte 0))
+               (<= cursor (or row.line-end-byte row.end-byte 0)))
+      (set cursor-line (- i 1))
+      (set cursor-column (cursor-column-for-row row cursor))
+      (set found? true)))
+  (local cursor-index (+ (adapter-line-start-index lines cursor-line) cursor-column))
+  (set model.lines lines)
+  (set model.cursor-line cursor-line)
+  (set model.cursor-column cursor-column)
+  (set model.cursor-index cursor-index)
+  (set self.model model)
+  (set self.lines lines)
+  (set self.cursor-line cursor-line)
+  (set self.cursor-column cursor-column)
+  (set self.cursor-index cursor-index)
+  model)
+
 (fn refresh-viewport [self opts]
   (assert self.buffer "refresh-viewport requires buffer")
   (local options (or opts {}))
@@ -81,6 +144,7 @@
     (row-widget:set-codepoints codepoints {:mark-measure-dirty? false}))
   (when (resolve-mark-flag options :mark-layout-dirty? true)
     (mark-viewport-dirty self))
+  (sync-model-state self snapshot)
   snapshot)
 
 (fn sync-scroll [self]
@@ -177,6 +241,34 @@
     (self:refresh-viewport))
   moved)
 
+(fn byte-for-adapter-position [self position]
+  (assert (= (type position) :number) "byte-for-adapter-position requires numeric position")
+  (local viewport (ensure-viewport self))
+  (local rows (or viewport.rows []))
+  (local target (math.max 0 (math.floor position)))
+  (var remaining target)
+  (var fallback-byte (or self.buffer.cursor-byte 0))
+  (each [_ row (ipairs rows)]
+    (when (and row remaining)
+      (set fallback-byte (or row.line-end-byte row.end-byte fallback-byte))
+      (local codepoint-count (length (or row.codepoints [])))
+      (local newline-length (or row.newline-bytes 0))
+      (local span (+ codepoint-count newline-length))
+      (if (<= remaining codepoint-count)
+          (do
+            (set fallback-byte (byte-for-column row remaining))
+            (set remaining nil))
+          (and remaining (< remaining span))
+          (do
+            (set fallback-byte (or row.line-end-byte row.end-byte fallback-byte))
+            (set remaining nil))
+          remaining
+          (set remaining (- remaining span)))))
+  fallback-byte)
+
+(fn move-caret-to [self position]
+  (apply-caret-byte self (byte-for-adapter-position self position) false))
+
 (fn apply-caret-line-column [self line column extend-selection?]
   (assert (= (type line) :number) "apply-caret-line-column requires line")
   (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
@@ -265,7 +357,9 @@
 (fn move-caret [self delta opts]
   (local (line column _row) (caret-line-column self))
   (local extend? (and opts opts.extend-selection?))
-  (if (= delta :left)
+  (if (= (type delta) :number)
+      (apply-horizontal-caret-move self delta extend?)
+      (= delta :left)
       (apply-horizontal-caret-move self -1 extend?)
       (= delta :right)
       (apply-horizontal-caret-move self 1 extend?)
@@ -346,6 +440,21 @@
             (= key KEY_RETURN)
             (self:insert-text "\n")
             false))))
+
+(fn enter-insert-mode [self]
+  (set self.mode :insert)
+  (mark-caret-dirty self)
+  true)
+
+(fn enter-normal-mode [self]
+  (set self.mode :normal)
+  (mark-caret-dirty self)
+  true)
+
+(fn submit [self payload]
+  (if self.on-submit
+      (self.on-submit self payload)
+      false))
 
 (fn local-point-from-event [self event]
   (if (and event event.local-point)
@@ -567,17 +676,29 @@
        :scroll-line (math.max 0 (or buffer.scroll-line 0))
        :scroll-column 0
        :viewport nil
+       :model {}
+       :lines []
+       :cursor-index 0
+       :cursor-line 0
+       :cursor-column 0
+       :mode :normal
+       :multiline? true
        :selection-anchor-byte (or buffer.cursor-byte 0)
        :on-change options.on-change
        :on-save options.on-save
+       :on-submit options.on-submit
        :refresh-viewport refresh-viewport
        :insert-text insert-text
        :delete-before-cursor delete-before-cursor
        :delete-at-cursor delete-at-cursor
+       :move-caret-to move-caret-to
        :move-caret move-caret
        :scroll-lines scroll-lines
        :copy-selection copy-selection
        :save save
+       :enter-insert-mode enter-insert-mode
+       :enter-normal-mode enter-normal-mode
+       :submit submit
        :on-text-input on-text-input
        :on-key-down on-key-down
        :on-click on-click

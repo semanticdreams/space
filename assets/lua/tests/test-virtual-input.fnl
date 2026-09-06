@@ -9,6 +9,8 @@
 (local InputState (require :input-state-router))
 (local States (require :states))
 (local StateSystemBindings (require :state-system-bindings))
+(local TextState (require :text-state))
+(local InsertState (require :insert-state))
 
 (local tests [])
 (local temp-root "/tmp/space/tests/virtual-input")
@@ -151,6 +153,13 @@
   (set stub.unregister (fn [_self _obj] (set state.unregister (+ state.unregister 1))))
   stub)
 
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn command-hints-hud-provider [_self]
+  {:command-hints (make-command-hints-stub)})
+
 (fn make-ctx []
   (BuildContext {:clickables (make-clickables-stub)
                  :hoverables (make-hoverables-stub)}))
@@ -179,6 +188,28 @@
   (states:set-state :normal)
   (StateSystemBindings.bind-states-host states)
   states)
+
+(fn with-virtual-input-states [body]
+  (local original-states app.states)
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (local text-state (TextState))
+  (local insert-state (InsertState))
+  (states:add-state :normal {})
+  (states:add-state :text text-state)
+  (states:add-state :insert insert-state)
+  (states:set-state :normal)
+  (StateSystemBindings.bind-states-host states)
+  (local (ok result)
+    (pcall body {:states states
+                 :text-state text-state
+                 :insert-state insert-state}))
+  (InputState.reset)
+  (StateSystemBindings.bind-states-host original-states)
+  (when states.drop
+    (states:drop))
+  (if ok
+      result
+      (error result)))
 
 (fn install-clipboard-spy []
   (local original-set gl.clipboard-set)
@@ -342,6 +373,105 @@
   (input:drop)
   (assert (not (InputState.active-input)) "drop should release active VirtualInput"))
 
+(fn virtual-input-text-state-i-enters-insert-mode []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-insert" "abc\ndef"))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+      (input:on-click {:row-index 1 :column 0})
+      (assert (= (states:active-name) :text) "click should enter text state")
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should be handled for VirtualInput")
+      (assert (= input.mode :insert) "VirtualInput should enter insert mode")
+      (assert (= (states:active-name) :insert) "states host should enter insert")
+      (input:drop))))
+
+(fn virtual-input-text-state-h-l-move-without-numeric-delta-error []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-horizontal" "abcd"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "l")})
+              "TextState l should move right")
+      (assert (= buffer.cursor-byte 2) "l should move one UTF-8 codepoint right")
+      (assert (text-state:on-key-down {:key (string.byte "h")})
+              "TextState h should move left")
+      (assert (= buffer.cursor-byte 1) "h should move one UTF-8 codepoint left")
+      (input:drop))))
+
+(fn virtual-input-text-state-j-k-move-using-lazy-rows []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-vertical" "aa\nbb\ncc"))
+      (local input (build-input {:buffer buffer :line-count 3 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "j")})
+              "TextState j should move down")
+      (assert (= input.cursor-line 1) "j should move to second lazy row")
+      (assert (= input.cursor-column 1) "j should preserve preferred column")
+      (assert (text-state:on-key-down {:key (string.byte "k")})
+              "TextState k should move up")
+      (assert (= input.cursor-line 0) "k should move back to first lazy row")
+      (input:drop))))
+
+(fn virtual-input-text-state-x-deletes-and-clamps []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-delete" "abc"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 2})
+      (assert (text-state:on-key-down {:key (string.byte "x")})
+              "TextState x should delete at cursor")
+      (assert (= (snapshot-text buffer) "ab") "x should delete the current character")
+      (assert (<= input.cursor-column 1) "caret should clamp inside remaining line")
+      (input:drop))))
+
+(fn virtual-input-insert-state-escape-returns-to-text-mode []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local buffer (lazy-buffer "insert-state-escape" "abcd"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 2})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should enter insert before Escape")
+      (assert (= input.mode :insert) "precondition: VirtualInput should be in insert mode")
+      (assert (= (states:active-name) :insert) "precondition: states host should be insert")
+      (assert (insert-state:on-key-down {:key 27})
+              "InsertState Escape should be handled for VirtualInput")
+      (assert (= input.mode :normal) "Escape should return VirtualInput to normal mode")
+      (assert (= (states:active-name) :text) "Escape should return states host to text")
+      (assert (= buffer.cursor-byte 1) "Escape should move caret left once when possible")
+      (input:drop))))
+
+(fn virtual-input-insert-state-return-inserts-newline []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local buffer (lazy-buffer "insert-state-return" "abc"))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should enter insert before Return")
+      (assert (insert-state:on-key-down {:key 13})
+              "InsertState Return should be handled for multiline VirtualInput")
+      (local rows (. (buffer:get-viewport {:line 0 :column 0 :lines 2 :columns 80}) :rows))
+      (assert (= (. rows 1 :text) "a") "Return should split text at the caret")
+      (assert (= (. rows 2 :text) "bc") "Return should keep text after inserted newline")
+      (assert (= input.mode :insert) "Return should keep multiline VirtualInput in insert mode")
+      (assert (= (states:active-name) :insert) "Return should keep states host in insert")
+      (input:drop))))
+
 (fn virtual-input-insertion-replaces-real-buffer-selection []
   (local buffer (lazy-buffer "selection-replace" "abcde"))
   (buffer:move-caret-to-byte 1)
@@ -446,6 +576,12 @@
 (table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict})
 (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
 (table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events})
+(table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
+(table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
+(table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows})
+(table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
+(table.insert tests {:name "VirtualInput InsertState Escape returns to text mode" :fn virtual-input-insert-state-escape-returns-to-text-mode})
+(table.insert tests {:name "VirtualInput InsertState Return inserts newline" :fn virtual-input-insert-state-return-inserts-newline})
 (table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection})
 (table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
 (table.insert tests {:name "VirtualInput Delete deletes active selection" :fn virtual-input-delete-deletes-active-selection})
