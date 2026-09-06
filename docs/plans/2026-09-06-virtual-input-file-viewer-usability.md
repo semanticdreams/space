@@ -241,12 +241,9 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
   - Numeric movement remains UTF-8-safe through `LazyTextBuffer:move-caret-horizontal`.
   - Existing `Input`/`InputModel` behavior is untouched.
 
-- [ ] **Step 6: Commit Task 1.**
+- [ ] **Step 6: Prepare Task 1 for reviewer handoff.**
 
-  ```bash
-  git add assets/lua/virtual-input.fnl assets/lua/tests/test-virtual-input.fnl
-  git commit -m "fix(ui): route virtual input through text states"
-  ```
+  Do not commit from the implementer handoff. Report the changed files, RED evidence, GREEN validation evidence, and coverage rationale. The supervisor will dispatch the reviewer and commit only after reviewer pass.
 
 ---
 
@@ -342,12 +339,9 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
   - Children receive the local clip region, not only inherited parent clip.
   - Viewport requests shrink under narrow allocation without changing file viewer production code.
 
-- [ ] **Step 7: Commit Task 2.**
+- [ ] **Step 7: Prepare Task 2 for reviewer handoff.**
 
-  ```bash
-  git add assets/lua/virtual-input.fnl assets/lua/tests/test-virtual-input.fnl
-  git commit -m "fix(ui): clip virtual input to allocated viewport"
-  ```
+  Do not commit from the implementer handoff. Report the changed files, RED evidence, GREEN validation evidence, and coverage rationale. The supervisor will dispatch the reviewer and commit only after reviewer pass.
 
 ---
 
@@ -439,12 +433,9 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
   - Caret visibility logic does not hide a valid caret merely because the old clipped viewport did not include it.
   - Existing UTF-8 navigation tests still pass.
 
-- [ ] **Step 7: Commit Task 3.**
+- [ ] **Step 7: Prepare Task 3 for reviewer handoff.**
 
-  ```bash
-  git add assets/lua/virtual-input.fnl assets/lua/tests/test-virtual-input.fnl
-  git commit -m "fix(ui): keep virtual input caret visible horizontally"
-  ```
+  Do not commit from the implementer handoff. Report the changed files, RED evidence, GREEN validation evidence, and coverage rationale. The supervisor will dispatch the reviewer and commit only after reviewer pass.
 
 ---
 
@@ -628,12 +619,9 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
   - Temporary files are removed on successful test completion.
   - Documentation matches implemented invariants.
 
-- [ ] **Step 7: Commit Task 4.**
+- [ ] **Step 7: Prepare Task 4 for reviewer handoff.**
 
-  ```bash
-  git add assets/lua/tests/e2e/test-fs-file-viewer-virtual-input.fnl assets/lua/tests/e2e.fnl docs/dev/features/lazy-text-buffer-virtual-input.md
-  git commit -m "test(ui): cover file viewer virtual input e2e"
-  ```
+  Do not commit from the implementer handoff. Report the changed files, RED evidence, GREEN validation evidence, and coverage rationale. The supervisor will dispatch the reviewer and commit only after reviewer pass.
 
 ---
 
@@ -665,9 +653,9 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
   - Clip regions are updated, not recreated in an unbounded way during normal layout.
   - All new tests fail against the old behavior and pass with the fix.
 
-- [ ] **Step 4: Commit any reviewed fixes.**
+- [ ] **Step 4: Commit reviewed fixes.**
 
-  Use scope `ui`:
+  The supervisor commits only reviewed changes after reviewer pass. Use scope `ui`:
 
   ```bash
   git add assets/lua/virtual-input.fnl assets/lua/tests/test-virtual-input.fnl assets/lua/tests/e2e/test-fs-file-viewer-virtual-input.fnl assets/lua/tests/e2e.fnl docs/dev/features/lazy-text-buffer-virtual-input.md
