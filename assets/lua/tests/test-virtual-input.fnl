@@ -7,8 +7,11 @@
 (local LazyTextSource (require :lazy-text-source))
 (local LazyTextBuffer (require :lazy-text-buffer))
 (local InputState (require :input-state-router))
+(local Runtime (require :state-runtime))
 (local States (require :states))
 (local StateSystemBindings (require :state-system-bindings))
+(local TextState (require :text-state))
+(local InsertState (require :insert-state))
 
 (local tests [])
 (local temp-root "/tmp/space/tests/virtual-input")
@@ -151,6 +154,13 @@
   (set stub.unregister (fn [_self _obj] (set state.unregister (+ state.unregister 1))))
   stub)
 
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn command-hints-hud-provider [_self]
+  {:command-hints (make-command-hints-stub)})
+
 (fn make-ctx []
   (BuildContext {:clickables (make-clickables-stub)
                  :hoverables (make-hoverables-stub)}))
@@ -180,6 +190,28 @@
   (StateSystemBindings.bind-states-host states)
   states)
 
+(fn with-virtual-input-states [body]
+  (local original-states app.states)
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (local text-state (TextState))
+  (local insert-state (InsertState))
+  (states:add-state :normal {})
+  (states:add-state :text text-state)
+  (states:add-state :insert insert-state)
+  (states:set-state :normal)
+  (StateSystemBindings.bind-states-host states)
+  (local (ok result)
+    (pcall body {:states states
+                 :text-state text-state
+                 :insert-state insert-state}))
+  (Runtime.reset)
+  (StateSystemBindings.bind-states-host original-states)
+  (when states.drop
+    (states:drop))
+  (if ok
+      result
+      (error result)))
+
 (fn install-clipboard-spy []
   (local original-set gl.clipboard-set)
   (var copied nil)
@@ -189,6 +221,22 @@
 
 (fn build-input [opts]
   ((VirtualInput opts) (make-ctx)))
+
+(fn record-viewport-calls [buffer]
+  (local original-get-viewport buffer.get-viewport)
+  (set buffer.state {:viewport-calls []})
+  (set buffer.get-viewport
+       (fn [self view]
+         (table.insert self.state.viewport-calls view)
+         (original-get-viewport self view)))
+  buffer)
+
+(fn assert-viewport-calls-bounded [calls max-lines max-columns message]
+  (each [i view (ipairs (or calls []))]
+    (assert (<= view.lines max-lines)
+            (.. message ": viewport call " i " requested " view.lines " lines, expected <= " max-lines))
+    (assert (<= view.columns max-columns)
+            (.. message ": viewport call " i " requested " view.columns " columns, expected <= " max-columns))))
 
 (fn expect-build-without-context []
   ((VirtualInput {:buffer (make-buffer)}) nil))
@@ -342,6 +390,125 @@
   (input:drop)
   (assert (not (InputState.active-input)) "drop should release active VirtualInput"))
 
+(fn virtual-input-text-state-i-enters-insert-mode []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-insert" "abc\ndef"))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+      (input:on-click {:row-index 1 :column 0})
+      (assert (= (states:active-name) :text) "click should enter text state")
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should be handled for VirtualInput")
+      (assert (= input.mode :insert) "VirtualInput should enter insert mode")
+      (assert (= (states:active-name) :insert) "states host should enter insert")
+      (input:drop))))
+
+(fn virtual-input-state-helper-clears-ignored-text-input []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "ignored-text-source" "abc"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 0})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should arm one ignored text-input event")
+      (input:drop)))
+  (local buffer (make-buffer))
+  (set-test-states)
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+  (input:on-click {:row-index 1 :column 0})
+  (assert (Runtime.dispatch-text-input {:text "Z"})
+          "fresh active input should receive routed text input")
+  (assert (= (. buffer.state.inserted 1) "Z")
+          "with-virtual-input-states cleanup should not leak ignored text-input events")
+  (input:drop))
+
+(fn virtual-input-text-state-h-l-move-without-numeric-delta-error []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-horizontal" "abcd"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "l")})
+              "TextState l should move right")
+      (assert (= buffer.cursor-byte 2) "l should move one UTF-8 codepoint right")
+      (assert (text-state:on-key-down {:key (string.byte "h")})
+              "TextState h should move left")
+      (assert (= buffer.cursor-byte 1) "h should move one UTF-8 codepoint left")
+      (input:drop))))
+
+(fn virtual-input-text-state-j-k-move-using-lazy-rows []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-vertical" "aa\nbb\ncc"))
+      (local input (build-input {:buffer buffer :line-count 3 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "j")})
+              "TextState j should move down")
+      (assert (= input.cursor-line 1) "j should move to second lazy row")
+      (assert (= input.cursor-column 1) "j should preserve preferred column")
+      (assert (text-state:on-key-down {:key (string.byte "k")})
+              "TextState k should move up")
+      (assert (= input.cursor-line 0) "k should move back to first lazy row")
+      (input:drop))))
+
+(fn virtual-input-text-state-x-deletes-and-clamps []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "text-state-delete" "abc"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 2})
+      (assert (text-state:on-key-down {:key (string.byte "x")})
+              "TextState x should delete at cursor")
+      (assert (= (snapshot-text buffer) "ab") "x should delete the current character")
+      (assert (<= input.cursor-column 1) "caret should clamp inside remaining line")
+      (input:drop))))
+
+(fn virtual-input-insert-state-escape-returns-to-text-mode []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local buffer (lazy-buffer "insert-state-escape" "abcd"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 8}))
+      (input:on-click {:row-index 1 :column 2})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should enter insert before Escape")
+      (assert (= input.mode :insert) "precondition: VirtualInput should be in insert mode")
+      (assert (= (states:active-name) :insert) "precondition: states host should be insert")
+      (assert (insert-state:on-key-down {:key 27})
+              "InsertState Escape should be handled for VirtualInput")
+      (assert (= input.mode :normal) "Escape should return VirtualInput to normal mode")
+      (assert (= (states:active-name) :text) "Escape should return states host to text")
+      (assert (= buffer.cursor-byte 1) "Escape should move caret left once when possible")
+      (input:drop))))
+
+(fn virtual-input-insert-state-return-inserts-newline []
+  (with-virtual-input-states
+    (fn [env]
+      (local states (. env :states))
+      (local text-state (. env :text-state))
+      (local insert-state (. env :insert-state))
+      (local buffer (lazy-buffer "insert-state-return" "abc"))
+      (local input (build-input {:buffer buffer :line-count 2 :column-count 8}))
+      (input:on-click {:row-index 1 :column 1})
+      (assert (text-state:on-key-down {:key (string.byte "i")})
+              "TextState i should enter insert before Return")
+      (assert (insert-state:on-key-down {:key 13})
+              "InsertState Return should be handled for multiline VirtualInput")
+      (local rows (. (buffer:get-viewport {:line 0 :column 0 :lines 2 :columns 80}) :rows))
+      (assert (= (. rows 1 :text) "a") "Return should split text at the caret")
+      (assert (= (. rows 2 :text) "bc") "Return should keep text after inserted newline")
+      (assert (= input.mode :insert) "Return should keep multiline VirtualInput in insert mode")
+      (assert (= (states:active-name) :insert) "Return should keep states host in insert")
+      (input:drop))))
+
 (fn virtual-input-insertion-replaces-real-buffer-selection []
   (local buffer (lazy-buffer "selection-replace" "abcde"))
   (buffer:move-caret-to-byte 1)
@@ -435,6 +602,116 @@
   (assert (= input.caret.visible? false) "off-viewport cursor should not render caret on first visible row")
   (input:drop))
 
+(fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip []
+  (local buffer (make-buffer {:rows [(row 0 "abcdefghij" 0)
+                                     (row 1 "klmnopqrst" 11)]}))
+  (local input (build-input {:buffer buffer :line-count 2 :column-count 10}))
+  (input.layout:measurer)
+  (local narrow-width (+ (* 2 input.padding.x) (* 3 input.column-width)))
+  (local one-line-height (+ (* 2 input.padding.y) input.line-height))
+  (set input.layout.position (glm.vec3 1 2 0))
+  (set input.layout.size (glm.vec3 narrow-width one-line-height 0))
+  (set input.layout.clip-region {:id 9001
+                                 :bounds {:position (glm.vec3 0 0 0)
+                                          :rotation (glm.quat 1 0 0 0)
+                                          :size (glm.vec3 100 100 0)}})
+  (set buffer.state.viewport-calls [])
+  (input.layout:layouter)
+  (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+  (assert (= input.visible-column-count 3) "allocated width should reduce visible columns")
+  (assert (= input.visible-line-count 1) "allocated height should reduce visible rows")
+  (assert-viewport-calls-bounded buffer.state.viewport-calls
+                                 input.visible-line-count
+                                 input.visible-column-count
+                                 "narrow layout refresh should stay within allocated viewport")
+  (assert (= last-view.columns 3) "refresh should request allocated visible columns")
+  (assert (= last-view.lines 1) "refresh should request allocated visible rows")
+  (assert input.local-clip-region "VirtualInput should create a local clip region")
+  (assert (= (. input.rows 1 :layout :clip-region) input.local-clip-region)
+          "visible row should receive local clip")
+  (assert (= input.caret.layout.clip-region input.local-clip-region)
+          "caret should receive local clip")
+  (assert (<= input.local-clip-region.bounds.size.x input.layout.size.x)
+          "local clip width should not exceed allocated input width")
+  (input:drop))
+
+(fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (lazy-buffer "narrow-text-state-right" "abcdefghij"))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 10}))
+      (input.layout:measurer)
+      (local narrow-width (+ (* 2 input.padding.x) (* 3 input.column-width)))
+      (local one-line-height (+ (* 2 input.padding.y) input.line-height))
+      (set input.layout.position (glm.vec3 0 0 0))
+      (set input.layout.size (glm.vec3 narrow-width one-line-height 0))
+      (input.layout:layouter)
+      (input:on-click {:row-index 1 :column 2})
+      (assert (= input.visible-column-count 3) "precondition: narrow layout should expose three visual columns")
+      (assert (text-state:on-key-down {:key (string.byte "l")})
+              "TextState l should move beyond the last visible codepoint")
+      (assert (= buffer.cursor-byte 3) "l should route through the UTF-8-safe buffer movement API")
+      (input:drop))))
+
+(fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible []
+  (with-virtual-input-states
+    (fn [env]
+      (local text-state (. env :text-state))
+      (local buffer (record-viewport-calls (lazy-buffer "horizontal-visible" "abcdefghijklmnopqrstuvwxyz")))
+      (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+      (input.layout:measurer)
+      (set input.layout.size (+ (glm.vec3 (* 2 input.padding.x)
+                                          (* 2 input.padding.y)
+                                          0)
+                                 (glm.vec3 (* 4 input.column-width)
+                                           input.line-height
+                                           0)))
+      (input.layout:layouter)
+      (input:on-click {:row-index 1 :column 0})
+      (for [_ 1 8]
+        (text-state:on-key-down {:key (string.byte "l")})
+        (input.layout:layouter))
+      (assert (> input.scroll-column 0) "moving right past visible columns should scroll horizontally")
+      (assert input.caret.visible? "caret should remain visible after horizontal scroll")
+      (local local-x (- input.caret.layout.position.x input.layout.position.x))
+      (assert (>= local-x input.padding.x) "caret x should stay inside left input padding")
+      (assert (<= local-x (- input.layout.size.x input.padding.x))
+              "caret x should stay inside right input padding")
+      (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+      (assert (= last-view.column input.scroll-column)
+              "viewport request should use updated horizontal scroll column")
+      (input:drop))))
+
+(fn virtual-input-numeric-horizontal-jump-keeps-caret-visible []
+  (local buffer (record-viewport-calls (lazy-buffer "numeric-horizontal-visible" "abcdefghijklmnopqrstuvwxyz")))
+  (local input (build-input {:buffer buffer :line-count 1 :column-count 4}))
+  (input.layout:measurer)
+  (set input.layout.size (+ (glm.vec3 (* 2 input.padding.x)
+                                    (* 2 input.padding.y)
+                                    0)
+                           (glm.vec3 (* 4 input.column-width)
+                                     input.line-height
+                                     0)))
+  (input.layout:layouter)
+  (set buffer.state.viewport-calls [])
+  (assert (input:move-caret 8) "numeric movement should move through the safe horizontal API")
+  (input.layout:layouter)
+  (assert (= input.scroll-column 5) "jumping to column 8 should scroll far enough to show the caret")
+  (assert input.caret.visible? "caret should remain visible after numeric horizontal jump")
+  (local local-x (- input.caret.layout.position.x input.layout.position.x))
+  (assert (>= local-x input.padding.x) "caret x should stay inside left input padding after jump")
+  (assert (<= local-x (- input.layout.size.x input.padding.x))
+          "caret x should stay inside right input padding after jump")
+  (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
+  (assert (= last-view.column input.scroll-column)
+          "viewport request should use updated horizontal scroll column after jump")
+  (assert-viewport-calls-bounded buffer.state.viewport-calls
+                                 input.visible-line-count
+                                 input.visible-column-count
+                                 "numeric horizontal jump should not expand caret discovery requests")
+  (input:drop))
+
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})
 (table.insert tests {:name "VirtualInput renders only visible viewport rows" :fn virtual-input-renders-only-visible-viewport-rows})
 (table.insert tests {:name "VirtualInput caret navigation loads lazy rows" :fn virtual-input-caret-navigation-loads-lazy-rows})
@@ -446,6 +723,13 @@
 (table.insert tests {:name "VirtualInput save reports success and conflict" :fn virtual-input-save-reports-success-and-conflict})
 (table.insert tests {:name "VirtualInput drop tears down owned children" :fn virtual-input-drop-tears-down-owned-children})
 (table.insert tests {:name "VirtualInput click focus routes InputState events" :fn virtual-input-click-focus-routes-input-state-events})
+(table.insert tests {:name "VirtualInput TextState i enters insert mode" :fn virtual-input-text-state-i-enters-insert-mode})
+(table.insert tests {:name "VirtualInput state helper clears ignored text input" :fn virtual-input-state-helper-clears-ignored-text-input})
+(table.insert tests {:name "VirtualInput TextState h/l move without numeric delta error" :fn virtual-input-text-state-h-l-move-without-numeric-delta-error})
+(table.insert tests {:name "VirtualInput TextState j/k move using lazy rows" :fn virtual-input-text-state-j-k-move-using-lazy-rows})
+(table.insert tests {:name "VirtualInput TextState x deletes and clamps" :fn virtual-input-text-state-x-deletes-and-clamps})
+(table.insert tests {:name "VirtualInput InsertState Escape returns to text mode" :fn virtual-input-insert-state-escape-returns-to-text-mode})
+(table.insert tests {:name "VirtualInput InsertState Return inserts newline" :fn virtual-input-insert-state-return-inserts-newline})
 (table.insert tests {:name "VirtualInput insertion replaces real buffer selection" :fn virtual-input-insertion-replaces-real-buffer-selection})
 (table.insert tests {:name "VirtualInput Backspace deletes active selection" :fn virtual-input-backspace-deletes-active-selection})
 (table.insert tests {:name "VirtualInput Delete deletes active selection" :fn virtual-input-delete-deletes-active-selection})
@@ -454,6 +738,10 @@
 (table.insert tests {:name "VirtualInput horizontal crossing newline scrolls viewport" :fn virtual-input-horizontal-crossing-newline-scrolls-viewport})
 (table.insert tests {:name "VirtualInput horizontal navigation requires safe buffer API" :fn virtual-input-horizontal-navigation-requires-safe-buffer-api})
 (table.insert tests {:name "VirtualInput layout hides off-viewport caret" :fn virtual-input-layout-hides-off-viewport-caret})
+(table.insert tests {:name "VirtualInput narrow layout requests visible columns and local clip" :fn virtual-input-narrow-layout-requests-visible-columns-and-local-clip})
+(table.insert tests {:name "VirtualInput narrow layout TextState l moves past visible edge" :fn virtual-input-narrow-layout-text-state-l-moves-past-visible-edge})
+(table.insert tests {:name "VirtualInput long-line horizontal navigation keeps caret visible" :fn virtual-input-long-line-horizontal-navigation-keeps-caret-visible})
+(table.insert tests {:name "VirtualInput numeric horizontal jump keeps caret visible" :fn virtual-input-numeric-horizontal-jump-keeps-caret-visible})
 
 (local main
   (fn []

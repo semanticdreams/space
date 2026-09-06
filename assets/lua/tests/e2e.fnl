@@ -38,6 +38,7 @@
 (local TerminalRendererTransformTest (require :tests.e2e.test-terminal-renderer-transform))
 (local HoverRectLifecycleTest (require :tests.e2e.test-hover-rect-lifecycle))
 (local RenderSmokeTest (require :tests.e2e.test-render-smoke))
+(local FsFileViewerVirtualInputTest (require :tests.e2e.test-fs-file-viewer-virtual-input))
 
 (fn run-all []
   (ButtonTest.main)
@@ -78,6 +79,7 @@
   (TerminalRendererTransformTest.main)
   (HoverRectLifecycleTest.main)
   (RenderSmokeTest.main)
+  (FsFileViewerVirtualInputTest.main)
   (RenderCaptureTest.main))
 
 (fn main []
