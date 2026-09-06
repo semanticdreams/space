@@ -4,7 +4,7 @@
 
 The lazy editor stack supports file-scale text viewing and editing without loading the whole file into a Fennel string, an `InputModel`, or a single `Text` widget. Use it for graph filesystem file viewer nodes and other features that must open large source, log, or plain-text files while keeping reads and rendered widgets bounded to the active viewport.
 
-This stack is intentionally plain text only in this iteration. It does not provide syntax highlighting, undo/redo history, modal editing, multi-cursor behavior, whole-file search/replace, binary editing, or collaborative editing.
+This stack is intentionally plain text only in this iteration. `VirtualInput` provides a bounded `TextState`/`InsertState` compatibility facade for the file viewer, but the lazy editor stack does not provide full modal-editor features such as syntax highlighting, undo/redo history, multi-cursor behavior, whole-file search/replace, binary editing, or collaborative editing.
 
 ## File source and save primitives
 
@@ -32,7 +32,13 @@ Viewport construction reads composed ranges in bounded chunks and marks long row
 
 ## VirtualInput widget
 
-`VirtualInput` is the file-scale text widget. It renders a fixed number of visible rows by feeding each visible row's codepoints to child `Text` widgets, routes keyboard editing to `LazyTextBuffer`, tracks viewport scroll, handles selection/copy, and exposes save handling for buffers that support saving.
+`VirtualInput` is the file-scale text widget. It renders a bounded set of visible rows by feeding each visible row's codepoints to child `Text` widgets, routes keyboard editing to `LazyTextBuffer`, tracks viewport scroll, handles selection/copy, and exposes save handling for buffers that support saving.
+
+`VirtualInput` exposes a deliberately small `Input`-compatible facade for the existing `TextState` and `InsertState` modal routes. The facade supports Vim-style `i`, `h`, `j`, `k`, `l`, and `x` in text mode, Escape and Return handling in insert mode, multiline insertion for Return, and Ctrl+S routing for file-viewer saves. File-scale editors should rely on this bounded facade instead of converting the document into an `InputModel`.
+
+The configured `:line-count` and `:column-count` are preferred maximum viewport dimensions. The allocated layout size determines the current visible row/column counts, so containers can shrink a file viewer without forcing the widget to render or request more lazy-buffer data than fits. All rendered children — background, row text, and caret — receive a `VirtualInput`-local clip region intersected with any parent clip bounds so narrow allocations clip consistently.
+
+Horizontal caret movement updates `scroll-column` to keep the caret visible inside the allocated input bounds. This visibility invariant is maintained through lazy viewport requests and caret-row discovery, not by eagerly reading or indexing the whole file.
 
 `VirtualInput` builders require an explicit build context and a lazy buffer. It must be used for file-scale text because it virtualizes both data access and child rendering; no new large-file path should pass a whole file or whole composed document to `Text` or `Input`.
 
