@@ -230,6 +230,13 @@
          (original-get-viewport self view)))
   buffer)
 
+(fn assert-viewport-calls-bounded [calls max-lines max-columns message]
+  (each [i view (ipairs (or calls []))]
+    (assert (<= view.lines max-lines)
+            (.. message ": viewport call " i " requested " view.lines " lines, expected <= " max-lines))
+    (assert (<= view.columns max-columns)
+            (.. message ": viewport call " i " requested " view.columns " columns, expected <= " max-columns))))
+
 (fn expect-build-without-context []
   ((VirtualInput {:buffer (make-buffer)}) nil))
 
@@ -587,10 +594,15 @@
                                  :bounds {:position (glm.vec3 0 0 0)
                                           :rotation (glm.quat 1 0 0 0)
                                           :size (glm.vec3 100 100 0)}})
+  (set buffer.state.viewport-calls [])
   (input.layout:layouter)
   (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
   (assert (= input.visible-column-count 3) "allocated width should reduce visible columns")
   (assert (= input.visible-line-count 1) "allocated height should reduce visible rows")
+  (assert-viewport-calls-bounded buffer.state.viewport-calls
+                                 input.visible-line-count
+                                 input.visible-column-count
+                                 "narrow layout refresh should stay within allocated viewport")
   (assert (= last-view.columns 3) "refresh should request allocated visible columns")
   (assert (= last-view.lines 1) "refresh should request allocated visible rows")
   (assert input.local-clip-region "VirtualInput should create a local clip region")
@@ -661,6 +673,7 @@
                                      input.line-height
                                      0)))
   (input.layout:layouter)
+  (set buffer.state.viewport-calls [])
   (assert (input:move-caret 8) "numeric movement should move through the safe horizontal API")
   (input.layout:layouter)
   (assert (= input.scroll-column 5) "jumping to column 8 should scroll far enough to show the caret")
@@ -672,6 +685,10 @@
   (local last-view (. buffer.state.viewport-calls (length buffer.state.viewport-calls)))
   (assert (= last-view.column input.scroll-column)
           "viewport request should use updated horizontal scroll column after jump")
+  (assert-viewport-calls-bounded buffer.state.viewport-calls
+                                 input.visible-line-count
+                                 input.visible-column-count
+                                 "numeric horizontal jump should not expand caret discovery requests")
   (input:drop))
 
 (table.insert tests {:name "VirtualInput requires explicit build context" :fn virtual-input-requires-explicit-build-context})

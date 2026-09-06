@@ -75,7 +75,8 @@
 (fn adapter-row [row]
   (assert row "adapter-row requires row")
   (local codepoints (clip-codepoints (or row.codepoints []) (+ (length (or row.codepoints [])) 1)))
-  (when row.partial?
+  (when (or row.partial?
+            (< (or row.end-byte 0) (or row.line-end-byte row.end-byte 0)))
     (table.insert codepoints 32))
   {:line row.line
    :start-byte row.start-byte
@@ -142,17 +143,10 @@
 (fn refresh-viewport [self opts]
   (assert self.buffer "refresh-viewport requires buffer")
   (local options (or opts {}))
-  (local model-snapshot
-    (and (or (not (= self.visible-line-count self.configured-line-count))
-             (not (= self.visible-column-count self.configured-column-count)))
-         (self.buffer:get-viewport {:line self.scroll-line
-                                    :column self.scroll-column
-                                    :lines self.configured-line-count
-                                    :columns self.configured-column-count})))
   (local snapshot (self.buffer:get-viewport {:line self.scroll-line
-                                              :column self.scroll-column
-                                              :lines self.visible-line-count
-                                              :columns self.visible-column-count}))
+                                             :column self.scroll-column
+                                             :lines self.visible-line-count
+                                             :columns self.visible-column-count}))
   (set self.viewport snapshot)
   (set self.scroll-line snapshot.start-line)
   (set self.scroll-column snapshot.start-column)
@@ -163,7 +157,7 @@
     (row-widget:set-codepoints codepoints {:mark-measure-dirty? false}))
   (when (resolve-mark-flag options :mark-layout-dirty? true)
     (mark-viewport-dirty self))
-  (sync-model-state self (or model-snapshot snapshot))
+  (sync-model-state self snapshot)
   snapshot)
 
 (fn sync-scroll [self]
@@ -241,35 +235,20 @@
 (fn locate-caret-in-full-line [self line]
   (assert self "locate-caret-in-full-line requires input")
   (when line
-    (assert (= (type self.configured-column-count) :number)
-            "locate-caret-in-full-line requires configured-column-count")
     (assert (= (type self.visible-column-count) :number)
             "locate-caret-in-full-line requires visible-column-count")
     (assert (= (type self.scroll-column) :number)
             "locate-caret-in-full-line requires scroll-column")
     (local cursor (or self.buffer.cursor-byte 0))
-    (local step-columns (math.max 1 self.visible-column-count))
-    (var columns (math.max self.configured-column-count
-                           (+ self.scroll-column self.visible-column-count 1)))
-    (var row nil)
-    (var done? false)
-    (while (not done?)
-      (local snapshot (self.buffer:get-viewport {:line line
-                                                 :column 0
-                                                 :lines 1
-                                                 :columns columns}))
-      (set row (. (or snapshot.rows []) 1))
-      (if (not row)
-          (set done? true)
-          (or (< cursor (or row.start-byte 0))
-              (<= cursor (or row.end-byte row.start-byte 0))
-              (not row.partial?))
-          (set done? true)
-          (set columns (+ columns step-columns))))
+    (local snapshot (self.buffer:get-viewport {:line line
+                                               :column self.scroll-column
+                                               :lines 1
+                                               :columns self.visible-column-count}))
+    (local row (. (or snapshot.rows []) 1))
     (when (and row
                (>= cursor (or row.start-byte 0))
                (<= cursor (or row.end-byte row.start-byte 0)))
-      (values row.line (cursor-column-for-row row cursor) row))))
+      (values row.line (+ self.scroll-column (cursor-column-for-row row cursor)) row))))
 
 (fn locate-caret-line-column [self]
   (assert self "locate-caret-line-column requires input")
@@ -309,6 +288,8 @@
   (local cursor (or self.buffer.cursor-byte 0))
   (if (and first-row (< cursor (or first-row.start-byte 0)))
       (math.max 0 (- first-row.line 1))
+      (and last-row last-row.partial? (> cursor (or last-row.end-byte 0)))
+      last-row.line
       (and last-row (> cursor (or last-row.line-end-byte last-row.end-byte 0)))
       (+ last-row.line 1)
       nil))
@@ -382,7 +363,7 @@
           (self.buffer:clear-selection))))
   (when moved
     (keep-line-visible self (line-after-caret-move self line))
-    (keep-caret-column-visible self)
+    (keep-column-visible self column)
     (mark-caret-dirty self)
     (self:refresh-viewport))
   moved)
@@ -450,11 +431,20 @@
   (when (not self.buffer.move-caret-horizontal)
     (error "VirtualInput requires buffer:move-caret-horizontal for horizontal movement"))
   (local anchor (or self.selection-anchor-byte self.buffer.cursor-byte 0))
+  (local previous-line self.cursor-line)
+  (local previous-column (+ self.scroll-column self.cursor-column))
   (local moved (self.buffer:move-caret-horizontal delta))
   (update-horizontal-selection self anchor extend-selection?)
   (when moved
-    (keep-line-visible self (line-after-caret-move self nil))
-    (keep-caret-column-visible self)
+    (local target-line (or (line-after-caret-move self nil) previous-line))
+    (local target-column (if (= target-line previous-line)
+                           (math.max 0 (+ previous-column delta))
+                           0))
+    (when target-line
+      (set self.cursor-line target-line))
+    (set self.cursor-column target-column)
+    (keep-line-visible self target-line)
+    (keep-column-visible self target-column)
     (mark-caret-dirty self)
     (self:refresh-viewport))
   moved)
