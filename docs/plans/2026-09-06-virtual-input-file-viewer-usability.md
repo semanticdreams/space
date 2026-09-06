@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Do not edit files while creating this plan.
+- During implementation, edit only the files listed for the active task unless reviewer-confirmed evidence proves an additional scoped file is required.
 - Use active project skills during implementation: `subagent-driven-development`, `test-driven-development`, `space-fennel`, `space-fennel-ui`, and `space-testing-runtime`.
 - Tests-first for every implementation task: add failing tests before changing production code.
 - Fennel validation ladder: compile check first, then constraints, focused tests, broader suite when justified by behavioral surface and risk.
@@ -88,11 +88,7 @@ Use this ladder after each task, narrowing the touched-file compile command to f
 
 8. Full integration gate:
 
-   ```bash
-   gh pr checks --watch
-   ```
-
-   Acceptance requires PR CI green.
+   Acceptance requires PR CI green. GitHub reads, PR creation, auto-merge, merge-queue polling, and PR check watching are supervisor capability-boundary work and must go through the configured GitHub operator wrapper, not ad-hoc direct `gh` commands from implementer tasks.
 
 If Fennel delimiter or parse errors occur, inspect the nearest enclosing form around the reported line, repair the smallest malformed form, and rerun the compile check before constraints or tests.
 
@@ -645,13 +641,7 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
 
 - [ ] **Step 1: Ensure the branch is current against `origin/main`.**
 
-  ```bash
-  git fetch origin
-  git status --porcelain
-  git rev-list --left-right --count origin/main...HEAD
-  ```
-
-  If the branch is behind `origin/main` and remote integration would be rejected, merge `origin/main` safely, resolve conflicts through implementer and reviewer gates, and rerun validation.
+  The supervisor must use the `git-integrator` capability wrapper for fetch/current-branch status and any safe merge from `origin/main`. If the branch is behind `origin/main` and remote integration would be rejected, merge `origin/main` safely through the wrapper, resolve conflicts through implementer and reviewer gates, and rerun validation.
 
 - [ ] **Step 2: Run full relevant local validation.**
 
@@ -688,14 +678,7 @@ If Fennel delimiter or parse errors occur, inspect the nearest enclosing form ar
 
 - [ ] **Step 5: Push and open PR after clean validation.**
 
-  ```bash
-  git status --porcelain
-  git push -u origin HEAD
-  gh pr create --base main --fill
-  gh pr checks --watch
-  ```
-
-  PR CI is the full integration gate.
+  The supervisor must verify a clean worktree, then use `git-integrator` to push the current branch and `github-operator` to create the PR targeting `main`, enable the configured integration path, and monitor PR/merge-queue status. PR CI is the full integration gate.
 
 ## Observable Acceptance Criteria
 
